@@ -18,7 +18,6 @@
 //    Server → Cache, which Intel hides) and the Orchestrator fallbacks
 //    (System Prompt / Temperature / Max Tokens feed the built-in agent when
 //    it has no value of its own).
-//  - Generative greetings stay (an Intel feature upstream no longer shows).
 //
 //  Persistence: debounced auto-save of the fields this page owns,
 //  load-modify-write on the shared `ChatConfiguration` so the General page's
@@ -45,8 +44,6 @@ struct ChatSettingsView: View {
     /// Upstream follow-up suggestions switch, default on.
     @State private var tempGenerateFollowUpSuggestions: Bool = true
     @State private var tempBackfillAgentDescriptions: Bool = false
-    @State private var tempGenerativeGreetingsEnabled: Bool = false
-    @State private var tempGreetingPersona: String = ""
     /// `MemoryConfiguration.enabled` (same debounced save).
     @State private var tempMemoryEnabled: Bool = false
     /// Upstream compaction model ("" = the chat's current model).
@@ -101,7 +98,6 @@ struct ChatSettingsView: View {
             appearanceSection
             behaviorSection
             agentSessionsSection
-            greetingsSection
             folderToolsSection
             advancedSection
         }
@@ -253,22 +249,6 @@ struct ChatSettingsView: View {
                     .foregroundColor(theme.secondaryText)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private var greetingsSection: some View {
-        SettingsSection(title: "Greetings", icon: "hand.wave") {
-            SettingsToggle(
-                title: L("AI-Generated Greetings"),
-                description:
-                    "Each empty chat generates a fresh greeting and quick actions on the Core Model. The static greeting still shows instantly. Per-agent settings still win.",
-                anchorId: "settings.chat.greetings",
-                isOn: $tempGenerativeGreetingsEnabled
-            )
-
-            if tempGenerativeGreetingsEnabled {
-                personalityEditorBlock
             }
         }
     }
@@ -471,63 +451,6 @@ struct ChatSettingsView: View {
         .frame(maxWidth: 320)
     }
 
-    // MARK: - Greeting personality
-
-    /// Label row + multi-line editor + hint. The editor is prefilled with the
-    /// built-in default so it is never empty; an unedited default is stored
-    /// as "" so future default updates still reach the user.
-    private var personalityEditorBlock: some View {
-        let defaultText = GenerativeGreetingService.defaultPersonaInstruction
-        let isAtDefault =
-            tempGreetingPersona.trimmingCharacters(in: .whitespacesAndNewlines)
-            == defaultText.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text("Personality (default for all agents)", bundle: .module)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(theme.primaryText)
-                Spacer()
-                if !isAtDefault {
-                    Button {
-                        tempGreetingPersona = defaultText
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.uturn.backward")
-                                .font(.system(size: 10, weight: .semibold))
-                            Text("Reset to Default", bundle: .module)
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(theme.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            TextEditor(text: $tempGreetingPersona)
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundColor(theme.primaryText)
-                .scrollContentBackground(.hidden)
-                .frame(minHeight: 100, maxHeight: 200)
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(theme.inputBackground)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(theme.inputBorder, lineWidth: 1)
-                        )
-                )
-
-            Text(
-                "Shapes the voice of AI-generated empty-state greetings and quick actions. Each agent can override this in its Customization tab.",
-                bundle: .module
-            )
-            .font(.system(size: 11))
-            .foregroundColor(theme.tertiaryText)
-        }
-    }
-
     // MARK: - Persistence
 
     struct SaveableFormState: Equatable {
@@ -542,8 +465,6 @@ struct ChatSettingsView: View {
         var autoTitles: Bool
         var followUps: Bool
         var backfillDescriptions: Bool
-        var greetingsEnabled: Bool
-        var greetingPersona: String
         var memoryEnabled: Bool
         var compactionModelProvider: String = ""
         var compactionModelName: String = ""
@@ -562,8 +483,6 @@ struct ChatSettingsView: View {
             autoTitles: tempAutoGenerateChatTitles,
             followUps: tempGenerateFollowUpSuggestions,
             backfillDescriptions: tempBackfillAgentDescriptions,
-            greetingsEnabled: tempGenerativeGreetingsEnabled,
-            greetingPersona: tempGreetingPersona,
             memoryEnabled: tempMemoryEnabled,
             compactionModelProvider: tempCompactionModelProvider,
             compactionModelName: tempCompactionModelName
@@ -583,11 +502,6 @@ struct ChatSettingsView: View {
         tempAutoGenerateChatTitles = chat.autoGenerateChatTitles
         tempGenerateFollowUpSuggestions = chat.generateFollowUpSuggestions
         tempBackfillAgentDescriptions = chat.backfillAgentDescriptions
-        tempGenerativeGreetingsEnabled = chat.generativeGreetingsEnabled
-        tempGreetingPersona =
-            chat.greetingPersona.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? GenerativeGreetingService.defaultPersonaInstruction
-            : chat.greetingPersona
         tempMemoryEnabled = MemoryConfigurationStore.load().enabled
         tempCompactionModelProvider = chat.compactionModelProvider ?? ""
         tempCompactionModelName = chat.compactionModelName ?? ""
@@ -643,10 +557,6 @@ struct ChatSettingsView: View {
         chat.compactionModelProvider = form.compactionModelProvider.isEmpty ? nil : form.compactionModelProvider
         chat.compactionModelName = form.compactionModelName.isEmpty ? nil : form.compactionModelName
         chat.backfillAgentDescriptions = form.backfillDescriptions
-        chat.generativeGreetingsEnabled = form.greetingsEnabled
-        let persona = trimmed(form.greetingPersona)
-        chat.greetingPersona =
-            persona == trimmed(GenerativeGreetingService.defaultPersonaInstruction) ? "" : form.greetingPersona
     }
 }
 

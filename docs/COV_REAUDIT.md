@@ -133,10 +133,10 @@ its code absent is a candidate gap.
 | Done (3b-3) | re-checked `993c2b499` | #1889 | 0/8 | improved favorite models UI | Favorites tab pinned first (shown while a favourite is among the options), hearts on hover, filled hearts persistent (`FavoriteModelsStore`, shared with the chat picker). Intel keeps All as the default tab. |
 | Check:onboarding | re-checked `1faccfa28` | #2487 | 3/16 | minor improvements in onboarding | UPSTREAM_TRIAGE_0.24.3 |
 | Done (3c-1) | re-checked `0046b7b4a` | #2173 | 1/20 | inject current date and timezone into the latest user turn | `[Current Time]` (upstream's current, minute granularity) rides last on the latest user message for chat and HTTP agent runs; replaces Intel's Apple Apps-only clock. |
-| Check:prompt | re-checked `31d9ec56c` | #2278 | 1/3 | Remove generative greetings | UPSTREAM_TRIAGE_0.24.3 |
-| Check:prompt | re-checked `4a9a23f0b` | #1430 | 15/111 | improved system prompts for better instructions following | UPSTREAM_SYNC |
-| Check:prompt | re-checked `849bc4837` | #2862 | 0/5 | Stop quoting a settings shortcut that is not bound | UPSTREAM_AUDIT_2026-09-25 |
-| Check:prompt | re-checked `86ed14d91` | #3033 | 0/9 | Clarify judge polarity and ScreenContext rubric while preserving verdict gating | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-08, UPSTREAM_SYNC |
+| Done (3c-2) | re-checked `31d9ec56c` | #2278 | 1/3 | Remove generative greetings | Generative greetings removed as upstream: the Conversation → Greetings section, the agent Empty State AI/Custom picker (the Greeting, Message and Action Bar fields stay), the empty-state path, the greeting fields of `ChatConfiguration` and `AgentSettings` (old agent keys survive as unknown fields), `greetingPoolCacheFile`, Intel's no-op stubs and the two test files. |
+| Done (3c-2) | re-checked `4a9a23f0b` | #1430 | 15/111 | improved system prompts for better instructions following | Intel's composer now emits upstream's static sections (`IntelPromptDiscipline`: model family guidance, Grounding, Code style, Risk-aware actions, Agent loop; texts and `ModelFamilyGuidance.swift` at `bce907045`). Sandbox Plugin Creator skill removed, `PluginCreatorGate` synced, sentence-case folder headings. The sandbox ladder, Secret handling, Self-improvement and plugin recipe are sandbox-only; the manifest wording was rewritten again by #2309 (3c-3). |
+| Done (3c-2) | re-checked `849bc4837` | #2862 | 0/5 | Stop quoting a settings shortcut that is not bound | Intel's guides already say Settings… (⌘,); the CLI plugin template still quoted Cmd+Shift+M and now says Settings… (⌘,) → Plugins. The other paths in the commit are upstream screens Intel doesn't have or has under its own names. |
+| Done (3c-2) | re-checked `86ed14d91` | #3033 | 0/9 | Clarify judge polarity and ScreenContext rubric while preserving verdict gating | `CapabilityClaimsEvaluator` judge prompt: reason before verdict and the polarity rule. The ScreenContext eval runner is not on Intel. |
 | I | re-checked `03de9e23b` | #2427 | 1/7 | Video attachments were silently dropped at send for bundles whose name lacks -vl | 3a: local bundle video capability (MLX). |
 | Done (3a) | re-checked `0a8c50086` | #2415 | 5/11 | fix external providers stuck disconnected after an update relaunch | Intel had no recovery at all: discovery swallowed transport errors as "0 models". Now thrown, classified, and retried on the network's up edge. |
 | In | re-checked `10e66ca5c` | #3042 | 14/88 | Compaction turns reasoning off in a form self-hosted servers read | 3a: Intel's compaction sends `disableThinking`, and non-strict hosts get `chat_template_kwargs.enable_thinking=false`. |
@@ -250,6 +250,58 @@ its code absent is a candidate gap.
 | W-workspaces-sharing | re-checked `d8e9cd60c` | #2687 | 22/136 | workspace improvements | UPSTREAM_AUDIT_2026-09-25 |
 | W-workspaces-sharing | re-checked `fc48e4f0b` | #3111 | 1/9 | Chat sidebar: snapshot orphaned workspace pairings once per render | UPSTREAM_AUDIT_2026-10-26 |
 
+### Feasibility rows the decline filter hid (found 2026-11-08)
+
+Found in 3c-2. `--mentioned` drops a commit when a ledger line records a
+skip or defer. `DEFER_FEASIBILITY_AUDIT_2026-09-08.md` supersedes every
+DEFER in the 0.24.3 and 0.24.7 ledgers and marks many of those commits
+**PORT NEXT** or **ROADMAP**, but the old DEFER lines still matched the
+filter, so those commits were never scored. The tool now takes the
+feasibility verdict as final for the commits it lists (`declined()` in
+`cov_reaudit.py`); 32 came back mostly absent. The loop, capability and
+prompt rows (11) form stage **3c-3**; the rest join their area's stage or
+their backlog item.
+
+Still open: the 0.24.3 SKIP verdicts that the feasibility audit did not
+revisit (456 commits still count as declined). Some give reasons that no
+longer hold, such as "Agent capabilities subsystem" or "Skills excluded",
+now that Intel has both. Stage 6 re-reads them.
+
+| Verdict | Commit | PR | Presence | Subject | Note |
+|---|---|---|---|---|---|
+| Check:agents | re-checked `ad0698d78` | #1608 | 82/196 | Stabilize the default configuration agent and fix disappearing custom agents | Default configuration agent and disappearing custom agents. |
+| Check:capabilities | re-checked `06af55e7a` | #2336 | 24/60 | Bound capability group-load schemas + repin vmlx (Muse Glimmer runtime) | Group-load schema bounds (3c-3); the vMLX repin is incompatible. |
+| Check:capabilities | re-checked `5d16b603f` | #2309 | 18/77 | Clarify capability IDs and recover grouped tool calls | Capability ids in the manifest, grouped tool-call recovery (3c-3). |
+| Check:capabilities | re-checked `d89626227` | #2089 | 24/67 | Fix skill discovery metadata loss and MCP capability-load reliability seams | Skill discovery metadata and MCP capability-load seams (3c-3; `W-tools-tab-sync` holds the wording). |
+| Check:chat | re-checked `7e109ade6` | #2668 | 0/1 | Chat: a run cancelled during its cold load must not roll back the retry that already owns the session | A cancelled cold-load run must not roll back the retry that owns the turn; check Intel's retry ownership. |
+| Check:chat | re-checked `880752784` | #2661 | 3/31 | fix history dialog row actions and keep the dialog open under nested alerts | History dialog row actions and nested alerts (`CHAT_WINDOW_LAYOUT_INTEL.md` lists it as a source). |
+| Check:crashes | re-checked `4daee7b36` | #2128 | 92/197 | fixed app hangs | App hangs #2128. |
+| Check:crashes | re-checked `a9ae5fd9c` | #1901 | 80/176 | Free model memory on chat close, respond to memory pressure, and cap unbounded caches | Memory pressure and unbounded caches; the model-unload half is MLX. |
+| Check:crashes | re-checked `b621603fb` | #2015 | 11/38 | Checkpoint: stop the gemma tool-loop, two crashes, and lying tok/s | Two crashes and tok/s reporting; the Gemma loop half is MLX. |
+| Check:loop | re-checked `2b15a5078` | #1950 | 7/22 | Repin vmlx to 0d3444ca (gemma4 parser fix #128) + fix reasoning-toggle default display | Reasoning toggle default display; the vMLX repin is incompatible (3c-3). |
+| Check:loop | re-checked `2ecf2b058` | #2250 | 466/937 | Make the Mac harness leaner and more reliable | Mac harness reliability (3c-3); the container and workspace parts go with their items. |
+| Check:loop | re-checked `54aa52ada` | #2653 | 6/20 | Chat: queued steer ordering, stale notices across the steer boundary, empty wrap-up bubble | Queued steer ordering, notices across a steer, empty wrap-up bubble (3c-3). |
+| Check:loop | re-checked `846ca9185` | #2101 | 2/17 | Preserve explicit Thinking mode across agent tool turns | Explicit Thinking mode kept across tool turns (3c-3). |
+| Check:loop | re-checked `9b0331fd4` | #2105 | 5/72 | fix: honor reasoning toggle across agent tool loops | Reasoning toggle held across tool rounds (3c-3). |
+| Check:loop | re-checked `e00a9d88d` | #2656 | 41/123 | Research completion: announce-only recovery names what the model can do; promised-work endings recovered; replayed retrieval failures escalate before stopping; window-close crash fixed | Announce-only recovery and promised-work endings (3c-3, with the stage-5 note on #2480). |
+| Check:mobile | re-checked `67fba7464` | #1623 | 149/397 | harden remote agent security and reliability | Remote agent security and reliability. |
+| Check:mobile | re-checked `d1b96a5e7` | #1658 | 40/176 | Harden Bonjour discovery (security, reliability, discoverability) | Bonjour discovery hardening; compare with Intel's discovered agents. |
+| Check:mobile | re-checked `f7e683dfb` | #1636 | 29/158 | Fix and harden remote agent (Mode 2) runs | Remote agent (Mode 2) runs; compare with Intel's paired relay agents. |
+| Check:prompt | re-checked `4be5a5776` | #1798 | 52/232 | Cut per-turn prompt cost: remote prompt caching + local KV prefix reuse + measured text trims | Remote prompt caching and prompt text trims; the local KV half is incompatible (3c-3). |
+| Check:prompt | re-checked `61dad2f36` | #2051 | 19/85 | Reduce redundant agent prompt context | Redundant agent prompt context trimmed (3c-3; Intel's composer is its own). |
+| Check:server | re-checked `34a64dc2d` | #2606 | 2/11 | fix /api/show for external models and report tool/thinking capabilities | `/api/show` for external models, with tool and thinking capabilities. |
+| Check:settings | re-checked `64bc65808` | #2442 | 18/105 | Sampling Defaults were inert on almost every model, and nothing showed what actually ran | Sampling defaults applied and shown for remote models; the MLX half is incompatible. |
+| W-channels | re-checked `44548e901` | #2202 | 487/1065 | Native channel presence, formatting, and reactions | Channel presence and reactions. |
+| W-declarative-config | re-checked `8d7c3dd42` | #2485 | 1377/6646 | Default-agent declarative config + delegation orchestrator | The declarative configuration plane and orchestrator (`ORCHESTRATOR_INTEL_PLAN.md`). |
+| W-declarative-config | re-checked `b285b946c` | #2628 | 5/72 | Watcher dispatch grounds itself; config apply says DONE | Watcher dispatch grounding and config apply; lands with the item. |
+| W-declarative-config | re-checked `e03127e7b` | #2603 | 12/30 | Watcher/dispatch agents can actually reach their target folder | Watcher and dispatch agents reaching their folder. |
+| W-diagnostics-telemetry | re-checked `1f052d17c` | #2563 | 45/185 | Show and cancel exact live inference work | Live inference work list and cancel. |
+| W-subagents | re-checked `5856d3502` | #1769 | 4/14 | Standardize on "subagent" spelling (drop hyphenated "sub-agent") | "subagent" spelling; lands with the item. |
+| W-subagents | re-checked `679ba7504` | #2498 | 88/219 | Orchestrator-first delegation: default-on spawn pool, same-turn spawn activation, and delegated artifact pass-through | Orchestrator-first delegation (`ORCHESTRATOR_INTEL_PLAN.md`). |
+| W-subagents | re-checked `7aa8d7a30` | #2493 | 195/441 | Introduce the Orchestrator: dedicated settings tab, identity, and launch polish | Orchestrator settings tab and identity (`ORCHESTRATOR_INTEL_PLAN.md`). |
+| W-subagents | re-checked `afa32e5c8` | #2165 | 268/576 | Unify runtime policy and bounded subagent delegation | Runtime policy and bounded delegation (`ORCHESTRATOR_INTEL_PLAN.md`). |
+| W-subagents | re-checked `c853ca4ce` | #2533 | 104/253 | Spawn admission: price a child by its bounded request, not the retention cap | Spawn admission pricing (`ORCHESTRATOR_INTEL_PLAN.md`). |
+
 ## Plan (each stage a report and push)
 
 1. **Stage 1 (this doc):** the tool and the triage.
@@ -270,11 +322,15 @@ its code absent is a candidate gap.
    scroll, durations, narrow chips), **3b-3** the pickers (done 2026-11-07;
    Favourites in the legacy picker, the live reasoning catalog); **3c**
    capabilities, the agent loop and prompts (14 with #2235's loop part), in
-   two parts: **3c-1** the loop and capabilities (done 2026-11-08;
+   three parts: **3c-1** the loop and capabilities (done 2026-11-08;
    upstream's terminal recovery in `CloudChatEngine`, the step limit and its
    wrap-up, the Blocked banner, schema checks, the time block; #1507, #2167,
-   #2175 and #2192 re-checked with it), **3c-2** the prompt commits (#2278
-   generative greetings removal, #1430, #1317, #2862, #3033);
+   #2175 and #2192 re-checked with it), **3c-2** the prompt commits (done
+   2026-11-08; generative greetings removed, #2278 and #1362; upstream's
+   static discipline sections in Intel's composer, #1430 and #1317; the CLI
+   plugin template's settings path, #2862; the judge polarity prompt,
+   #3033), **3c-3** the loop, capability and prompt rows the decline filter
+   hid (11; see "Feasibility rows the decline filter hid");
    **3d** knowledge (5); **3e** crashes and hangs (13); **3f** the rest
    (folders, storage, settings, agents, memory, voice, MCP, server, chat,
    chat import, onboarding, mobile, windows, flags, misc). Translations
@@ -290,7 +346,17 @@ its code absent is a candidate gap.
    the engine's terminal recovery runs on chat only and skips upstream's
    announce-only and continuation-request cases (#2480); compare the rest
    of `AgentToolLoop.run` (truncated tool calls, repeated-retrieval and
-   announce wrap-ups, the API and plugin surfaces).
+   announce wrap-ups, the API and plugin surfaces). From 3c-2: Intel's
+   composer puts the folder section and its own folder tool directive
+   before the discipline sections (upstream: after Agent loop), never picks
+   the compact variants (no context size class on Intel), and has no
+   Capability Discovery section; upstream's Bulk edits section lands with
+   `W-privacy-filter`.
+6. **Stage 6, the declined verdicts:** re-read the 0.24.3 and 0.24.7 SKIP
+   verdicts the feasibility audit did not revisit (456 commits at
+   `bce907045` still count as declined) and drop the ones whose reason no
+   longer holds on Intel ("subsystem excluded" for a subsystem Intel now
+   has).
 
 The 47 upstream commits past `bce907045` are a separate audit (carried
 follow-up); rerun this tool with the new ref after it.
@@ -344,8 +410,8 @@ follow-up); rerun this tool with the new ref after it.
 | Check:memory | `d870213bb` | #1613 | 4/8 | fixed issue with memory distill failure | Memory distillation collects visible text without streaming tool-hint sentinels; check Intel's distillation call. |
 | Check:misc | `1342db202` | #1315 | 44/50 | minor UI improvements | Minor UI improvements #1315. |
 | Check:misc | `1a4c25542` | #1297 | 24/42 | minor improvements | "minor improvements" #1297. |
-| Check:misc | `e2eec4a9e` | #1362 | 8/10 | disable generative greetings globally and moved to per agent configuration | Generative greetings per agent. |
-| Check:prompt | `76614779f` | #1317 | 31/48 | improve prompt for better guidance | Prompt guidance (#1317). |
+| Done (3c-2) | `e2eec4a9e` | #1362 | 8/10 | disable generative greetings globally and moved to per agent configuration | Superseded: upstream removed generative greetings in #2278, ported in 3c-2. |
+| Done (3c-2) | `76614779f` | #1317 | 31/48 | improve prompt for better guidance | Grounding, Code style and Risk-aware texts and the family blocks (LFM2, default obedience) come with #1430's port; `capabilities_search` was renamed later and Intel offers the `capabilities` gateway. Preflight companions are not on Intel (`COV-tool-discovery`). |
 | In | `390eb33e2` | #1594 | 68/139 | anthropic compaction fix | 3a: Intel's `sanitizeToolSequence` pairs every call with a result, fills unanswered calls and demotes orphan results; a duplicate same-id result is demoted rather than merged. |
 | Done (3a) | `76c1f6ae8` | #2108 | 21/76 | Fix truncated remote tool arguments | A round that ends on `finish_reason=length` with tool calls pending throws upstream's output-limit message; Anthropic's `max_tokens` stop now reaches the engine as `length`. |
 | In | `b3472ce02` | #1428 | 20/26 | moved remote provider diagnostics to edit | 3a: the UI part is in (20/26); the missing lines are MLX disk-cache stats. |

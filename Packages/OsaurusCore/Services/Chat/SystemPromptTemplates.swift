@@ -63,11 +63,56 @@ public enum SystemPromptTemplates {
     public static let agentLoopGuidance = """
         ## Agent loop
 
-        - `todo(markdown)` — write or replace the user-visible task list. Use it when the request has 3+ obvious steps; skip for trivial work. Each call replaces the whole list, so to mark items done re-send the full list with the new boxes.
-        - `complete(summary)` — call once at the very end (never alongside other tools) with WHAT you did + HOW you verified it. Vague placeholders ("done", "looks good") are rejected; partial work should be reported honestly.
+        - Always answer the user in plain text once the requested work is complete. Todo is advisory progress metadata and never overrides a final response.
+        - `todo(markdown)` — OPTIONAL, multi-step (3+) only: create it before starting, then re-send it only after a task or checkbox actually changes. Never repeat an unchanged checklist or mark verification done before running it. Before the final answer, if task status changed since the last todo call, re-send the full checklist once with every actually finished item checked through the tool, not as prose. Then answer exactly once and stop; unchecked items remain visible but never keep the turn open. Skip direct/single-step work.
+        - `complete(summary)` — OPTIONAL early closure for honestly blocked `todo` work. A fully checked todo needs no complete call: answer the user normally and stop. Invoke complete only as a structured tool call; never type `complete(...)` into the answer.
         - `clarify(question)` — pause and ask exactly one concrete question only when guessing wrong would change the result. For minor preferences pick a sensible default and proceed.
-        - `share_artifact(...)` — hands the user a file to keep or open: a generated image, chart, document, or code file. Text the user asked for in the chat (an answer, a poem, a message, a summary, a short snippet) goes in your reply, never in an artifact; the user reads your reply. **A `path` file MUST exist before this call.** Sandbox: save under your home dir (default cwd) — files in `/tmp` won't be findable. If unsure where you wrote it, verify with `sandbox_search_files(target="files", pattern="<name>")` first. For a text file, use `content`+`filename` mode and skip the file write entirely.
+        - `share_artifact(path | content+filename)` — hands the user a file to keep or open: a generated image, chart, document, or code file. Text the user asked for in the chat (an answer, a poem, a message, a summary, a short snippet) goes in your reply, never in an artifact; the user reads your reply. **A `path` file MUST exist before this call.** Sandbox: save under your home dir (default cwd), not `/tmp`. For a text file, pass `content`+`filename` and skip the file write.
         """
+
+    /// Compact agent-loop cheat-sheet for small-context / small local models
+    /// (`prefersCompactPrompt`). Same four tools and the load-bearing rules
+    /// (always answer in plain text, OPTIONAL 3+ step todo, OPTIONAL blocked
+    /// closure that must remain a real tool call, last-resort one-question
+    /// clarify with the anti-punt rule, file-exists artifact), one line each.
+    ///
+    /// The clarify line keeps the false-clarify discipline from the W4 eval
+    /// fixes compressed, not dropped: "fully specified is not ambiguous" +
+    /// the user-asks escape hatch must survive because the compact bootstrap
+    /// skeleton truncates the ClarifyTool description to its first sentence,
+    /// so this bullet is the only place a small model sees the anti-punt
+    /// rule. Argument constraints (option limits, ≥30-char summary) live in
+    /// the constraint-preserving tool schemas and are not restated here.
+    public static let agentLoopGuidanceCompact = """
+        ## Agent loop
+
+        - Answer the user in plain text once the requested work is complete. Todo is advisory and never overrides a final response.
+        - `todo(markdown)` — OPTIONAL for 3+ steps: create once and re-send only after an actual task or checkbox change. Never repeat it unchanged or check verification before running it. Before the final answer, send one last tool update if status changed; do not print the checklist as prose. Then answer once and stop. Unchecked items never keep the turn open. Skip direct/single-step work.
+        - `complete(summary)` — OPTIONAL early closure for blocked `todo` work. For success, check every box, answer normally, and stop. Invoke it as a tool only; never print `complete(...)` in the answer.
+        - `clarify(question)` — last resort; a fully specified task is not ambiguous, just do it. Ask ONE question only when the user asks or a required input is missing/contradictory with no sensible default.
+        - `share_artifact(path | content+filename)` — hands the user a file to keep (image, chart, document, code file); a `path` file MUST exist first. Text asked for in chat (answer, poem, message) goes in your reply, never an artifact. Sandbox: save under home, not `/tmp`.
+        """
+
+    /// Agent-loop guidance for the resolved schema: the `share_artifact`
+    /// bullet is emitted only when that tool actually resolved — the
+    /// orchestrator surface deliberately excludes it (workers deliver
+    /// artifacts), and a bullet naming an uncallable tool is the
+    /// recitation-loop trap `defaultPersona` documents. Both flags are
+    /// session-constant, so the choice is KV-cache safe. Line-filtering the
+    /// canonical statics (rather than duplicating them) keeps one source of
+    /// truth for the bullet text.
+    public static func agentLoopGuidance(
+        compact: Bool,
+        includeShareArtifact: Bool
+    ) -> String {
+        let base = compact ? agentLoopGuidanceCompact : agentLoopGuidance
+        guard !includeShareArtifact else { return base }
+        return
+            base
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.contains("`share_artifact(") }
+            .joined(separator: "\n")
+    }
 
     // MARK: - Time Context
 
@@ -113,20 +158,56 @@ public enum SystemPromptTemplates {
     /// Anti-fabrication directive injected whenever tools are present
     /// (gated on `!effectiveToolsOff` + a non-empty schema in the
     /// composer). Both conditions are session-constant → KV-cache safe.
-    /// Deliberately tool-name-free: this section can be emitted when
-    /// `capabilities_discover` is NOT in the schema (e.g. manual mode), and
-    /// naming a tool that isn't in the request is the recitation-loop trap
-    /// `defaultPersona` documents. The capability-discovery nudge (when
-    /// present) supplies the "how to find a tool" half; this supplies the
-    /// "don't fabricate when none fits" half.
-    public static let groundingDirective = """
+    /// This is the full variant — it names `capabilities_discover` and the
+    /// Enabled capabilities list, so the composer emits it only when that
+    /// tool is actually in the resolved schema. Naming a tool that isn't
+    /// in the request is the recitation-loop trap `defaultPersona`
+    /// documents; schemas without discovery get `groundingDirectiveBase`
+    /// instead (via `groundingDirective(discoveryAvailable:)`).
+    public static let groundingDirectiveFull = """
         ## Grounding
 
         - Ground factual and live-data claims — weather, prices, web content, file contents, command output, current state — in a tool result rather than answering from memory.
+        - A progress report is a factual claim about YOUR OWN work. Say a file was written, a page scraped, or a document saved only when a tool result in this conversation shows it. Never state a count, a file list, or a live status ("the browser is on step 2 of 11") you did not read out of a tool result — check first, or say plainly that you have not verified it.
         - You can almost always get there: a shell or network tool fetches live/external data, and `capabilities_discover` finds tools you don't have yet. Attempt that before deciding you can't — the absence of a purpose-built tool is not a dead end. Say what you can't do only after genuinely trying, and never invent a tool name or fabricate a value to fill a gap.
-        - A claim about your own capabilities is a factual claim. "I don't have a tool for X" or "I can't do X" must be backed by either the Enabled-capabilities manifest or a `capabilities_discover` call that came back empty. Never by X being absent from your current tool schema. Your loaded tools are a fixed subset, not the full enabled set.
-        - When the user asks whether you have a tool, whether you can do something, or what you can do: check the manifest first, then `capabilities_discover` if the manifest does not settle it, then answer.
+        - A claim about your own capabilities is a factual claim. "I don't have a tool for X" or "I can't do X" must be backed by either the Enabled capabilities list or a `capabilities_discover` call that came back empty. Never by X being absent from your current tool schema. Your loaded tools are a fixed subset, not the full enabled set.
+        - When the user asks whether you have a tool, whether you can do something, or what you can do: check the Enabled capabilities list first, then `capabilities_discover` if the list does not settle it, then answer.
         """
+
+    /// Tool-name-free grounding variant for schemas WITHOUT
+    /// `capabilities_discover` (e.g. manual mode with a curated tool list).
+    /// Keeps the anti-fabrication core; drops the discover/manifest bullets
+    /// that would name a tool the model cannot call.
+    public static let groundingDirectiveBase = """
+        ## Grounding
+
+        - Ground factual and live-data claims — weather, prices, web content, file contents, command output, current state — in a tool result rather than answering from memory.
+        - A progress report is a factual claim about YOUR OWN work. Say a file was written, a page scraped, or a document saved only when a tool result in this conversation shows it. Never state a count, a file list, or a live status you did not read out of a tool result — check first, or say plainly that you have not verified it.
+        - Say what you can't do only after genuinely trying with the tools you have, and never invent a tool name or fabricate a value to fill a gap.
+        """
+
+    /// Compact discovery-aware grounding for small-context / small local
+    /// models (`prefersCompactPrompt`). Keeps the three load-bearing claims
+    /// (ground live data, try-before-you-deny, capability-claims must be
+    /// backed) — just tighter. Still names `capabilities_discover` / the
+    /// Enabled list, so it is only chosen when discovery is in the schema.
+    public static let groundingDirectiveFullCompact = """
+        ## Grounding
+
+        - Ground live-data and factual claims (weather, prices, web, file contents, command output, current state) in a tool result, not memory.
+        - Progress reports are factual claims too: state a count, a file list, or a live status only if a tool result in this conversation showed it. Otherwise check, or say you have not verified.
+        - You can almost always get there: a shell/network tool fetches external data and `capabilities_discover` finds tools you lack. Try before saying you can't, and never invent a tool name or fabricate a value.
+        - "I can't do X" / "I don't have a tool for X" must be backed by the Enabled capabilities list or an empty `capabilities_discover` — never by X being absent from your current schema (a fixed subset, not the full enabled set).
+        """
+
+    /// Select the grounding variant for the resolved schema. The flags are
+    /// session-constant (the schema + size class are frozen at session start),
+    /// so the choice is KV-cache safe. `compact` only narrows the
+    /// discovery-aware variant — the tool-name-free base is already minimal.
+    public static func groundingDirective(discoveryAvailable: Bool, compact: Bool = false) -> String {
+        guard discoveryAvailable else { return groundingDirectiveBase }
+        return compact ? groundingDirectiveFullCompact : groundingDirectiveFull
+    }
 
     // MARK: - Capability Discovery Nudge
 
@@ -312,6 +393,15 @@ public enum SystemPromptTemplates {
         - Do not add docstrings, comments, or type annotations to code you did not modify.
         """
 
+    /// Compact code-style discipline for small-context / small local models
+    /// (`prefersCompactPrompt`). Same scope-creep guardrails, folded.
+    public static let codeStyleGuidanceCompact = """
+        ## Code style
+
+        - Limit changes to what was requested — no adjacent refactoring or style cleanup, no defensive handling for conditions that can't arise here.
+        - Don't extract helpers for single-use logic. Comment only genuinely non-obvious reasoning; don't annotate code you didn't modify.
+        """
+
     /// Risk-aware action discipline. Fires on the broader
     /// `SystemPromptComposer.mutationToolNames` gate (any tool that can
     /// mutate the filesystem OR run arbitrary code / install deps) — wider
@@ -320,9 +410,18 @@ public enum SystemPromptTemplates {
     public static let riskAwareGuidance = """
         ## Risk-aware actions
 
-        - Default to acting. Local, reversible work — reading, editing a file, running a command or test, installing into the sandbox — just do it; you do not need to ask permission first.
+        - Local, reversible work — reading, editing a file, running a command or test, installing into the sandbox — needs no permission; just do it.
         - Only pause to confirm for genuinely destructive or hard-to-undo actions: deleting the user's files, `rm -rf`, dropping data, force-pushing. The test is reversibility — if it's reversible, proceed.
         - When encountering unexpected state (unfamiliar files, unknown processes), investigate before removing anything.
+        """
+
+    /// Compact risk-aware discipline for small-context / small local models
+    /// (`prefersCompactPrompt`). Keeps the reversibility test, folded.
+    public static let riskAwareGuidanceCompact = """
+        ## Risk-aware actions
+
+        - Local, reversible work (read, edit a file, run a command or test, install into the sandbox) needs no permission — just do it.
+        - Pause to confirm only for destructive or hard-to-undo actions (deleting the user's files, `rm -rf`, dropping data, force-push); the test is reversibility. Investigate unexpected state before removing anything.
         """
 
     // MARK: - Soul
@@ -427,7 +526,7 @@ public enum SystemPromptTemplates {
 
     // MARK: - Sandbox Building Blocks
 
-    static let sandboxSectionHeading = "## Linux Sandbox Environment"
+    static let sandboxSectionHeading = "## Linux sandbox environment"
     static let sandboxReadFileHint =
         "`sandbox_read_file` with `start_line`/`line_count`/`tail_lines`"
 
@@ -578,7 +677,7 @@ public enum SystemPromptTemplates {
     ) -> String {
         guard let folder = folderContext else { return "" }
 
-        var lines: [String] = ["## Working Directory"]
+        var lines: [String] = ["## Working directory"]
         lines.append("**Path:** \(folder.rootPath.path)")
         if folder.projectType != .unknown {
             lines.append("**Project Type:** \(folder.projectType.displayName)")
@@ -622,7 +721,7 @@ public enum SystemPromptTemplates {
         if let contextFiles = folder.contextFiles, !contextFiles.isEmpty {
             section += """
 
-                ## Project Context
+                ## Project context
 
                 The following project context file has been loaded and should be followed:
 
@@ -680,7 +779,7 @@ public enum SystemPromptTemplates {
     ) -> String {
         guard let folder = folderContext else { return "" }
 
-        var lines: [String] = ["## Host Workspace (read-only)"]
+        var lines: [String] = ["## Host workspace (read-only)"]
         lines.append("**Path:** \(folder.rootPath.path)")
         if folder.projectType != .unknown {
             lines.append("**Project Type:** \(folder.projectType.displayName)")
@@ -709,7 +808,7 @@ public enum SystemPromptTemplates {
         if let contextFiles = folder.contextFiles, !contextFiles.isEmpty {
             section += """
 
-                ## Project Context
+                ## Project context
 
                 The following project context file has been loaded and should be followed:
 

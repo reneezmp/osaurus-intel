@@ -268,10 +268,6 @@ public enum SettingsSearchIndex {
             title: "Enable Memory", keywords: ["memory", "remember", "recall", "pinned facts"],
             disambiguation: "Turns memory on or off for chats; the Memory tab has the details."),
         .init(
-            id: "settings.chat.greetings", tab: .chat, section: "Greetings",
-            title: "AI-Generated Greetings",
-            keywords: ["greeting", "empty state", "quick actions", "personality"]),
-        .init(
             id: "settings.work.permissions", tab: .chat, section: "Folder Tool Permissions",
             title: "Folder Tool Permissions",
             keywords: ["file", "shell", "git", "write", "delete", "approve", "folder tools", "permissions"],

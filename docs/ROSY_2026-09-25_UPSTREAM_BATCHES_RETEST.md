@@ -3065,6 +3065,30 @@ Not in candidate 66.
       it, close both, unplug the display, and reopen them. Both appear on
       the remaining screen.
 
+## Prompt re-audit (2026-11-08)
+
+`W-cov-reaudit` stage 3c-2 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage
+3c-2"). Not in candidate 66.
+
+- [ ] Settings › Conversation: there is no Greetings section. Search
+      Settings for "greeting": no AI-Generated Greetings result.
+- [ ] An agent's Customization › Empty State shows Greeting, Message and
+      the Action Bar directly (no AI / Custom picker). Set a greeting and a
+      message, open a new chat with that agent: both show in the empty
+      chat. Clear them: the time-of-day greeting and "How can I help you
+      today?" come back.
+- [ ] Open the context budget popover in a chat with a custom agent that
+      has a folder mounted: the rows include Model Family Guidance,
+      Grounding, Code Style, Risk-Aware Actions, Agent Loop and Folder Tool
+      Use. With Disable Tools on, none of them appear.
+- [ ] With DeepSeek and a folder mounted, ask "what files are in this
+      folder?": it calls `file_tree` (or `file_read`) and lists real names;
+      it doesn't describe a plan or invent files.
+- [ ] With a GPT model, ask an agent with folder tools to change one line
+      in a file: it edits just that line and confirms the change took
+      effect, and doesn't ask permission first.
+- [ ] Skills: there is no "Sandbox Plugin Creator" skill.
+
 ## Agent loop re-audit (2026-11-08)
 
 `W-cov-reaudit` stage 3c-1 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage

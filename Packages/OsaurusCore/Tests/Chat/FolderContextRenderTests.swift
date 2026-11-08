@@ -68,10 +68,10 @@ struct FolderContextRenderTests {
         #expect(!rendered.contains("Git status"))
     }
 
-    @Test("Project Context section is omitted when contextFiles is nil")
+    @Test("Project context section is omitted when contextFiles is nil")
     func noContextFilesIsHidden() {
         let rendered = SystemPromptTemplates.folderContext(from: ctx(contextFiles: nil))
-        #expect(!rendered.contains("## Project Context"))
+        #expect(!rendered.contains("## Project context"))
     }
 
     // MARK: - Trimmed path-relative paragraph
@@ -119,7 +119,7 @@ struct FolderContextRenderTests {
 
     /// The rendered folder section should land subsections in this order:
     /// heading → metadata lines → (git block if any) → path rule →
-    /// dispatch → artifact reminder → (Project Context if any).
+    /// dispatch → artifact reminder → (Project context if any).
     @Test("folder section emits subsections in canonical order")
     func canonicalSubsectionOrder() {
         let rendered = SystemPromptTemplates.folderContext(
@@ -131,7 +131,7 @@ struct FolderContextRenderTests {
         )
         // Markers, in expected order:
         let anchors: [(label: String, text: String)] = [
-            ("heading", "## Working Directory"),
+            ("heading", "## Working directory"),
             ("path metadata", "**Path:**"),
             ("project type", "**Project Type:** Swift"),
             ("root contents", "**Root contents:**"),
@@ -139,7 +139,7 @@ struct FolderContextRenderTests {
             ("path rule", SystemPromptTemplates.folderPathRule),
             ("dispatch", "Tool dispatch"),
             ("artifact reminder", "Files land in the working folder"),
-            ("project context heading", "## Project Context"),
+            ("project context heading", "## Project context"),
         ]
         var lastIdx = -1
         var lastLabel = "(start)"

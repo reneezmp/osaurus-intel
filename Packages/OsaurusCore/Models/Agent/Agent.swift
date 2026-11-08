@@ -70,13 +70,11 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     public var chatQuickActions: [AgentQuickAction]?
     /// User-authored override for the chat empty-state greeting line.
     /// `nil` (or empty after trim) renders the existing time-of-day
-    /// default ("Good morning" / "Hello"). Only applied when generative
-    /// greetings resolve to OFF for this agent — when AI is generating,
-    /// the produced greeting wins.
+    /// default ("Good morning" / "Hello").
     public var chatGreeting: String?
     /// User-authored override for the chat empty-state subtitle.
     /// `nil` (or empty after trim) renders the localized default
-    /// ("How can I help you today?"). Same gating as `chatGreeting`.
+    /// ("How can I help you today?").
     public var chatSubtitle: String?
     /// Whether this is a built-in agent (cannot be deleted)
     public let isBuiltIn: Bool
@@ -672,18 +670,6 @@ public struct AgentLimitsSettings: Codable, Sendable, Equatable {
     public static var defaults: AgentLimitsSettings { AgentLimitsSettings() }
 }
 
-/// Legacy tri-state used before the master `enableGenerativeGreetings`
-/// toggle was retired in favor of a per-agent on/off (auto-on when a
-/// Core Model is configured). Kept around purely so old persisted
-/// `AgentSettings` JSON still decodes — `AgentSettings.init(from:)`
-/// maps `.enabled → true`, `.disabled → false`, `.followGlobal → nil`.
-/// New callers should not use this enum.
-public enum GenerativeGreetingsPreference: String, Codable, Sendable, CaseIterable {
-    case followGlobal
-    case enabled
-    case disabled
-}
-
 /// Top-level opt-in feature settings for an agent. Currently bundles the DB
 /// toggle (spec §5.5), self-scheduling bounds (spec §4.1, §9, §13), and the
 /// Phase 4 storage / cost limits (spec §11.3). New agent-wide opt-in
@@ -724,17 +710,6 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     public var schedule: AgentScheduleSettings
     /// Storage quota + per-run cost ceilings (Phase 4).
     public var limits: AgentLimitsSettings
-    /// Per-agent on/off for the generative greetings feature.
-    /// `nil` defers to the global master switch on
-    /// `ChatConfiguration.generativeGreetingsEnabled` (opt-in,
-    /// default off). Explicit `true`/`false` always wins over the
-    /// global flag — see `Agent.shouldUseGenerativeGreetings`.
-    public var generativeGreetingsEnabled: Bool?
-    /// Per-agent override for the empty-state greeting voice. `nil` (or
-    /// an empty string after trimming) inherits the global persona from
-    /// `ChatConfiguration.greetingPersona`; both empty falls back to the
-    /// built-in playful default in `GenerativeGreetingService`.
-    public var greetingPersona: String?
     /// `image` tool (upstream `imageEnabled`, `W-media-generation`): custom
     /// agents only, default off. On Intel it generates through Osaurus Cloud
     /// or Venice (billable; asks before every image).
@@ -788,8 +763,6 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         dbEnabled: Bool,
         schedule: AgentScheduleSettings,
         limits: AgentLimitsSettings = .defaults,
-        generativeGreetingsEnabled: Bool? = nil,
-        greetingPersona: String? = nil,
         webSearchEnabled: Bool = false,
         enabledAppleApps: Set<AppleApp> = [],
         selfSchedulingEnabled: Bool = false,
@@ -845,8 +818,6 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         self.speakEnabled = speakEnabled
         self.schedule = schedule
         self.limits = limits
-        self.generativeGreetingsEnabled = generativeGreetingsEnabled
-        self.greetingPersona = greetingPersona
     }
 
     public init(from decoder: Decoder) throws {
@@ -890,27 +861,6 @@ public struct AgentSettings: Codable, Sendable, Equatable {
             try c.decodeIfPresent(AgentScheduleSettings.self, forKey: .schedule)
             ?? AgentScheduleSettings.defaults(for: .manual)
         limits = try c.decodeIfPresent(AgentLimitsSettings.self, forKey: .limits) ?? .defaults
-        // Backward compat: prior versions stored a tri-state enum under
-        // `generativeGreetings`. Map it onto the new `Bool?` shape so
-        // upgrade installs don't lose their explicit on/off choice. The
-        // new `generativeGreetingsEnabled` key wins when both are
-        // present (which only happens during the first save after
-        // upgrade).
-        if let explicit = try c.decodeIfPresent(Bool.self, forKey: .generativeGreetingsEnabled) {
-            generativeGreetingsEnabled = explicit
-        } else if let legacy = try c.decodeIfPresent(
-            GenerativeGreetingsPreference.self,
-            forKey: .generativeGreetings
-        ) {
-            switch legacy {
-            case .enabled: generativeGreetingsEnabled = true
-            case .disabled: generativeGreetingsEnabled = false
-            case .followGlobal: generativeGreetingsEnabled = nil
-            }
-        } else {
-            generativeGreetingsEnabled = nil
-        }
-        greetingPersona = try c.decodeIfPresent(String.self, forKey: .greetingPersona)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -943,10 +893,6 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         case subagentModelOverrides
         case schedule
         case limits
-        case generativeGreetingsEnabled
-        case greetingPersona
-        // Read-only legacy key — never encoded after migration.
-        case generativeGreetings
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -984,8 +930,6 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         }
         try c.encode(schedule, forKey: .schedule)
         try c.encode(limits, forKey: .limits)
-        try c.encodeIfPresent(generativeGreetingsEnabled, forKey: .generativeGreetingsEnabled)
-        try c.encodeIfPresent(greetingPersona, forKey: .greetingPersona)
     }
 
     /// Default settings for newly created agents (and for back-compat decoding of
@@ -994,9 +938,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         AgentSettings(
             dbEnabled: false,
             schedule: AgentScheduleSettings.defaults(for: .manual),
-            limits: .defaults,
-            generativeGreetingsEnabled: nil,
-            greetingPersona: nil
+            limits: .defaults
         )
     }
 }
@@ -1015,19 +957,6 @@ public enum MediaToolPermission: String, Codable, Sendable, CaseIterable {
         case .deny: return L("Deny")
         case .alwaysAllow: return L("Always Allow")
         }
-    }
-}
-
-// MARK: - Generative Greetings Helpers
-
-extension Agent {
-    /// Resolves whether generative greetings should run for this agent.
-    /// Explicit per-agent on/off always wins; otherwise the value falls
-    /// through to the global master switch on `ChatConfiguration`. Pass
-    /// `globallyEnabled: AppConfiguration.shared.chatConfig.generativeGreetingsEnabled`
-    /// at the call site.
-    public func shouldUseGenerativeGreetings(globallyEnabled: Bool) -> Bool {
-        settings.generativeGreetingsEnabled ?? globallyEnabled
     }
 }
 

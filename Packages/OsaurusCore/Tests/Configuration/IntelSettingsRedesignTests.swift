@@ -66,8 +66,6 @@ struct IntelSettingsRedesignTests {
             autoTitles: false,
             followUps: true,
             backfillDescriptions: true,
-            greetingsEnabled: true,
-            greetingPersona: GenerativeGreetingService.defaultPersonaInstruction,
             memoryEnabled: true
         )
         ChatSettingsView.apply(form, to: chat)
@@ -85,9 +83,6 @@ struct IntelSettingsRedesignTests {
         #expect(chat.enableClipboardMonitoring == false)
         #expect(chat.autoGenerateChatTitles == false)
         #expect(chat.backfillAgentDescriptions == true)
-        #expect(chat.generativeGreetingsEnabled == true)
-        // An unedited built-in persona is stored as "" so future defaults apply.
-        #expect(chat.greetingPersona.isEmpty)
     }
 
     @Test func advancedAnchorsCoverTheirSearchEntries() {

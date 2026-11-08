@@ -1798,8 +1798,6 @@ final class ChatConfiguration: @unchecked Sendable {
     var maxTokens: Int? = nil
     var contextLength: Int? = 128000
     var defaultModel: String? = nil
-    var generativeGreetingsEnabled: Bool = false
-    var greetingPersona: String = ""
     var enableClipboardMonitoring: Bool = true
     // Upstream 5bb946f7: background Core-Model title generation after
     // the first exchange. On Intel this is served by CloudChatEngine
@@ -1889,9 +1887,7 @@ final class ChatConfiguration: @unchecked Sendable {
         enableClipboardMonitoring: Bool = true,
         autoGenerateChatTitles: Bool = true,
         generateFollowUpSuggestions: Bool = true,
-        backfillAgentDescriptions: Bool = false,
-        generativeGreetingsEnabled: Bool = false,
-        greetingPersona: String = ""
+        backfillAgentDescriptions: Bool = false
     ) {
         self.init()
         self.hotkey = hotkey
@@ -1917,8 +1913,6 @@ final class ChatConfiguration: @unchecked Sendable {
         self.autoGenerateChatTitles = autoGenerateChatTitles
         self.generateFollowUpSuggestions = generateFollowUpSuggestions
         self.backfillAgentDescriptions = backfillAgentDescriptions
-        self.generativeGreetingsEnabled = generativeGreetingsEnabled
-        self.greetingPersona = greetingPersona
     }
 
     /// Copy every editable field from another instance into self.
@@ -1951,8 +1945,6 @@ final class ChatConfiguration: @unchecked Sendable {
         self.compactionModelName = other.compactionModelName
         self.backfillAgentDescriptions = other.backfillAgentDescriptions
         self.fileHistoryRetention = other.fileHistoryRetention
-        self.generativeGreetingsEnabled = other.generativeGreetingsEnabled
-        self.greetingPersona = other.greetingPersona
     }
 
     static func load() -> ChatConfiguration { shared }
@@ -1980,8 +1972,6 @@ final class ChatConfiguration: @unchecked Sendable {
         var maxTokens: Int? = nil
         var contextLength: Int? = nil
         var defaultModel: String? = nil
-        var generativeGreetingsEnabled: Bool? = nil
-        var greetingPersona: String? = nil
         var enableClipboardMonitoring: Bool? = nil
         var autoGenerateChatTitles: Bool? = nil
         var generateFollowUpSuggestions: Bool? = nil
@@ -2020,8 +2010,6 @@ final class ChatConfiguration: @unchecked Sendable {
         if let v = s.maxTokens { maxTokens = v }
         if let v = s.contextLength { contextLength = v }
         if let v = s.defaultModel { defaultModel = v }
-        if let v = s.generativeGreetingsEnabled { generativeGreetingsEnabled = v }
-        if let v = s.greetingPersona { greetingPersona = v }
         if let v = s.enableClipboardMonitoring { enableClipboardMonitoring = v }
         if let v = s.autoGenerateChatTitles { autoGenerateChatTitles = v }
         if let v = s.generateFollowUpSuggestions { generateFollowUpSuggestions = v }
@@ -2052,8 +2040,6 @@ final class ChatConfiguration: @unchecked Sendable {
         s.maxTokens = maxTokens
         s.contextLength = contextLength
         s.defaultModel = defaultModel
-        s.generativeGreetingsEnabled = generativeGreetingsEnabled
-        s.greetingPersona = greetingPersona
         s.enableClipboardMonitoring = enableClipboardMonitoring
         s.autoGenerateChatTitles = autoGenerateChatTitles
         s.generateFollowUpSuggestions = generateFollowUpSuggestions

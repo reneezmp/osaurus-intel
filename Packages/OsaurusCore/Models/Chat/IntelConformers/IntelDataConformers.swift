@@ -897,8 +897,6 @@ final class AppConfiguration: ObservableObject, @unchecked Sendable {
     var foundationModelAvailable: Bool { false }
 }
 struct AppChatConfigStub: Sendable {
-    var generativeGreetingsEnabled = false
-    var greetingPersona = ""
     var disableTools = false
     var maxToolAttempts = 5
     var topPOverride: Double? = nil
@@ -2686,7 +2684,7 @@ final class SystemPromptComposer: @unchecked Sendable {
             return !ownKnowledge.isEmpty || !projectKnowledge.isEmpty
         }
         // M12 Gap 3: when a working folder is mounted, append the real
-        // "## Working Directory" framing (SystemPromptTemplates.folderContext —
+        // "## Working directory" framing (SystemPromptTemplates.folderContext —
         // NOT excluded). Without it the model just had bare tool specs and no
         // context, so DeepSeek hallucinated tool output as plain text instead
         // of emitting a real call (Renée 2026-06-03). The section carries the
@@ -2747,7 +2745,7 @@ final class SystemPromptComposer: @unchecked Sendable {
             sections.append(PromptSection(id: "grounding", label: "Grounding", text: folderSection, tint: .teal))
         }
         if !toolDirective.isEmpty {
-            sections.append(PromptSection(id: "agentLoop", label: "Agent Loop", text: toolDirective, tint: .indigo))
+            sections.append(PromptSection(id: "folderToolUse", label: "Folder Tool Use", text: toolDirective, tint: .indigo))
         }
         // Private agent database (docs/AGENT_DATABASE_INTEL_PLAN.md). The
         // onboarding framing is session-constant, so it joins the stable,
@@ -2823,7 +2821,7 @@ final class SystemPromptComposer: @unchecked Sendable {
                 // allowlist — mirrors upstream, where runtime-managed tools form the
                 // always-loaded baseline and the manual picker only ADDS discretionary
                 // tools on top. Without this, selecting a folder gave a Manual-mode
-                // agent the "## Working Directory" prompt but none of the actual
+                // agent the "## Working directory" prompt but none of the actual
                 // file/shell tool specs, so it couldn't call them (Renée, native
                 // Ventura, 2026-06-12).
                 var allowed = Set(enabled).union(folderToolNames)
@@ -2881,6 +2879,7 @@ final class SystemPromptComposer: @unchecked Sendable {
         // them (this session's loads arrive as `additionalToolNames`); the
         // prompt lists what can be loaded. Manual mode sends the enabled set.
         tools.removeAll { $0.function.name == CapabilitiesTool.toolName }
+        var manifestBlock: String? = nil
         if !tools.isEmpty, id != Agent.defaultId {
             let toolMode = await MainActor.run { AgentManager.shared.effectiveToolSelectionMode(for: id) }
             if toolMode == .auto {
@@ -2899,13 +2898,27 @@ final class SystemPromptComposer: @unchecked Sendable {
                     ToolRegistry.shared.openAISpecs(named: loaded.sorted().filter { !present.contains($0) }))
                 if let manifest = CapabilityManifest.render(catalog) {
                     tools += ToolRegistry.shared.openAISpecs(named: [CapabilitiesTool.toolName])
-                    let block = "\n\n" + CapabilityManifest.discoveryGuidance + "\n\n" + manifest
-                    prompt += block
-                    sections.append(
-                        PromptSection(
-                            id: "enabledManifest", label: "Enabled Capabilities", text: block, tint: .blue))
+                    manifestBlock = "\n\n" + CapabilityManifest.discoveryGuidance + "\n\n" + manifest
                 }
             }
+        }
+        // Upstream's static discipline sections (#1317, #1430), gated on the
+        // final schema and placed before the manifest as upstream does
+        // (`IntelPromptDiscipline`).
+        for section in IntelPromptDiscipline.sections(
+            modelId: model,
+            toolNames: Set(tools.map(\.function.name)),
+            toolsOff: toolsDisabled || agentToolsDisabled
+        ) {
+            let block = "\n\n" + section.text
+            prompt += block
+            sections.append(PromptSection(id: section.id, label: section.label, text: block, tint: .indigo))
+        }
+        if let manifestBlock {
+            prompt += manifestBlock
+            sections.append(
+                PromptSection(
+                    id: "enabledManifest", label: "Enabled Capabilities", text: manifestBlock, tint: .blue))
         }
         // Append plugin-declared `instructions` for any plugin whose tools are
         // active this turn, so a plugin can shape how the model wields it.

@@ -16,6 +16,5 @@ protocol ChatConfigurationProtocol: Sendable {
     var maxTokens: Int? { get }
     var contextLength: Int? { get }
     var defaultModel: String? { get }
-    var generativeGreetingsEnabled: Bool { get }
     static func load() -> any ChatConfigurationProtocol
 }

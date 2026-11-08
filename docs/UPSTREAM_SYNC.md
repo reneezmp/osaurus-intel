@@ -5649,6 +5649,72 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 3c-2: the prompt commits (`W-cov-reaudit`) — 2026-11-08
+
+The prompt rows of 3c ([`COV_REAUDIT.md`](COV_REAUDIT.md)).
+
+- **Generative greetings removed (#2278, #1362):** upstream retired the
+  model-generated empty state; on Intel it was already dead (the pool and
+  service were no-op stubs, the real files excluded), so the Settings ›
+  Conversation › Greetings switch, its Personality editor and the agent's
+  Empty State AI/Custom picker did nothing. Removed as upstream: the
+  Greetings section and its search entry, the AI side of the agent's Empty
+  State (the Greeting, Message and Action Bar fields stay, now shown
+  directly), the `ChatEmptyState` / `ChatView` / `ChatWindowManager`
+  generative path (shimmer, trigger, sleep/wake pool hooks), the greeting
+  fields of Intel's `ChatConfiguration` and `AgentSettings`,
+  `OsaurusPaths.greetingPoolCacheFile`, the stubs, protocols, model and the
+  two test files. Agent files written with `generativeGreetingsEnabled` or
+  `greetingPersona` keep them as unknown fields (`preservingUnknownFields`);
+  `chat.json` drops them on the next save, as upstream. Seven retired
+  strings are marked stale.
+- **Static discipline sections (#1430, #1317):** Intel's composer
+  (`composeChatContext`, IntelDataConformers) emitted none of upstream's
+  static sections; an old comment says only that they lived in excluded
+  files. `IntelPromptDiscipline` now appends them with upstream's gates and
+  order, before the capabilities manifest: model family guidance (upstream's
+  `ModelFamilyGuidance.swift` at `bce907045`; GPT/Codex, Gemini, Gemma,
+  GLM/Qwen, DeepSeek, LFM2, default) whenever tools are on, Grounding for
+  any tool schema (the base variant: Intel offers the `capabilities` gateway,
+  not `capabilities_discover`, as upstream's gateway schemas do), Code style
+  with `file_write` / `file_edit`, Risk-aware actions with those or
+  `shell_run`, and Agent loop with `todo` / `complete` / `clarify` /
+  `share_artifact` (the share bullet only when offered). Texts are
+  upstream's at `bce907045`. Intel's own folder tool directive stays (it
+  carries the document-tool guidance); its budget row is now "Folder Tool
+  Use" so it doesn't clash with upstream's Agent loop. Not ported: the
+  sandbox ladder, Secret handling, Self-improvement and plugin recipe
+  (sandbox-only), Bulk edits (names `redact_file`, lands with
+  `W-privacy-filter`), the compact variants (Intel has no context size
+  class). Also from #1430: the Sandbox Plugin Creator skill is gone (Intel
+  filtered it out already), `PluginCreatorGate` matches upstream, and the
+  folder headings are sentence case (`## Working directory`, `## Project
+  context`).
+- **Settings shortcut (#2862):** Intel's guides already said Settings…
+  (⌘,); the CLI plugin template still said Cmd+Shift+M and now says
+  Settings… (⌘,) → Plugins.
+- **Judge polarity (#3033):** `CapabilityClaimsEvaluator`'s judge writes its
+  reason before the verdict and gets the polarity rule for negative
+  conditions.
+- **Found — the decline filter hid feasibility rows:** `cov_reaudit.py
+  --mentioned` skipped a commit when an old ledger line said DEFER or SKIP,
+  but `DEFER_FEASIBILITY_AUDIT_2026-09-08.md` superseded those DEFERs and
+  marked many PORT NEXT or ROADMAP. The tool now takes the feasibility
+  verdict as final; 32 commits came back mostly absent and have verdicts
+  (11 form stage 3c-3: Thinking mode across tool turns #2101 / #2105,
+  capability ids #2309, queued steer and the empty wrap-up bubble #2653,
+  prompt trims #2051 / #1798, …). The 0.24.3 SKIPs the feasibility audit
+  didn't revisit are stage 6.
+
+Tests: `IntelPromptDisciplineTests` (gates, order, gateway grounding, the
+share bullet, family by model id); `IntelSettingsRedesignTests` updated;
+`FolderContextRenderTests` (excluded on Intel) follows the new headings.
+Full gate: 5,059 tests; besides the known avatar-cache test, the four
+`ExternalOfficeRuntimeDetector` probe tests failed once (each after 2.0 s, the
+fixture's version-probe timeout, on the fake `soffice` scripts); alone they
+pass in 0.2 s. A load-dependent flake: rerun the suite before suspecting a
+change.
+
 ### Coverage re-audit, stage 3c-1: the agent loop and capabilities (`W-cov-reaudit`) — 2026-11-08
 
 3c ([`COV_REAUDIT.md`](COV_REAUDIT.md)) splits in two: **3c-1** the agent

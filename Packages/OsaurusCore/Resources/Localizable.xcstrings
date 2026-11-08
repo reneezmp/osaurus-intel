@@ -2297,6 +2297,7 @@
       }
     },
     "AI-Generated Greetings" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -22536,6 +22537,7 @@
       }
     },
     "Each empty chat generates a fresh greeting and quick actions on the Core Model. The static greeting still shows instantly. Per-agent settings still win." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -22978,6 +22980,7 @@
       }
     },
     "Greetings" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -59505,6 +59508,7 @@
       }
     },
     "Inherits from the global personality in Settings → Chat. Edit to give this agent its own voice." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -74062,6 +74066,7 @@
       }
     },
     "Personality" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -74078,6 +74083,7 @@
       }
     },
     "Personality (default for all agents)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -87934,6 +87940,7 @@
       }
     },
     "Shapes the voice of AI-generated empty-state greetings and quick actions. Each agent can override this in its Customization tab." : {
+      "extractionState" : "stale",
       "localizations" : {
         "de" : {
           "stringUnit" : {

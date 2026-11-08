@@ -2101,28 +2101,6 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
 // `IntelMemoryService.swift`. The old no-op `bufferTurn` stub that used to sit
 // here was removed in Phase 2.
 
-// MARK: - GenerativeGreeting (no-op on Intel)
-
-final class GenerativeGreetingPool: @unchecked Sendable {
-    static let shared = GenerativeGreetingPool()
-    func setActive(agent: Agent, model: String) async {}
-    func popFresh(for agent: Agent, model: String) async -> GenerativeGreeting? { nil }
-    func seed(_ cached: GenerativeGreeting, for agent: Agent, model: String) async {}
-    func warmUp(for agent: Agent, model: String) async {}
-}
-
-final class GenerativeGreetingService: @unchecked Sendable {
-    static let shared = GenerativeGreetingService()
-    func generate(agent: Agent, fallbackModel: String) async throws -> GenerativeGreeting { throw CancellationError() }
-
-    /// Used by `ConfigurationView`'s greeting persona row
-    /// (un-body-swapped in M11 Phase 11.A.3.1) as placeholder text
-    /// when the user hasn't set a custom persona. The actual
-    /// greeting generation is amputated on Intel; this string is
-    /// purely for the UI's empty-state hint.
-    static let defaultPersonaInstruction: String = "Be warm and playful. Keep it short."
-}
-
 // MARK: - SharedArtifact (stub)
 
 struct ProcessingResult: Sendable {

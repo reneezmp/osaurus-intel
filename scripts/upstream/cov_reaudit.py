@@ -27,6 +27,8 @@ ones whose code is mostly absent (presence < 50%). A doc mention means the
 commit was examined, not that it was ported: the 0.24.3 triage marked #2388
 and #2392 PORT, and neither reached Intel. A listed commit is fine when its
 doc verdict was skip/defer/omit; a PORT verdict with absent code is a gap.
+A PORT NEXT or ROADMAP row in docs/DEFER_FEASIBILITY_AUDIT_2026-09-08.md
+overrides the older DEFER/SKIP lines for that commit (it superseded them).
 Any commit with a row in docs/COV_REAUDIT.md's tables has a verdict and is
 left off this list.
 """
@@ -90,6 +92,24 @@ DECLINED = re.compile(
     r"Incompatible|incompatible|amputated|N/A|Not applicable|not applicable|MLX|vMLX|vmlx)\b"
     r"|\| I \||\| \*\*I\*\* \|"
 )
+
+
+# docs/DEFER_FEASIBILITY_AUDIT_2026-09-08.md supersedes every DEFER verdict
+# in the 0.24.3 / 0.24.7 ledgers. Its PORT NEXT and ROADMAP rows are open work,
+# not declines, so the older DEFER/SKIP lines for those commits don't count.
+FEASIBILITY = {}
+if os.path.exists("docs/DEFER_FEASIBILITY_AUDIT_2026-09-08.md"):
+    for l in open("docs/DEFER_FEASIBILITY_AUDIT_2026-09-08.md"):
+        m = re.match(r"\| `([0-9a-f]{7,12})` \| \*\*([A-Z ]+)\*\* \|", l)
+        if m:
+            FEASIBILITY[m.group(1)[:7]] = m.group(2)
+
+
+def declined(h, lines):
+    verdict = FEASIBILITY.get(h[:7])
+    if verdict in ("PORT NEXT", "ROADMAP", "LANDED"):
+        return False
+    return any(DECLINED.search(l) for l in lines)
 
 
 def ledger_mentions(h, prs):
@@ -174,7 +194,7 @@ for h, subject, files in commits:
         if not lines:
             skipped["only in this audit's table"] += 1
             continue
-        if any(DECLINED.search(l) for l in lines):
+        if declined(h, lines):
             skipped["declined in the ledger (skip/defer/omit/MLX)"] += 1
             continue
     src = [f for f in files if f.endswith(".swift") and not f.startswith("Tests/")]

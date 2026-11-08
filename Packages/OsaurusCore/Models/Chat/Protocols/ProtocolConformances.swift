@@ -73,12 +73,6 @@ extension ChatConfiguration: ChatConfigurationProtocol {
     static func load() -> any ChatConfigurationProtocol { ChatConfigurationStore.load() }
 }
 
-// MARK: - GenerativeGreeting
-
-extension GenerativeGreetingPool: GenerativeGreetingPoolProtocol {}
-
-extension GenerativeGreetingService: GenerativeGreetingServiceProtocol {}
-
 // MARK: - SharedArtifact
 
 extension SharedArtifact: SharedArtifactProtocol {}
