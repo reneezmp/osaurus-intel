@@ -86,7 +86,14 @@ public struct ContextBudgetManager: Sendable {
 
     /// Estimate token count for a set of chat turns (conversation history).
     static func estimateTokens(for turns: [ChatTurn]) -> Int {
-        turns.reduce(0) { total, turn in
+        // INVARIANT (upstream #3259): assistant.toolResults is a display mirror
+        // of the following explicit tool turns, not additional model-visible
+        // history. Count it only when that call has no explicit result in its
+        // own adjacent batch. Legacy result-only histories still count, and
+        // never deduplicate by payload text or against an unrelated batch
+        // that reuses a call id.
+        var followingResultIDs = Set<String>()
+        return turns.reversed().reduce(0) { total, turn in
             var t = 0
             if !turn.contentIsEmpty {
                 t += max(1, turn.contentLength / TokenEstimator.charsPerToken)
@@ -99,7 +106,8 @@ public struct ContextBudgetManager: Sendable {
                     )
                 }
             }
-            for (_, result) in turn.toolResults {
+            for (id, result) in turn.toolResults
+            where turn.role != .assistant || !followingResultIDs.contains(id) {
                 t += TokenEstimator.estimate(result)
             }
             if turn.hasThinking {
@@ -107,6 +115,13 @@ public struct ContextBudgetManager: Sendable {
             }
             for attachment in turn.attachments {
                 t += attachment.estimatedTokens
+            }
+            if turn.role == .tool {
+                if let id = turn.toolCallId, !id.isEmpty {
+                    followingResultIDs.insert(id)
+                }
+            } else {
+                followingResultIDs.removeAll(keepingCapacity: true)
             }
             return total + t
         }

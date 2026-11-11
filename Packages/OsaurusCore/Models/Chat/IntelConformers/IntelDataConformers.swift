@@ -94,7 +94,9 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     @Published var toolCalls: [ToolCall]? = nil {
         didSet { Self.bumpTokenEstimateRevision() }
     }
-    var toolCallId: String? = nil
+    var toolCallId: String? = nil {
+        didSet { Self.bumpTokenEstimateRevision() }  // upstream #3259
+    }
     @Published var toolResults: [String: String] = [:] {
         didSet { Self.bumpTokenEstimateRevision() }
     }
