@@ -58,7 +58,13 @@ public final class KnowledgeManager: ObservableObject {
         var collection = KnowledgeCollection(name: name, summary: summary, folderPath: folderPath, includeGlobs: includeGlobs, excludeGlobs: excludeGlobs)
         // Upstream: adopting a folder that is already a git repo remembers its
         // `origin`, so the card offers Sync.
-        if collection.isGitRepository {
+        // #3222: `isGitRepository` stats the folder (can block on slow/network
+        // volumes), so probe it off the main actor.
+        let isGitRepo = await Task.detached(
+            priority: .userInitiated,
+            operation: { @Sendable [collection] in collection.isGitRepository }
+        ).value
+        if isGitRepo {
             collection.gitRemoteURL = await KnowledgeGitSyncService.shared.remoteURL(of: collection.folderURL)
         }
         try KnowledgeCollectionStore.save(collection)
