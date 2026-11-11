@@ -1165,6 +1165,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         responseBody: responseText.isEmpty ? nil : responseText,
                         wireRequestBody: wire.request,
                         wireResponseBody: wire.response.isEmpty ? nil : wire.response,
+                        wireResponseTruncated: wire.truncated,  // upstream #3284
                         connection: destination.connection,
                         path: loggedPathIsInternal ? loggedPath : destination.path,
                         agentId: loggedAgentId,
