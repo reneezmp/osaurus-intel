@@ -406,7 +406,11 @@ struct ChatContentView: View {
                                     // the thread has an explicit Ventura height, so
                                     // an extra row above the composer would push it.
                                     .overlay(alignment: .bottom) {
-                                        runProgressNotice
+                                        VStack(spacing: 0) {
+                                            // Upstream's unsaved-history notice (#2736).
+                                            ChatPersistenceNotice(sessionId: observedSession.sessionId)
+                                            runProgressNotice
+                                        }
                                             .frame(maxWidth: 1100)
                                             .padding(.horizontal, 16)
                                             .animation(

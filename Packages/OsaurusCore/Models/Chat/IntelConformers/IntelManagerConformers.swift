@@ -1525,6 +1525,9 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         deletedSessionIDs.insert(id)
         deletionLock.unlock()
         sessions.removeValue(forKey: id)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { _ = ChatPersistenceStatus.shared.unsaved.remove(id) }
+        }
         let fileURL = OsaurusPaths.sessionFile(for: id)
         // Serialize removal behind any metadata writes already submitted for
         // this session. Those writes also consult the tombstone before disk.
@@ -1642,13 +1645,67 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        guard let encoded = try? encoder.encode(data) else { return }
-        // Check and write under one lock so a newer snapshot cannot be
-        // overtaken between the staleness check and the disk write.
-        writeLock.lock()
-        defer { writeLock.unlock() }
-        guard writeGenerations[data.id] == generation else { return }
-        try? encoded.write(to: fileURL, options: .atomic)
+        let outcome: SaveOutcome
+        do {
+            let encoded = try encoder.encode(data)
+            // Check and write under one lock so a newer snapshot cannot be
+            // overtaken between the staleness check and the disk write.
+            writeLock.lock()
+            defer { writeLock.unlock() }
+            guard writeGenerations[data.id] == generation else { return }
+            try encoded.write(to: fileURL, options: .atomic)
+            outcome = .written
+        } catch {
+            print("[ChatSessionsManager] Failed to save session \(data.id): \(error)")
+            outcome = .failed
+        }
+        reportSave(outcome, id: data.id)
+    }
+
+    // MARK: - Unsaved chats (upstream `ChatSessionStore` save retry, #1737 / #2736)
+    //
+    // A write that fails (disk full, permissions, a vanished volume) used to
+    // be dropped silently: the chat looked fine until relaunch. As upstream,
+    // the chat is marked unsaved (`ChatPersistenceNotice` shows it with
+    // Retry) and the latest in-memory snapshot is written again after 2 s.
+
+    private enum SaveOutcome { case written, failed }
+    private var retryScheduled = false
+
+    private func reportSave(_ outcome: SaveOutcome, id: UUID) {
+        DispatchQueue.main.async { [self] in
+            MainActor.assumeIsolated {
+                switch outcome {
+                case .written:
+                    ChatPersistenceStatus.shared.unsaved.remove(id)
+                case .failed:
+                    ChatPersistenceStatus.shared.unsaved.insert(id)
+                    scheduleSaveRetry()
+                }
+            }
+        }
+    }
+
+    @MainActor private func scheduleSaveRetry() {
+        guard !retryScheduled else { return }
+        retryScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [self] in
+            MainActor.assumeIsolated {
+                retryScheduled = false
+                retryUnsaved()
+            }
+        }
+    }
+
+    /// Write every unsaved chat's latest snapshot again (the notice's Retry).
+    @MainActor func retryUnsaved() {
+        for id in ChatPersistenceStatus.shared.unsaved {
+            guard let data = sessions[id], !isDeleted(id) else {
+                ChatPersistenceStatus.shared.unsaved.remove(id)
+                continue
+            }
+            persistAsync(data)
+        }
     }
 
     private func nextWriteGeneration(for id: UUID) -> UInt64 {

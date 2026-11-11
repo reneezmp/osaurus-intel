@@ -373,7 +373,21 @@ now that Intel has both. Stage 6 re-reads them.
    passes in full for the first time; 0 of 2,498 referenced keys fall back
    to English in a required locale. Stage 4 complete; stage 5 next.
 5. **Stage 5, behaviour audit of the `COV-intel-own` files** (the item's
-   original scope): commits since the fork are covered by stages 1–4; this
+   original scope). **5a (chat storage) done 2026-11-11.** Upstream's
+   storage is now `SyncConversationStore` on the proprietary, arm64-only
+   `OsaurusSync` core (1.0; `UPSTREAM_SYNC.md`, "Osaurus 1.0: what Intel
+   can't take"), so Intel keeps its per-session JSON and takes the
+   behaviour: `ChatHistoryDatabase`'s stubs now read `ChatSessionsManager`
+   (a plugin or HTTP caller's `externalSessionKey` reattaches to its newest
+   saved chat, the AppleScript agent sees the session's last request, the
+   agent detail history shows turn counts), and a failed save is flagged
+   and retried after 2 s with upstream's `ChatPersistenceNotice` (Retry)
+   above the composer instead of being dropped silently. Not taken:
+   loading metadata only (Intel holds every chat in memory; fine at
+   today's sizes), encryption (with `W-storage-encryption-optin`, since
+   upstream made it opt-in in #1600). `isUnattendedDispatch` needs nothing
+   now: upstream's auto-approvable list is empty and its other use is
+   channel publishing (deferred). Rest of the original scope: commits since the fork are covered by stages 1–4; this
    compares behaviour Intel's replacements never had at all, starting with
    chat storage, the prompt composer (with the Abilities context-impact
    readout, #2306 / #2323, and upstream's per-chat freeze of the prompt and

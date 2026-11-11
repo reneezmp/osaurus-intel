@@ -163,26 +163,65 @@ enum AgentStore {
     static func loadAll() -> [Agent] { [] }
 }
 
-// MARK: - Chat History Database (Intel stub)
+// MARK: - Chat History Database (Intel: reads ChatSessionsManager)
+//
+// Upstream's conversation store (the SQLite `ChatHistoryDatabase`, since 1.0
+// `SyncConversationStore` on the proprietary arm64-only `OsaurusSync` core)
+// can't run on Intel, whose chats are `ChatSessionsManager`'s per-session
+// JSON. These are upstream's `ConversationStore` queries over that store.
+// Until 2026-11-11 (`W-cov-reaudit` 5a) they were stubs: a plugin or HTTP
+// caller's `externalSessionKey` never reattached to its saved chat, the
+// AppleScript agent never saw the session's last request, and the agent
+// detail history list showed no turn counts.
 
 final class ChatHistoryDatabase: @unchecked Sendable {
     static let shared = ChatHistoryDatabase()
     private init() {}
-    /// Per-session turn counts for an agent's history list. Empty on
-    /// Intel (chat history persistence is session-scoped in-memory).
-    func turnCounts(forAgent agentId: UUID?) -> [UUID: Int] { [:] }
 
-    // MARK: - Session reattach (M13 Schedules restore)
-    //
-    // `BackgroundTaskManager.reattachSession` looks up a persisted session by
-    // `externalSessionKey` so repeated dispatches (e.g. the same scheduler
-    // run) accrete into one row. Intel has no persisted chat-history DB
-    // (sessions are in-memory), so these no-op: `findSession` returns nil →
-    // every scheduled dispatch starts a fresh session, which is correct here.
+    /// `ChatSessionsManager.sessions` is main-thread state.
+    private func onMain<T>(_ body: () -> T) -> T {
+        Thread.isMainThread ? body() : DispatchQueue.main.sync(execute: body)
+    }
+
+    /// Per-session turn counts; `agentId == nil` counts every session.
+    func turnCounts(forAgent agentId: UUID?) -> [UUID: Int] {
+        onMain {
+            var counts: [UUID: Int] = [:]
+            for session in ChatSessionsManager.shared.sessions.values
+            where agentId == nil || session.agentId == agentId {
+                counts[session.id] = session.turns.count
+            }
+            return counts
+        }
+    }
+
     func open() throws {}
-    func findSession(source: SessionSource, externalKey: String, agentId: UUID?) -> ChatSessionData? { nil }
-    func findSession(pluginId: String, externalKey: String, agentId: UUID?) -> ChatSessionData? { nil }
-    func loadSession(id: UUID) -> ChatSessionData? { nil }
+
+    /// The newest session for `externalKey` from `source` and `agentId`
+    /// (upstream: same key, same agent, latest `updatedAt`).
+    func findSession(source: SessionSource, externalKey: String, agentId: UUID?) -> ChatSessionData? {
+        findSession(externalKey: externalKey, agentId: agentId) { $0.source == source }
+    }
+
+    func findSession(pluginId: String, externalKey: String, agentId: UUID?) -> ChatSessionData? {
+        findSession(externalKey: externalKey, agentId: agentId) { $0.sourcePluginId == pluginId }
+    }
+
+    private func findSession(
+        externalKey: String,
+        agentId: UUID?,
+        where matches: (ChatSessionData) -> Bool
+    ) -> ChatSessionData? {
+        onMain {
+            ChatSessionsManager.shared.sessions.values
+                .filter { $0.externalSessionKey == externalKey && $0.agentId == agentId && matches($0) }
+                .max { $0.updatedAt < $1.updatedAt }
+        }
+    }
+
+    func loadSession(id: UUID) -> ChatSessionData? {
+        onMain { ChatSessionsManager.shared.session(for: id) }
+    }
 }
 
 // SchedulerDatabase is now the real one (Storage/SchedulerDatabase.swift),

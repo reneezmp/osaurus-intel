@@ -3333,3 +3333,13 @@ Region (move the language to the top, relaunch Osaurus), then set back.
 - [ ] German: macOS's speech-recognition permission prompt (first use of
       voice input after a reset) is in German; in Korean or Russian it is
       in that language.
+
+## Chat storage re-audit (2026-11-11)
+
+`W-cov-reaudit` stage 5a (`COV_REAUDIT.md`, "Stage 5"). Not in candidate 67.
+
+- [ ] Agents → a custom agent you've chatted with → its history list: each
+      chat shows its real number of turns (not "0 turns").
+- [ ] Chat normally, quit and relaunch: chats are all still there (the save
+      path changed slightly). No yellow "History isn't saved yet" bar
+      appears above the composer during normal use.
