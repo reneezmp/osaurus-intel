@@ -2027,7 +2027,7 @@ struct AgentDetailView: View {
                 Button(role: .destructive) {
                     showDeleteAgentDataConfirmation = true
                 } label: {
-                    Label("Delete Data", systemImage: "trash")
+                    Label(localized: "Delete Data", systemImage: "trash")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(theme.errorColor)
                         .padding(.horizontal, 10)

@@ -182,7 +182,7 @@ struct IntelOrchestratorConfigSheet: View {
             isPresented: $showApproval,
             titleVisibility: .visible
         ) {
-            Button("Apply Changes") { applyApprovedPlan() }
+            Button(localized: "Apply Changes") { applyApprovedPlan() }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This applies the exact plan shown below. The operation will be rejected if the current configuration changed since the plan was created.", bundle: .module)
@@ -249,7 +249,7 @@ struct IntelOrchestratorConfigSheet: View {
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundColor(theme.tertiaryText)
                     Spacer()
-                    Button("Load current") { loadCurrent() }
+                    Button(localized: "Load current") { loadCurrent() }
                         .buttonStyle(SettingsButtonStyle())
                 }
 

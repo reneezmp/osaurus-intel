@@ -173,11 +173,12 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
             return
         }
         lastStorageWarningAt[agentId] = now
-        let name = agent(for: agentId)?.name ?? "Agent"
+        let name = agent(for: agentId)?.name ?? L("Agent")
         let message = String(
-            format: "%@ has used %d%% of its database storage (%.1f / %.1f MB).",
+            format: L("%@ has used %lld%% of its database storage (%.1f / %.1f MB)."),
             name, percent, Double(usedBytes) / 1_048_576.0, Double(limitBytes) / 1_048_576.0)
-        _ = ToastManager.shared.warning("Database \(percent)% full", message: message)
+        _ = ToastManager.shared.warning(
+            String(format: L("Database %lld%% full"), percent), message: message)
     }
 
     /// Delete Data wipes the database, so the quota badge no longer applies.

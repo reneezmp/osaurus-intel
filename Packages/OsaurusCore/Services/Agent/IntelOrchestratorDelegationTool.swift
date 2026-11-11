@@ -231,10 +231,11 @@ struct IntelOrchestratorDelegationTool: OsaurusTool, PermissionedTool {
         await MainActor.run {
             let alert = NSAlert()
             alert.alertStyle = .informational
-            alert.messageText = "Allow one delegated turn?"
-            alert.informativeText = "Target: \(request.targetAgentID.uuidString)\nModel: \(request.modelID)"
-            alert.addButton(withTitle: "Allow Once")
-            alert.addButton(withTitle: "Deny")
+            alert.messageText = L("Allow one delegated turn?")
+            alert.informativeText =
+                L("Target: \(request.targetAgentID.uuidString)") + "\n" + L("Model: \(request.modelID)")
+            alert.addButton(withTitle: L("Allow Once"))
+            alert.addButton(withTitle: L("Deny"))
             alert.addButton(withTitle: "Always Allow")
             NSApp.activate(ignoringOtherApps: true)
             switch alert.runModal() {

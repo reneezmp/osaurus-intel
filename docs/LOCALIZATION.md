@@ -151,7 +151,18 @@ forms. When word order swaps two arguments, use positional specifiers
 (upstream doesn't require it either). `es` and `ja` are in `knownRegions`
 with no strings, as upstream.
 
-`check.sh`'s literal lint (raw `Text("…")`, `Button("…")`, `.help("…")` …)
-fails on Intel-own views until they are wrapped; as of 2026-11-11 that is
-56 sites (KnowledgeView, IntelNativePluginCard, AppDelegate, the
-Orchestrator sheets, …), the next part of stage 4.
+`check.sh` passes in full since 2026-11-11 (its literal lint failed on 56
+raw `Text("…")` / `Button("…")` / `Label("…")` / `.help("…")` / toast /
+alert strings in Intel-own views until they were wrapped). Brand names in
+SwiftUI use `Text(verbatim:)` so the lint and the catalog skip them.
+
+The key checker can't match two shapes, which upstream's code avoids too:
+a literal `%` next to an interpolation (`L("Database \(percent)% full")`;
+use `String(format: L("Database %lld%% full"), percent)`), and `\n` inside
+an interpolated key (split it into two `L(…)` joined with `"\n"`). Use
+`%lld` for `Int` in `String(format:)` keys.
+
+`lint-zh-style.py --check` is not part of `check.sh` (upstream's own
+catalog has 41 flags); Intel's prose was fixed, and the 7 remaining flags
+are count suffixes such as `%1$lld 个技能%2$@` where the suffix is attached
+on purpose.

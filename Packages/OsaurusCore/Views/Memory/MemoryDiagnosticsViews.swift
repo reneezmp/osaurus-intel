@@ -945,7 +945,7 @@ struct MemoryDiagnosticsTabContent: View {
                     .foregroundColor(theme.tertiaryText)
             }
             Spacer()
-            Button("Cancel") { backfillTask?.cancel() }
+            Button(localized: "Cancel") { backfillTask?.cancel() }
                 .buttonStyle(.plain)
                 .foregroundColor(theme.errorColor)
         }
@@ -1216,7 +1216,7 @@ struct MemoryDiagnosticsTabContent: View {
                         .foregroundColor(theme.tertiaryText)
                         .lineLimit(2)
                     if let shapeRange = details.range(of: "SSE shape:") {
-                        Button("Copy response shape") {
+                        Button(localized: "Copy response shape") {
                             let shape = String(details[shapeRange.lowerBound...])
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(shape, forType: .string)

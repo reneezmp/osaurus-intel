@@ -3308,3 +3308,28 @@ Not in candidate 66.
       error (not "connected" with 0 models).
 - [ ] If you use Grok sign-in: the picker offers grok-4.6 (default),
       grok-4.5, grok-4.3, grok-build-0.1 and the grok-4.20 models.
+
+## Translations (2026-11-11)
+
+`W-cov-reaudit` stage 4 (`COV_REAUDIT.md`, "Stage 4, translations";
+`LOCALIZATION.md`, "Intel fork"). Not in candidate 67. Each check needs
+the Mac's language changed in System Settings → General → Language &
+Region (move the language to the top, relaunch Osaurus), then set back.
+
+- [ ] Korean (한국어): Settings, the chat window, the Agents tab and the
+      menu bar popover are in Korean, with no English labels mixed in
+      except brand names (Osaurus, Venice, OpenRouter, Claude Code …).
+- [ ] Russian (Русский): the same screens are in Russian. Counts read
+      like "Инструментов: 3" (count after a colon).
+- [ ] Traditional Chinese (繁體中文): most screens are in Traditional
+      Chinese; a few Intel-only strings may still show in English (expected:
+      only upstream's Traditional Chinese is used).
+- [ ] Simplified Chinese (简体中文): agents are called 智能体 (not 代理) and
+      the app says 你 (not 您), e.g. Agents → "刷新智能体".
+- [ ] German: the Knowledge tab's buttons (Add Collection, Sync, Re-index,
+      Edit) and the plugin cards' menus (View Details, Uninstall …) are in
+      German now; the menu bar popover's tooltips (hover the server dot and
+      the copy button) are German.
+- [ ] German: macOS's speech-recognition permission prompt (first use of
+      voice input after a reset) is in German; in Korean or Russian it is
+      in that language.

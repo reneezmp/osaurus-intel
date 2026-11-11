@@ -1041,7 +1041,7 @@ struct IntelStatusPanelView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Open this conversation")
+            .localizedHelp("Open this conversation")
 
             Button {
                 IntelTaskBanner.shared.dismiss()
@@ -1051,7 +1051,7 @@ struct IntelStatusPanelView: View {
                     .foregroundColor(theme.tertiaryText)
             }
             .buttonStyle(.plain)
-            .help("Dismiss")
+            .localizedHelp("Dismiss")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -1102,17 +1102,17 @@ struct IntelStatusPanelView: View {
                     AppDelegate.shared?.dismissStatusPopover()
                     AppDelegate.shared?.showManagementWindow(initialTab: .server)
                 }
-                .help("Open Server settings")
+                .localizedHelp("Open Server settings")
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("Osaurus")
+                    Text(verbatim: "Osaurus")
                         .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundColor(theme.primaryText)
                     Text("v\(appVersion)")
                         .font(.system(size: 11))
                         .foregroundColor(theme.tertiaryText)
-                    Text("Intel")
+                    Text(verbatim: "Intel")
                         .font(.system(size: 9, weight: .semibold))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
@@ -1122,7 +1122,7 @@ struct IntelStatusPanelView: View {
                     Circle()
                         .fill(theme.successColor)
                         .frame(width: 8, height: 8)
-                        .help("Server running")
+                        .localizedHelp("Server running")
                 }
                 HStack(spacing: 6) {
                     Text(serverURL)
@@ -1140,7 +1140,7 @@ struct IntelStatusPanelView: View {
                             .foregroundColor(copied ? theme.successColor : theme.tertiaryText)
                     }
                     .buttonStyle(.plain)
-                    .help("Copy server URL")
+                    .localizedHelp("Copy server URL")
                 }
             }
         }
@@ -1217,7 +1217,7 @@ struct IntelStatusPanelView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold))
-                Text("Ask AI").font(.system(size: 13, weight: .semibold))
+                Text(localized: "Ask AI").font(.system(size: 13, weight: .semibold))
             }
             .foregroundColor(.white)
             .padding(.horizontal, 14)
@@ -1234,7 +1234,7 @@ struct IntelStatusPanelView: View {
             )
         }
         .buttonStyle(.plain)
-        .help("Open chat")
+        .localizedHelp("Open chat")
     }
 }
 

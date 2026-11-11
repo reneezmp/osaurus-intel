@@ -153,7 +153,7 @@ struct KnowledgeView: View {
                 },
                 onReindex: {
                     integration.reindexCollection(collection.id)
-                    showToast("Re-indexing \"\(collection.name)\"")
+                    showToast(L("Re-indexing \"\(collection.name)\""))
                 },
                 onEdit: {
                     selectedCollection = nil
@@ -203,7 +203,7 @@ struct KnowledgeView: View {
             }
 
             Button(action: beginCreate) {
-                Label("Add Collection", systemImage: "plus")
+                Label(localized: "Add Collection", systemImage: "plus")
             }
             .buttonStyle(.plain)
             .foregroundColor(.white)
@@ -460,7 +460,7 @@ struct KnowledgeView: View {
                         },
                         onReindex: {
                             integration.reindexCollection(collection.id)
-                            showToast("Re-indexing \"\(collection.name)\"")
+                            showToast(L("Re-indexing \"\(collection.name)\""))
                         },
                         onSync: { syncCollection(collection.id) },
                         onEdit: { editingCollection = collection },
@@ -477,7 +477,7 @@ struct KnowledgeView: View {
     private func presentDeleteConfirmation(for collection: KnowledgeUICollection) {
         KnowledgeDeleteConfirmation.present(collectionName: collection.name) {
             integration.deleteCollection(collection.id)
-            showToast("Deleted \"\(collection.name)\"")
+            showToast(L("Deleted \"\(collection.name)\""))
         }
     }
 
@@ -514,7 +514,7 @@ struct KnowledgeView: View {
                 }
                 createPrefillName = ""
                 createGrantProjectId = nil
-                showToast("Added \"\(name)\", indexing in the background")
+                showToast(L("Added \"\(name)\", indexing in the background"))
                 grantingCollection = KnowledgeGrantTarget(id: collectionId, name: name)
             } catch {
                 showToast(error.localizedDescription, isError: true)
@@ -535,7 +535,7 @@ struct KnowledgeView: View {
                 id, name: name, summary: summary, folderPath: folderPath,
                 includeGlobs: includeGlobs, excludeGlobs: excludeGlobs)
             editingCollection = nil
-            showToast("Saved \"\(name)\"")
+            showToast(L("Saved \"\(name)\""))
         } catch {
             showToast(error.localizedDescription, isError: true)
         }
@@ -733,7 +733,7 @@ private struct KnowledgeCollectionCard: View {
                 !$0.isBuiltIn && agentManager.knowledgeCollectionIds(for: $0.id).contains(collection.id)
             }
             if grantedAgents.isEmpty {
-                Label("No agents with access", systemImage: "person.2.slash")
+                Label(localized: "No agents with access", systemImage: "person.2.slash")
                     .font(.system(size: 10))
                     .foregroundColor(theme.tertiaryText)
             } else {
@@ -810,11 +810,11 @@ private struct KnowledgeCollectionCard: View {
                     Label(collection.statusMessage ?? "Not indexed yet", systemImage: "clock")
                 }
                 if collection.isIndexing {
-                    Label("Indexing…", systemImage: "arrow.triangle.2.circlepath")
+                    Label(localized: "Indexing…", systemImage: "arrow.triangle.2.circlepath")
                         .foregroundColor(theme.accentColor)
                 }
                 if collection.gitRemoteURL != nil {
-                    Label("Git", systemImage: "arrow.triangle.branch")
+                    Label(localized: "Git", systemImage: "arrow.triangle.branch")
                 }
                 Spacer()
             }
@@ -834,16 +834,16 @@ private struct KnowledgeCollectionCard: View {
                 if collection.gitRemoteURL != nil {
                     // Upstream: fast-forward pull + push for a git repo folder.
                     Button(action: onSync) {
-                        Label("Sync", systemImage: "arrow.triangle.2.circlepath.circle")
+                        Label(localized: "Sync", systemImage: "arrow.triangle.2.circlepath.circle")
                     }
                     .buttonStyle(.borderless)
                 }
                 Button(action: onReindex) {
-                    Label("Re-index", systemImage: "arrow.clockwise")
+                    Label(localized: "Re-index", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderless)
                 Button(action: onEdit) {
-                    Label("Edit", systemImage: "pencil")
+                    Label(localized: "Edit", systemImage: "pencil")
                 }
                 .buttonStyle(.borderless)
                 Button(role: .destructive, action: onDelete) {
@@ -1029,7 +1029,7 @@ private struct KnowledgeCollectionEditorSheet: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Choose"
+        panel.prompt = L("Choose")
         if panel.runModal() == .OK, let url = panel.url {
             folderPath = url.path
             if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1323,7 +1323,7 @@ private struct KnowledgeCollectionDetailSheet: View {
                     .textSelection(.enabled)
             } icon: { Image(systemName: "folder.fill") }
             .foregroundColor(theme.secondaryText)
-            Text("Created \(live.createdAt.formatted(date: .abbreviated, time: .shortened)) · Updated \(live.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+            Text(localized: "Created \(live.createdAt.formatted(date: .abbreviated, time: .shortened)) · Updated \(live.updatedAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.system(size: 11))
                 .foregroundColor(theme.tertiaryText)
         }

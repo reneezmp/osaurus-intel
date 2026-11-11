@@ -39,13 +39,13 @@ struct NativePluginCard: View {
                         if hasUpdate {
                             HStack(spacing: 3) {
                                 Image(systemName: "arrow.up.circle.fill").font(.caption2)
-                                Text("Update").font(.caption2.weight(.medium))
+                                Text(localized: "Update").font(.caption2.weight(.medium))
                             }
                             .foregroundColor(.orange)
                         } else {
                             HStack(spacing: 3) {
                                 Image(systemName: "checkmark.circle.fill").font(.caption2)
-                                Text("Loaded").font(.caption2.weight(.medium))
+                                Text(localized: "Loaded").font(.caption2.weight(.medium))
                             }
                             .foregroundColor(theme.successColor)
                         }
@@ -57,21 +57,21 @@ struct NativePluginCard: View {
                 Spacer()
 
                 Menu {
-                    Button { onSelect() } label: { Label("View Details", systemImage: "info.circle") }
+                    Button { onSelect() } label: { Label(localized: "View Details", systemImage: "info.circle") }
                     if hasUpdate, let onUpgrade {
                         Button {
                             Task { try? await onUpgrade() }
-                        } label: { Label("Update", systemImage: "arrow.up.circle.fill") }
+                        } label: { Label(localized: "Update", systemImage: "arrow.up.circle.fill") }
                     }
                     if isConfigurable {
-                        Button { onOpenSettings() } label: { Label("Settings", systemImage: "gearshape") }
+                        Button { onOpenSettings() } label: { Label(localized: "Settings", systemImage: "gearshape") }
                     }
-                    Button { revealInFinder() } label: { Label("Reveal in Finder", systemImage: "folder") }
+                    Button { revealInFinder() } label: { Label(localized: "Reveal in Finder", systemImage: "folder") }
                     if let onUninstall {
                         Divider()
                         Button(role: .destructive) {
                             onUninstall()
-                        } label: { Label("Uninstall", systemImage: "trash") }
+                        } label: { Label(localized: "Uninstall", systemImage: "trash") }
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -89,7 +89,7 @@ struct NativePluginCard: View {
                 Label("\(plugin.toolNames.count)", systemImage: "wrench.and.screwdriver")
                     .font(.caption).foregroundColor(theme.secondaryText)
                 if isConfigurable {
-                    Label("Settings", systemImage: "gearshape")
+                    Label(localized: "Settings", systemImage: "gearshape")
                         .font(.caption).foregroundColor(theme.secondaryText)
                 }
             }
@@ -144,7 +144,7 @@ struct IntelNativePluginDetailView: View {
                 Button(action: onBack) {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
-                        Text("Plugins")
+                        Text(localized: "Plugins")
                     }
                     .foregroundColor(theme.accentColor)
                 }
@@ -156,7 +156,7 @@ struct IntelNativePluginDetailView: View {
                             .foregroundColor(.red)
                     }
                     .buttonStyle(.plain)
-                    .help("Uninstall plugin")
+                    .localizedHelp("Uninstall plugin")
                 }
             }
             .padding(.horizontal, 24)
@@ -186,7 +186,7 @@ struct IntelNativePluginDetailView: View {
 
                     // Tools
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Tools (\(tools.count))")
+                        Text(localized: "Tools (\(tools.count))")
                             .font(.headline).foregroundColor(theme.primaryText)
                         ForEach(tools, id: \.id) { tool in
                             VStack(alignment: .leading, spacing: 3) {
@@ -207,7 +207,7 @@ struct IntelNativePluginDetailView: View {
 
                     if !secrets.isEmpty {
                         Button(action: onOpenSettings) {
-                            Label("Settings (\(secrets.count))", systemImage: "gearshape")
+                            Label(localized: "Settings (\(secrets.count))", systemImage: "gearshape")
                                 .foregroundColor(theme.accentColor)
                         }
                         .buttonStyle(.plain)

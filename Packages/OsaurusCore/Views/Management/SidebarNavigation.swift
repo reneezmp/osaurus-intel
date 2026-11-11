@@ -552,7 +552,7 @@ struct SidebarCollapsibleSectionHeader: View {
         .padding(.bottom, 4)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
-        .accessibilityValue(isExpanded ? Text("Shown") : Text("Hidden"))
+        .accessibilityValue(isExpanded ? Text(localized: "Shown") : Text(localized: "Hidden"))
     }
 }
 

@@ -426,10 +426,10 @@ struct EpisodeRow: View {
             if !episode.decisions.isEmpty || !episode.actionItems.isEmpty {
                 VStack(alignment: .leading, spacing: 3) {
                     if !episode.decisions.isEmpty {
-                        Text("Decisions: \(episode.decisions)")
+                        Text(localized: "Decisions: \(episode.decisions)")
                     }
                     if !episode.actionItems.isEmpty {
-                        Text("Actions: \(episode.actionItems)")
+                        Text(localized: "Actions: \(episode.actionItems)")
                     }
                 }
                 .font(.system(size: 10))

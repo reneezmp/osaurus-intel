@@ -194,11 +194,11 @@ struct OrchestratorSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack {
-                    Label("Gate 5 · bounded Intel scope", systemImage: "lock.shield")
+                    Label(localized: "Gate 5 · bounded Intel scope", systemImage: "lock.shield")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(theme.tertiaryText)
                     Spacer()
-                    Button("Open Configuration…") {
+                    Button(localized: "Open Configuration…") {
                         showDeclarativeConfigurationSheet = true
                     }
                     .buttonStyle(SettingsButtonStyle())

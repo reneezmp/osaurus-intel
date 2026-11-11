@@ -43,7 +43,7 @@ public struct AppleSiliconOnlyOverlay: View {
                         .foregroundStyle(.tertiary)
 
                     if let onDismiss {
-                        Button("Dismiss") { onDismiss() }
+                        Button(localized: "Dismiss") { onDismiss() }
                             .buttonStyle(.plain)
                             .font(.caption)
                             .foregroundStyle(.tint)

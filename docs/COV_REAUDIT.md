@@ -364,9 +364,14 @@ now that Intel has both. Stage 6 re-reads them.
    `LCached`), the SettingsKit label check, `lint-zh-style.py`,
    `export-untranslated.py`, `apply-ko.py`, and the non-blocking
    untranslated-strings report in CI (0 referenced keys fall back to
-   English now). **4b next:** the literal lint's 56 raw `Text` /
+   English now). **4b done 2026-11-11:** the literal lint's 56 raw `Text` /
    `Button` / `Label` / `.help` / toast / alert strings in Intel-own views
-   (failing before 4a too), wrapped and translated.
+   (failing before 4a too) are wrapped as upstream does (`Text(localized:)`,
+   `Label(localized:)`, `Button(localized:)`, `.localizedHelp`, `L()`;
+   brand names `Text(verbatim:)`), the NSAlert buttons of the Orchestrator
+   delegation prompt too; 23 new keys in de / zh-Hans / ko / ru. `check.sh`
+   passes in full for the first time; 0 of 2,498 referenced keys fall back
+   to English in a required locale. Stage 4 complete; stage 5 next.
 5. **Stage 5, behaviour audit of the `COV-intel-own` files** (the item's
    original scope): commits since the fork are covered by stages 1–4; this
    compares behaviour Intel's replacements never had at all, starting with

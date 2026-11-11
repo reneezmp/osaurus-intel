@@ -205,9 +205,9 @@ struct OrchestratorDelegationSettings: View {
     private func permissionMenu(for agent: Agent) -> some View {
         let binding = permissionBinding(for: agent.id)
         return Menu {
-            Button("Ask") { binding.wrappedValue = .ask }
-            Button("Deny") { binding.wrappedValue = .deny }
-            Button("Always Allow") { binding.wrappedValue = .alwaysAllow }
+            Button(localized: "Ask") { binding.wrappedValue = .ask }
+            Button(localized: "Deny") { binding.wrappedValue = .deny }
+            Button(localized: "Always Allow") { binding.wrappedValue = .alwaysAllow }
         } label: {
             HStack(spacing: 8) {
                 Text(permissionTitle(binding.wrappedValue))
@@ -507,7 +507,7 @@ struct OrchestratorDelegationSheet: View {
             isPresented: $showApproval,
             titleVisibility: .visible
         ) {
-            Button("Allow Once") {
+            Button(localized: "Allow Once") {
                 guard let approvalScope else { return }
                 beginRun(approval: .approved(approvalScope))
             }

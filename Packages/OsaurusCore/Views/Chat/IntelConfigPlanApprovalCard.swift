@@ -109,12 +109,12 @@ struct IntelConfigPlanApprovalCard: View {
 
             HStack {
                 Spacer()
-                Button("Cancel") {
+                Button(localized: "Cancel") {
                     queue.resolve(id: request.id, outcome: .denied)
                 }
                 .buttonStyle(ThemedBorderedButtonStyle())
                 .keyboardShortcut(.cancelAction)
-                Button("Apply") {
+                Button(localized: "Apply") {
                     queue.resolve(id: request.id, outcome: .approved)
                 }
                 .buttonStyle(ThemedBorderedButtonStyle(prominent: true))

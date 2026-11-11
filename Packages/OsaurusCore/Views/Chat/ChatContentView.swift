@@ -418,7 +418,7 @@ struct ChatContentView: View {
                         } else {
                             VStack(spacing: 16) {
                                 ProgressView().scaleEffect(0.8)
-                                Text("Discovering models…").font(theme.font(size: 13)).foregroundStyle(theme.secondaryText)
+                                Text(localized: "Discovering models…").font(theme.font(size: 13)).foregroundStyle(theme.secondaryText)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .transition(.opacity)
