@@ -58,6 +58,10 @@ struct ChatSettingsView: View {
     private var cmdNStartsNewChatInCurrentWindow: Bool = true
     @AppStorage(ComposerSpellCheckSetting.defaultsKey)
     private var composerSpellCheckEnabled: Bool = ComposerSpellCheckSetting.defaultValue
+    /// Turn large pastes into an attachment chip instead of composer text
+    /// (upstream #3276).
+    @AppStorage(ComposerPasteCollapseSetting.defaultsKey)
+    private var collapseLongPastes: Bool = ComposerPasteCollapseSetting.defaultValue
     /// Upstream smooth streaming: pace the visible reveal at ~180 tok/s
     /// however bursty the network is. Read per delta by
     /// `StreamingDeltaProcessor`.
@@ -183,6 +187,14 @@ struct ChatSettingsView: View {
                     "Offer text you've just copied in any app as context, and grab the current selection when you summon Osaurus.",
                 anchorId: "settings.chat.clipboard",
                 isOn: $tempEnableClipboardMonitoring
+            )
+
+            SettingsToggle(
+                title: L("Collapse Long Pastes"),
+                description:
+                    "Turn long pasted text into a compact attachment instead of filling the message box. Turn off if a dictation or automation tool needs the pasted text to stay in the field.",
+                anchorId: "settings.chat.collapseLongPastes",
+                isOn: $collapseLongPastes
             )
 
             SettingsToggle(

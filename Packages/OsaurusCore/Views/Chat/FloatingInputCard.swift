@@ -85,6 +85,10 @@ struct FloatingInputCard: View {
     @ObservedObject private var recentFolders = RecentFoldersStore.shared
     @AppStorage(ComposerSpellCheckSetting.defaultsKey)
     private var spellCheckEnabled: Bool = ComposerSpellCheckSetting.defaultValue
+    /// Settings ▸ Chat ▸ Collapse Long Pastes. When off, pastes of any size go
+    /// straight into the composer as text. (Upstream #3276.)
+    @AppStorage(ComposerPasteCollapseSetting.defaultsKey)
+    private var collapseLongPastes: Bool = ComposerPasteCollapseSetting.defaultValue
     /// Fired on every keystroke with the composer's current text, so the
     /// session can keep a draft mirror for stash/restore across chat and
     /// agent switches without re-rendering per key (upstream 65cbb73e0).
@@ -2743,7 +2747,7 @@ extension FloatingInputCard {
                 switch content {
                 case .text(let text):
                     Button {
-                        if text.utf8.count >= Self.pastedContentThreshold {
+                        if collapseLongPastes, text.utf8.count >= Self.pastedContentThreshold {
                             withAnimation(theme.springAnimation()) {
                                 pendingAttachments.append(.pastedContent(text))
                             }
@@ -2812,7 +2816,7 @@ extension FloatingInputCard {
 
         switch content {
         case .text(let text):
-            if text.utf8.count >= Self.pastedContentThreshold {
+            if collapseLongPastes, text.utf8.count >= Self.pastedContentThreshold {
                 // Large paste → convert to a "pasted content" attachment.
                 // Lets the user view / remove the snippet without polluting
                 // the input field with hundreds of lines of text.
@@ -3572,7 +3576,9 @@ extension FloatingInputCard {
             onArrowDown: { handleInputArrowDown() },
             onEscape: (showSlashPopup || showAtPopup) ? { handlePopupEscape() } : nil,
             onPasteText: { pasted in
-                guard pasted.utf8.count >= Self.pastedContentThreshold else { return false }
+                // Off in Settings ▸ Chat ▸ Collapse Long Pastes: return false so the
+                // text view inserts the paste as plain text (upstream #3276).
+                guard collapseLongPastes, pasted.utf8.count >= Self.pastedContentThreshold else { return false }
                 withAnimation(theme.springAnimation()) {
                     pendingAttachments.append(.pastedContent(pasted))
                 }

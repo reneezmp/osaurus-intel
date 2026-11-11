@@ -107,6 +107,7 @@ struct SettingsSearchIndexTests {
     @Test("Search ranks title hits first and needs every word")
     func searchRanking() {
         #expect(SettingsSearchIndex.search("spelling").first?.id == "settings.chat.spellCheck")
+        #expect(SettingsSearchIndex.search("collapse long pastes").first?.id == "settings.chat.collapseLongPastes")
         #expect(SettingsSearchIndex.search("hotkey").first?.id == "settings.general.hotkey")
         #expect(SettingsSearchIndex.search("clipboard monitoring").first?.id == "settings.chat.clipboard")
         #expect(SettingsSearchIndex.search("recovery phrase").contains { $0.id == "identity.recovery" })
