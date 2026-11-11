@@ -53,6 +53,9 @@ struct IntelRetainedRunTabsTests {
                 first.registerTaskForTesting(state)
                 first.dehydrateTaskForTesting(state.id)
                 #expect(first.isTaskDehydratedForTesting(state.id))
+                // Retained tabs are written off the main thread (#3351); quit
+                // flushes them, so the simulated relaunch does too.
+                #expect(first.flushRetainedTabWrites())
 
                 // A fresh manager simulates the next launch: metadata only.
                 let relaunched = BackgroundTaskManager.makeForTestingRetaining(defaults: defaults)
@@ -65,6 +68,7 @@ struct IntelRetainedRunTabsTests {
 
                 // Closing its tab dismisses it for good.
                 relaunched.finalizeTask(state.id)
+                #expect(relaunched.flushRetainedTabWrites())
                 let third = BackgroundTaskManager.makeForTestingRetaining(defaults: defaults)
                 #expect(third.taskState(for: state.id) == nil)
             }
@@ -81,6 +85,7 @@ struct IntelRetainedRunTabsTests {
                 let done = makeRegistryTask(title: "Done", status: .cancelled)
                 for task in [running, headless, done] { first.registerTaskForTesting(task) }
                 first.dehydrateTaskForTesting(done.id)
+                #expect(first.flushRetainedTabWrites())
 
                 let relaunched = BackgroundTaskManager.makeForTestingRetaining(defaults: defaults)
                 #expect(relaunched.taskState(for: running.id) == nil)
