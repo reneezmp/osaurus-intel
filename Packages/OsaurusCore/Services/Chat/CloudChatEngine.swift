@@ -928,12 +928,49 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// default its picker already shows: Codex only streams a reasoning
     /// summary (the chat's "Thinking") when a `reasoning` object is sent, so a
     /// fresh model such as GPT-6 otherwise answers with no Thinking at all.
+    /// Whether `none` must reach the wire: the official OpenAI API takes it as
+    /// a real effort on models whose table has it (upstream #3229).
+    private static func officialOpenAIAcceptsNone(
+        endpoint: ResolvedEndpoint, options: [String: ModelOptionValue]?
+    ) -> Bool {
+        guard endpoint.provider?.providerType == .openResponses,
+            (URL(string: endpoint.url)?.host ?? "").lowercased().contains("openai.com")
+        else { return false }
+        return ModelPickerItem.officialOpenAIAcceptsNoneEffort(modelId: endpoint.modelId)
+    }
+
+    /// Whether a Responses request should ask for `reasoning.summary` when no
+    /// effort was picked (upstream #3229): ChatGPT/Codex and the official API's
+    /// reasoning families, never custom hosts, and not when the user turned
+    /// reasoning off.
+    private static func requestsReasoningSummary(
+        providerType: RemoteProviderType?, isCodex: Bool, host: String, model: String,
+        options: [String: ModelOptionValue]?
+    ) -> Bool {
+        if options?["disableThinking"]?.boolValue == true { return false }
+        if let raw = options?["reasoningEffort"]?.stringValue,
+            ["off", "disabled", "false", "none"].contains(
+                raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        {
+            return false
+        }
+        if isCodex { return OpenAIReasoningProfile.matches(modelId: model) }
+        guard providerType == .openResponses else { return false }
+        let normalizedHost = host.lowercased()
+        return (normalizedHost == "api.openai.com" || normalizedHost.hasSuffix(".openai.com"))
+            && OpenAIReasoningProfile.matches(modelId: model)
+            && !model.lowercased().contains("-chat")
+    }
+
     static func codexReasoningEffort(
         modelId: String,
-        options: [String: ModelOptionValue]?
+        options: [String: ModelOptionValue]?,
+        officialOpenAIAcceptsNone: Bool = false
     ) -> String? {
         if let raw = options?["reasoningEffort"]?.stringValue {
             let effort = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            // The official API's `none` is a real effort on some models.
+            if effort == "none", officialOpenAIAcceptsNone { return "none" }
             guard !effort.isEmpty, !["off", "disabled", "false", "none"].contains(effort) else {
                 return nil
             }
@@ -1340,9 +1377,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         }
                         if endpoint.usesResponsesWire {
                             if let effort = Self.codexReasoningEffort(
-                                modelId: endpoint.modelId, options: request.modelOptions)
+                                modelId: endpoint.modelId, options: request.modelOptions,
+                                officialOpenAIAcceptsNone: Self.officialOpenAIAcceptsNone(
+                                    endpoint: endpoint, options: request.modelOptions))
                             {
                                 body["reasoning_effort"] = effort
+                            } else if Self.requestsReasoningSummary(
+                                providerType: endpoint.provider?.providerType,
+                                isCodex: endpoint.isCodex,
+                                host: URL(string: endpoint.url)?.host ?? "", model: endpoint.modelId,
+                                options: request.modelOptions)
+                            {
+                                // No effort picked: still ask for summaries so
+                                // the Think panel has text at the model's own
+                                // default effort (upstream #3229).
+                                body["reasoning"] = ["summary": "auto"]
                             }
                             body = try IntelCodexResponsesAdapter.makeRequest(
                                 chatCompletions: body,
@@ -1393,7 +1442,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             Self.applyVeniceParameters(
                                 request.modelOptions, host: URL(string: endpoint.url)?.host ?? "", into: &body)
                             if endpoint.usesAnthropicWire {
-                                body = try IntelAnthropicMessagesAdapter.makeRequest(chatCompletions: body)
+                                // The Models API contract decides thinking and
+                                // effort; read the raw picker value, since the
+                                // generic translation drops the Off id (#3229).
+                                let anthropicCapabilities = endpoint.provider.flatMap {
+                                    AnthropicModelCatalog.info(providerId: $0.id, modelId: endpoint.modelId)?
+                                        .capabilities
+                                }
+                                let offRequested =
+                                    request.modelOptions?["disableThinking"]?.boolValue == true
+                                body = try IntelAnthropicMessagesAdapter.makeRequest(
+                                    chatCompletions: body,
+                                    capabilities: anthropicCapabilities,
+                                    effort: offRequested
+                                        ? AnthropicReasoningContract.offLevelId
+                                        : request.modelOptions?["reasoningEffort"]?.stringValue)
                             } else if endpoint.usesGeminiWire {
                                 body = try IntelGeminiAdapter.makeRequest(chatCompletions: body)
                             }

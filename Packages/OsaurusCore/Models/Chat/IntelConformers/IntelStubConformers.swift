@@ -160,6 +160,37 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     /// `context_window`, then DeepInfra's nested `metadata.context_length`
     /// (upstream #3068). Ints, finite doubles and numeric strings count; a
     /// non-object `metadata` just means no window.
+    /// All pages of Anthropic's `/v1/models` (`has_more` / `last_id` ->
+    /// `after_id`), decoded leniently so a malformed capability object only
+    /// drops that metadata. The first page is the response already fetched.
+    nonisolated static func fetchAnthropicModelInfos(
+        firstPage: Data, url: URL, headers: [String: String]
+    ) async -> [AnthropicModelInfo] {
+        var all: [AnthropicModelInfo] = []
+        var page = try? JSONDecoder().decode(AnthropicModelsResponse.self, from: firstPage)
+        var pages = 0
+        while let current = page, pages < 20 {
+            all.append(contentsOf: current.data)
+            pages += 1
+            guard current.has_more, let lastId = current.last_id,
+                var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            else { break }
+            var items = (components.queryItems ?? []).filter { $0.name != "after_id" }
+            items.append(URLQueryItem(name: "after_id", value: lastId))
+            components.queryItems = items
+            guard let next = components.url else { break }
+            var req = URLRequest(url: next)
+            req.httpMethod = "GET"
+            req.timeoutInterval = 20
+            for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+            guard let (data, response) = try? await GlobalProxySettings.makeSession().data(for: req),
+                (response as? HTTPURLResponse).map({ (200...299).contains($0.statusCode) }) == true
+            else { break }
+            page = try? JSONDecoder().decode(AnthropicModelsResponse.self, from: data)
+        }
+        return all
+    }
+
     nonisolated static func advertisedContextLength(in entry: [String: Any]) -> Int? {
         let metadata = entry["metadata"] as? [String: Any]
         let candidates = [
@@ -407,6 +438,17 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
             return ([], [:])
         }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], [:]) }
+        if provider.providerType == .anthropic, json["data"] is [[String: Any]] {
+            // Anthropic's Models API publishes per-model thinking/effort
+            // capabilities and `max_input_tokens`; keep both for the picker
+            // and the request builder (upstream #3229).
+            let infos = await Self.fetchAnthropicModelInfos(
+                firstPage: data, url: url, headers: headers)
+            if !infos.isEmpty {
+                AnthropicModelCatalog.replace(providerId: provider.id, models: infos)
+                return (infos.map(\.id).sorted(), AnthropicModelCatalog.contextLengths(of: infos))
+            }
+        }
         if let arr = json["data"] as? [[String: Any]] {
             var ids: [String] = []
             var lengths: [String: Int] = [:]

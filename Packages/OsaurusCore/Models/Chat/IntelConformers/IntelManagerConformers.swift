@@ -1264,7 +1264,12 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
                         )
                     } else {
                         let capabilities: ModelReasoningCapabilities?
-                        if provider.providerType == .openAICodex {
+                        let anthropicInfo =
+                            provider.providerType == .anthropic
+                            ? AnthropicModelCatalog.info(providerId: provider.id, modelId: modelId) : nil
+                        if provider.providerType == .anthropic {
+                            capabilities = AnthropicReasoningContract.capabilities(from: anthropicInfo?.capabilities)
+                        } else if provider.providerType == .openAICodex {
                             capabilities = codexMetadata[modelId].flatMap(ModelReasoningCapabilities.init(codex:))
                         } else if provider.providerType == .openResponses,
                             provider.host.lowercased() == "api.openai.com"
@@ -1284,7 +1289,7 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
                                 displayName: modelId,
                                 source: .remote(providerName: provider.name, providerId: provider.id),
                                 isVLM: false,
-                                description: provider.name,
+                                description: anthropicInfo?.isDeprecated == true ? "Deprecated" : provider.name,
                                 contextLength: manager.customProviderContextLength(
                                     providerId: provider.id, modelId: modelId
                                 ) ?? ModelPickerItem.knownProviderContextWindow(

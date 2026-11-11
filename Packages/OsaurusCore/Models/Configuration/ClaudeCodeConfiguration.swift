@@ -35,6 +35,7 @@ public enum ClaudeCodeMode: String, Codable, Sendable, CaseIterable {
 public enum ClaudeCodeModel: String, CaseIterable, Sendable {
     case sonnet
     case opus
+    case fable
     case haiku
 
     /// Routing id surfaced to the model picker and matched by
@@ -45,6 +46,7 @@ public enum ClaudeCodeModel: String, CaseIterable, Sendable {
         switch self {
         case .sonnet: return "Claude Code (Sonnet)"
         case .opus: return "Claude Code (Opus)"
+        case .fable: return "Claude Code (Fable)"
         case .haiku: return "Claude Code (Haiku)"
         }
     }
@@ -85,6 +87,26 @@ public enum ClaudeCodeError: LocalizedError, Sendable, Equatable {
             return String(format: L("Claude Code exited with code %d: %@"), Int(code), tail)
         case .rateLimited(let detail):
             return String(format: L("Claude Code hit a subscription rate limit: %@"), detail)
+        }
+    }
+}
+
+/// `--effort` levels. Unset leaves the CLI on its own per-model default; a
+/// level the selected model doesn't support is the CLI's call to downgrade.
+public enum ClaudeCodeEffort: String, CaseIterable, Sendable {
+    case low
+    case medium
+    case high
+    case xhigh
+    case max
+
+    public var displayName: String {
+        switch self {
+        case .low: return L("Low")
+        case .medium: return L("Medium")
+        case .high: return L("High")
+        case .xhigh: return L("Extra High")
+        case .max: return L("Max")
         }
     }
 }
@@ -435,7 +457,8 @@ public enum ClaudeCodeConfiguration {
         allowedTools: [String],
         systemPrompt: String?,
         mcpConfigPath: String? = nil,
-        disallowedTools: [String] = []
+        disallowedTools: [String] = [],
+        effort: ClaudeCodeEffort? = nil
     ) -> [String] {
         var args = [
             "--print",
@@ -474,6 +497,14 @@ public enum ClaudeCodeConfiguration {
                 args += ["--mcp-config", mcpConfigPath]
             }
         }
+
+        if let effort {
+            args += ["--effort", effort.rawValue]
+        }
+        // Non-interactive runs ignore the `showThinkingSummaries` setting and
+        // stream empty thinking deltas; only the explicit flag requests
+        // summaries, so the reasoning panel has text to show (#3229).
+        args += ["--thinking-display", "summarized"]
 
         if let systemPrompt, !systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             args += ["--append-system-prompt", systemPrompt]

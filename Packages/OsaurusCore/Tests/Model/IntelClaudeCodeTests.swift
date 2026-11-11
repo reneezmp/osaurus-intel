@@ -87,6 +87,30 @@ struct IntelClaudeCodeTests {
         #expect(!textOnly.contains("--disallowedTools"))
     }
 
+    @Test func effortAndThinkingSummariesAreRequested() throws {
+        for mode in [ClaudeCodeMode.agent, .textOnly] {
+            let args = ClaudeCodeConfiguration.arguments(
+                model: .fable, mode: mode, allowedTools: [], systemPrompt: nil, effort: .xhigh)
+            let effort = try #require(args.firstIndex(of: "--effort"))
+            #expect(args[effort + 1] == "xhigh")
+            let display = try #require(args.firstIndex(of: "--thinking-display"))
+            #expect(args[display + 1] == "summarized")
+        }
+        let plain = ClaudeCodeConfiguration.arguments(
+            model: .sonnet, mode: .agent, allowedTools: [], systemPrompt: nil)
+        #expect(!plain.contains("--effort"))
+        #expect(ClaudeCodeModel.fromPickerId("claude-code/fable") == .fable)
+    }
+
+    @Test func effortSurvivesAgentRoundTripAndOldAgentsDecode() throws {
+        let config = ClaudeCodeAgentConfig(effort: " Max ")
+        let decoded = try JSONDecoder().decode(ClaudeCodeAgentConfig.self, from: JSONEncoder().encode(config))
+        #expect(decoded.resolvedEffort == .max)
+        let legacy = try JSONDecoder().decode(ClaudeCodeAgentConfig.self, from: Data(#"{"allowShell":true}"#.utf8))
+        #expect(legacy.resolvedEffort == nil)
+        #expect(ClaudeCodeAgentConfig(effort: "turbo").resolvedEffort == nil)
+    }
+
     @Test func refusalMessagesNameTheSettingToChange() {
         #expect(ClaudeCodeConfiguration.permissionDeniedMessage(tool: "Monitor").contains("Allow shell commands"))
         #expect(ClaudeCodeConfiguration.permissionDeniedMessage(tool: "Write").contains("Allow file changes"))

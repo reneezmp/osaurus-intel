@@ -132,4 +132,73 @@ struct IntelAnthropicMessagesAdapterTests {
             _ = try translator.translate(#"data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#)
         }
     }
+
+    // MARK: - Reasoning from the Models API contract (upstream #3229)
+
+    private func adaptive(disabled: Bool = true) -> AnthropicModelCapabilities {
+        AnthropicModelCapabilities(
+            thinking: .init(
+                supported: true,
+                types: .init(
+                    adaptive: .init(supported: true), enabled: .init(supported: false),
+                    disabled: .init(supported: disabled))),
+            effort: .init(
+                supported: true, low: .init(supported: true), medium: .init(supported: true),
+                high: .init(supported: true)))
+    }
+
+    private var manualOnly: AnthropicModelCapabilities {
+        AnthropicModelCapabilities(
+            thinking: .init(
+                supported: true,
+                types: .init(
+                    adaptive: .init(supported: false), enabled: .init(supported: true),
+                    disabled: .init(supported: true))),
+            effort: nil)
+    }
+
+    private let base: [String: Any] = [
+        "model": "claude-opus-5-5", "stream": true, "temperature": 0.4,
+        "messages": [["role": "user", "content": "hi"]],
+    ]
+
+    @Test func adaptiveModelsGetSummarizedThinkingAndThePickedEffort() throws {
+        let out = try IntelAnthropicMessagesAdapter.makeRequest(
+            chatCompletions: base, capabilities: adaptive(), effort: "high")
+        let thinking = try #require(out["thinking"] as? [String: Any])
+        #expect(thinking["type"] as? String == "adaptive")
+        #expect(thinking["display"] as? String == "summarized")
+        #expect((out["output_config"] as? [String: Any])?["effort"] as? String == "high")
+        #expect(out["temperature"] == nil)
+        let off = try IntelAnthropicMessagesAdapter.makeRequest(
+            chatCompletions: base, capabilities: adaptive(), effort: "none")
+        #expect((off["thinking"] as? [String: Any])?["type"] as? String == "disabled")
+        #expect(off["output_config"] == nil)
+    }
+
+    @Test func uncataloguedModelsSendNoThinking() throws {
+        let out = try IntelAnthropicMessagesAdapter.makeRequest(chatCompletions: base, effort: "high")
+        #expect(out["thinking"] == nil)
+        #expect(out["output_config"] == nil)
+    }
+
+    @Test func manualThinkingSendsABudgetAndDowngradesForcedToolChoice() throws {
+        var body = base
+        body["model"] = "claude-sonnet-4-5"
+        body["tool_choice"] = "required"
+        body["tools"] = [["type": "function", "function": ["name": "t", "parameters": ["type": "object"]]]]
+        body["max_tokens"] = 20_000
+        let out = try IntelAnthropicMessagesAdapter.makeRequest(
+            chatCompletions: body, capabilities: manualOnly, effort: "medium")
+        let thinking = try #require(out["thinking"] as? [String: Any])
+        #expect(thinking["type"] as? String == "enabled")
+        #expect(thinking["budget_tokens"] as? Int == 8192)
+        #expect((out["tool_choice"] as? [String: Any])?["type"] as? String == "auto")
+        #expect(out["temperature"] == nil, "thinking drops the sampler knobs")
+        // Thinking off on a model that accepts the knobs keeps them.
+        let offOut = try IntelAnthropicMessagesAdapter.makeRequest(
+            chatCompletions: base, capabilities: manualOnly, effort: "none")
+        #expect(offOut["thinking"] == nil)
+        #expect(offOut["temperature"] as? Double == 0.4)
+    }
 }

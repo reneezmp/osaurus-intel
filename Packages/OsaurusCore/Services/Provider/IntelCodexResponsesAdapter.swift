@@ -148,8 +148,14 @@ enum IntelCodexResponsesAdapter {
         if let reasoning = chatCompletions["reasoning"] {
             guard let reasoning = reasoning as? [String: Any] else { throw Error.invalidInput("reasoning must be an object") }
             try validateKeys(reasoning, allowed: ["effort", "summary", "context"], path: "reasoning")
-            guard let effort = nonEmptyString(reasoning["effort"]) else { throw Error.invalidInput("reasoning.effort must be a non-empty string") }
-            var codexReasoning: [String: Any] = ["effort": effort]
+            // A summary-only config leaves the effort to the model's default
+            // (upstream #3229).
+            let summaryOnly = reasoning["effort"] == nil && reasoning["summary"] != nil
+            var codexReasoning: [String: Any] = [:]
+            if !summaryOnly {
+                guard let effort = nonEmptyString(reasoning["effort"]) else { throw Error.invalidInput("reasoning.effort must be a non-empty string") }
+                codexReasoning["effort"] = effort
+            }
             if let summary = reasoning["summary"] {
                 guard let summary = nonEmptyString(summary) else { throw Error.invalidInput("reasoning.summary must be a non-empty string") }
                 codexReasoning["summary"] = summary
@@ -159,7 +165,7 @@ enum IntelCodexResponsesAdapter {
             if let context = reasoning["context"] {
                 guard let context = nonEmptyString(context) else { throw Error.invalidInput("reasoning.context must be a non-empty string") }
                 codexReasoning["context"] = context
-            } else {
+            } else if !summaryOnly {
                 codexReasoning["context"] = "all_turns"
             }
             payload["reasoning"] = codexReasoning

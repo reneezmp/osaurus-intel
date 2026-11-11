@@ -2934,6 +2934,22 @@ struct AgentDetailView: View {
                 .foregroundColor(theme.tertiaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
+                Picker(
+                    L("Claude effort"),
+                    selection: Binding(
+                        get: { claudeCodeConfig.resolvedEffort?.rawValue ?? "" },
+                        set: { effort in
+                            claudeCodeConfig.effort = effort.isEmpty ? nil : effort
+                            debouncedSave()
+                        }
+                    )
+                ) {
+                    Text("Default", bundle: .module).tag("")
+                    ForEach(ClaudeCodeEffort.allCases, id: \.rawValue) { effort in
+                        Text(verbatim: effort.displayName).tag(effort.rawValue)
+                    }
+                }
+
                 if claudeCodeConfig.mode == .agent {
                     claudePermissionToggle(
                         title: "Allow file changes",

@@ -159,11 +159,15 @@ extension ModelPickerItem {
         modelId: String,
         providerName: String,
         providerId: UUID,
-        contextLength: Int? = nil
+        contextLength: Int? = nil,
+        displayName catalogDisplayName: String? = nil,
+        description: String? = nil
     ) -> ModelPickerItem {
         // Remote model IDs are prefixed like "provider-name/model-id"
         let displayName: String
-        if let slashIndex = modelId.lastIndex(of: "/") {
+        if let catalogDisplayName {
+            displayName = catalogDisplayName
+        } else if let slashIndex = modelId.lastIndex(of: "/") {
             displayName = String(modelId[modelId.index(after: slashIndex)...])
         } else {
             displayName = modelId
@@ -173,6 +177,7 @@ extension ModelPickerItem {
             id: modelId,
             displayName: displayName,
             source: .remote(providerName: providerName, providerId: providerId),
+            description: description,
             contextLength: contextLength
         )
     }
@@ -248,7 +253,10 @@ extension ModelPickerItem {
     /// (upstream #2464). Scoped to the official host only: never applied to
     /// OpenAI-compatible proxies, whose ids aren't OpenAI's to trust.
     private static let officialOpenAIContextWindows: [(prefix: String, tokens: Int)] = [
-        ("gpt-6", 1_050_000),
+        // GPT-6 uses the documented maximum *input* (922,000): its 1.05M window
+        // includes output, and prompts budgeted against the full window are
+        // rejected before compaction kicks in (upstream #3229).
+        ("gpt-6", 922_000),
         ("gpt-5.6", 1_050_000),
         ("gpt-5.5", 1_050_000),
         ("gpt-5.4", 1_050_000),
@@ -265,9 +273,34 @@ extension ModelPickerItem {
     /// by model family (upstream #1991). Nil for families without a
     /// documented profile (they fall through to the static profiles).
     static func officialOpenAIReasoningCapabilities(forModelId modelId: String) -> ModelReasoningCapabilities? {
-        if isPublicGPT6ModelId(modelId) { return .officialOpenAIGPT6Astra }
+        if isPublicGPT6ModelId(modelId) {
+            let bare = (modelId.split(separator: "/").last.map(String.init) ?? modelId).lowercased()
+            let acceptsNone = officialOpenAIGPT6NoneModels.contains { bare.hasPrefix($0) }
+            return acceptsNone ? .officialOpenAIGPT6WithNone : .officialOpenAIGPT6Astra
+        }
         if isPublicGPT56ModelId(modelId) { return .officialOpenAIGPT56 }
         return nil
+    }
+
+    /// GPT-6 models whose effort range starts at `none` (verified live,
+    /// upstream #3229). Every other GPT-6 slug gets the `low`-floored profile,
+    /// which never sends a value the model rejects.
+    private static let officialOpenAIGPT6NoneModels = ["gpt-6.1-terra", "gpt-6-luna", "gpt-6-sol"]
+
+    /// Whether the official API accepts `none` as a real effort for the model,
+    /// so it must reach the wire instead of being stripped. Families without a
+    /// documented profile (GPT-5.1 ... 5.5) answer from the static profile
+    /// that offers them `none`; dropping it would fall back to the API default
+    /// (`medium` on GPT-5.5) and keep reasoning on.
+    static func officialOpenAIAcceptsNoneEffort(modelId: String) -> Bool {
+        if let capabilities = officialOpenAIReasoningCapabilities(forModelId: modelId) {
+            return capabilities.levels.contains { $0.id == "none" }
+        }
+        guard let profile = ModelProfileRegistry.profile(for: modelId),
+            let option = profile.options.first(where: { $0.id == "reasoningEffort" }),
+            case .segmented(let segments) = option.kind
+        else { return false }
+        return segments.contains { $0.id == "none" }
     }
 
     static func isPublicGPT56ModelId(_ id: String) -> Bool {

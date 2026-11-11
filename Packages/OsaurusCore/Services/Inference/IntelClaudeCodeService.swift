@@ -64,7 +64,8 @@ actor IntelClaudeCodeService {
             mode: mode,
             allowedTools: allowedTools,
             systemPrompt: systemPrompt,
-            disallowedTools: disallowedTools
+            disallowedTools: disallowedTools,
+            effort: config.resolvedEffort
         )
         let events = ClaudeCodeProcessRunner.stream(
             executable: executable,

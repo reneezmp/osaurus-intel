@@ -433,25 +433,34 @@ public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable {
     public var allowOsaurusTools: Bool
     /// Nested under `allowOsaurusTools`: permit configuration-changing tools.
     public var allowOsaurusConfigWrites: Bool
+    /// `--effort` value (`ClaudeCodeEffort`). Nil = the CLI's per-model default.
+    public var effort: String?
 
     public init(
         mode: ClaudeCodeMode = .agent,
         allowWrites: Bool = false,
         allowShell: Bool = false,
         allowOsaurusTools: Bool = false,
-        allowOsaurusConfigWrites: Bool = false
+        allowOsaurusConfigWrites: Bool = false,
+        effort: String? = nil
     ) {
         self.mode = mode
         self.allowWrites = allowWrites
         self.allowShell = allowShell
         self.allowOsaurusTools = allowOsaurusTools
         self.allowOsaurusConfigWrites = allowOsaurusConfigWrites
+        self.effort = effort
     }
 
     public static let `default` = ClaudeCodeAgentConfig()
 
+    /// The `--effort` value to launch with, or nil to leave the CLI default.
+    public var resolvedEffort: ClaudeCodeEffort? {
+        effort.flatMap { ClaudeCodeEffort(rawValue: $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()) }
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case mode, allowWrites, allowShell, allowOsaurusTools, allowOsaurusConfigWrites
+        case mode, allowWrites, allowShell, allowOsaurusTools, allowOsaurusConfigWrites, effort
     }
 
     /// Older JSON and future unknown mode values must not make its entire
@@ -464,6 +473,7 @@ public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable {
         allowOsaurusTools = try c.decodeIfPresent(Bool.self, forKey: .allowOsaurusTools) ?? false
         allowOsaurusConfigWrites =
             try c.decodeIfPresent(Bool.self, forKey: .allowOsaurusConfigWrites) ?? false
+        effort = try? c.decodeIfPresent(String.self, forKey: .effort)
     }
 }
 

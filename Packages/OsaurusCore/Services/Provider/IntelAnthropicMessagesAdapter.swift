@@ -38,9 +38,23 @@ enum IntelAnthropicMessagesAdapter {
         "claude-fable", "claude-mythos",
         "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8",
         "claude-sonnet-4-6", "claude-sonnet-5", "claude-opus-5",
+        // Confirmed live (upstream #3229).
+        "claude-haiku-5",
     ]
 
-    static func makeRequest(chatCompletions body: [String: Any]) throws -> [String: Any] {
+    /// - Parameters:
+    ///   - capabilities: the provider's Models API capability contract for
+    ///     this model (`AnthropicModelCatalog`), which decides `thinking` /
+    ///     `output_config.effort` and sampler support (upstream #3229). Nil
+    ///     when uncatalogued: no thinking field, and the prefix list decides
+    ///     the samplers.
+    ///   - effort: the raw picker value, or `AnthropicReasoningContract.offLevelId`
+    ///     when thinking is switched off.
+    static func makeRequest(
+        chatCompletions body: [String: Any],
+        capabilities: AnthropicModelCapabilities? = nil,
+        effort: String? = nil
+    ) throws -> [String: Any] {
         guard let model = body["model"] as? String, !model.isEmpty else {
             throw Failure(message: "Anthropic request needs a model")
         }
@@ -128,24 +142,46 @@ enum IntelAnthropicMessagesAdapter {
                 return out
             }
         }
+        let maxTokens = request["max_tokens"] as? Int ?? defaultMaxTokens
+        let reasoning = AnthropicReasoningContract.wireControls(
+            capabilities: capabilities, effort: effort, maxTokens: maxTokens)
+        if let thinking = reasoning?.thinking {
+            var wire: [String: Any] = ["type": thinking.type]
+            if let budget = thinking.budget_tokens { wire["budget_tokens"] = budget }
+            if let display = thinking.display { wire["display"] = display }
+            request["thinking"] = wire
+        }
+        if let effort = reasoning?.effort { request["output_config"] = ["effort": effort] }
         if let choice = body["tool_choice"] {
             switch choice {
             case let mode as String:
                 switch mode {
                 case "none": request["tool_choice"] = ["type": "none"]
-                case "required": request["tool_choice"] = ["type": "any"]
+                // Manual `enabled` thinking rejects forced tool use.
+                case "required": request["tool_choice"] = [
+                    "type": reasoning?.isManualThinking == true ? "auto" : "any"
+                ]
                 default: request["tool_choice"] = ["type": "auto"]
                 }
             case let object as [String: Any]:
                 if let name = (object["function"] as? [String: Any])?["name"] as? String {
-                    request["tool_choice"] = ["type": "tool", "name": name]
+                    request["tool_choice"] =
+                        reasoning?.isManualThinking == true ? ["type": "auto"] : ["type": "tool", "name": name]
                 }
             default:
                 break
             }
         }
         let bare = model.lowercased().split(separator: "/").last.map(String.init) ?? model.lowercased()
-        if !knobDeprecatingClaudePrefixes.contains(where: { bare.hasPrefix($0) }) {
+        // Thinking is incompatible with temperature/top_k changes on every
+        // Claude model; catalogued models answer from their capabilities,
+        // the prefix list covers uncatalogued ones.
+        let thinkingActive = ["adaptive", "enabled"].contains(reasoning?.thinking?.type ?? "")
+        let deprecatesSamplerKnobs =
+            thinkingActive
+            || AnthropicReasoningContract.acceptsSamplerKnobs(capabilities).map { !$0 }
+                ?? knobDeprecatingClaudePrefixes.contains { bare.hasPrefix($0) }
+        if !deprecatesSamplerKnobs {
             if let temperature = body["temperature"] { request["temperature"] = temperature }
             if let topP = body["top_p"] { request["top_p"] = topP }
         }
