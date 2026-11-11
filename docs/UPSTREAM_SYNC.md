@@ -23,7 +23,7 @@
 **Upstream version era:** `0.24.7` (`0.24.7-24-g7e109ade`)
 **Last sync date:** 2026-09-07
 **Last full upstream audit:** `bce907045` (2026-10-27; 11 commits after `fc75a1e06`, see [`UPSTREAM_AUDIT_2026-10-27.md`](UPSTREAM_AUDIT_2026-10-27.md)). Before that: `fc75a1e06` (2026-10-26; 102 commits after `24f4c416a`, see [`UPSTREAM_AUDIT_2026-10-26.md`](UPSTREAM_AUDIT_2026-10-26.md)). Earlier: `24f4c416a` (2026-10-10; 2 commits after `ec654e8c5`, see [`UPSTREAM_AUDIT_2026-10-10.md`](UPSTREAM_AUDIT_2026-10-10.md)). Earlier: `ec654e8c5` (2026-10-09; 5 commits after `02604ca60`, see [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md)). Earlier: `02604ca60` (2026-10-08; 14 commits after `66ea7ebc4`, upstream 0.25.20, see [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md)). Earlier: `66ea7ebc4` (2026-10-07; 40 commits after `4064a6fde`, see [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md)). Earlier: `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
-**Unaudited since `bce907045` (counted 2026-11-11):** 127 commits through `39dd0c1eb`, including **Osaurus 1.0** (#3366, `15d4089fe`, one commit, 2,230 files, +583k / −185k lines). See "Osaurus 1.0: what Intel can't take" below and the `W-upstream-1-0-audit` backlog row.
+**Unaudited since `bce907045` (counted 2026-11-11):** 127 commits through `39dd0c1eb`, including **Osaurus 1.0** (#3366, `15d4089fe`, one commit, 2,230 files, +583k / −185k lines). See "Osaurus 1.0: what Intel can't take" below, the `W-upstream-1-0-audit` backlog row, and the draft classification in [`UPSTREAM_AUDIT_2026-11-11.md`](UPSTREAM_AUDIT_2026-11-11.md) (not yet reviewed).
 **Commit-coverage status:** 🟢 **Classified through `a4daf94c4`**, but **synced only through `7e109ade`**. This does not claim feature parity or that any newly classified work shipped. The previous 53-commit batch after the 0.24.3 checkpoint received verdicts and applicable Intel slices were hand-ported; the new range is an assessment and backlog. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
 
 ---
@@ -34,7 +34,7 @@ Found during `W-cov-reaudit` stage 5a. Upstream 1.0 (#3366, `15d4089fe`)
 changed three constraints at once. Check these before porting anything
 from 1.0 or later.
 
-- **Minimum macOS 15.** `Packages/OsaurusCore/Package.swift` has
+- **Minimum macOS 15** (the 2026-11-11 audit says this predates 1.0; unverified). `Packages/OsaurusCore/Package.swift` has
   `platforms: [.macOS(.v15)]`, so 1.0-era APIs need `#available(macOS 14 / 15, *)`
   branches with a Ventura fallback (the standing macOS 14 rule, extended
   to 15).
