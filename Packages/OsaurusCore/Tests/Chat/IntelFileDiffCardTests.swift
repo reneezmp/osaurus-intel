@@ -49,10 +49,10 @@ struct IntelFileDiffCardTests {
         let diff = try #require(FileDiff.from(toolResult: result))
         #expect(diff.path == "a.txt")
         #expect(diff.addedCount >= 1)
-        // Upstream's summary (WorkspaceWriteSafety) counts the empty line after
-        // a trailing newline: "one\ntwo\n" reads as 3 lines (2026-10-10, when
-        // file_write became upstream's).
-        #expect(EnvelopeAssertions.successPayload(result)?["text"] as? String == "Updated a.txt (3 lines, 8 characters)")
+        // Upstream #3301: the summary counts lines the way file_read does, so
+        // "one\ntwo\n" is 2 lines (it was 3 before, counting the empty line
+        // after the trailing newline).
+        #expect(EnvelopeAssertions.successPayload(result)?["text"] as? String == "Updated a.txt (2 lines, 8 characters)")
 
         // A brand-new one-line file diffs as +1 −0 (no phantom removal).
         let created = try await FileWriteTool(rootPath: root).execute(
