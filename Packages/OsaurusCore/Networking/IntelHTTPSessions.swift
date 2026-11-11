@@ -41,6 +41,9 @@ extension HTTPHandler {
             serveListSessions(context: context, uri: head.uri)
         } else if head.method == .GET, path.hasPrefix("/sessions/"), path.contains("/images/") {
             serveSessionImage(context: context, path: path)
+        } else if head.method == .GET, path.hasPrefix("/sessions/"), path.hasSuffix("/context") {
+            // Before the `/sessions/{id}` catch-all (upstream #3209).
+            serveSessionContext(context: context, head: head, path: path)
         } else if head.method == .GET, path.hasPrefix("/artifacts/") {
             serveArtifactFile(context: context, path: path)
         } else if head.method == .POST, path.hasPrefix("/sessions/"), path.hasSuffix("/truncate") {
@@ -212,7 +215,8 @@ extension HTTPHandler {
         }
         let query = Self.queryItems(from: uri)
         let agentFilter = query["agent_id"].flatMap { UUID(uuidString: $0) }
-        let includeArchived = query["archived"] == "true"
+        // Archived only, a lens as on the Mac; without it, none (#3305).
+        let archivedOnly = query["archived"] == "true"
         let pinnedOnly = query["pinned"] == "true"
         // `mac`, `ios`, or a SessionSource raw value (http, plugin, …).
         let originFilter = query["origin"].flatMap { $0.isEmpty ? nil : $0 }
@@ -238,7 +242,7 @@ extension HTTPHandler {
                 let contentMatches: Set<UUID> =
                     search.isEmpty ? [] : ChatHistoryList.sessionIds(withContentContaining: search)
                 func matches(_ session: ChatSessionData) -> Bool {
-                    if !includeArchived && session.archived { return false }
+                    if session.archived != archivedOnly { return false }
                     if pinnedOnly && !session.pinned { return false }
                     if let agentFilter, session.agentId != agentFilter { return false }
                     if let originFilter, Self.origin(of: session) != originFilter { return false }
@@ -309,6 +313,38 @@ extension HTTPHandler {
                 json = #"{"error":"session_busy"}"#
             }
             self.respondOnLoop(eventLoop, status: status, headers: self.jsonHeaders(), body: json)
+        }
+    }
+
+    // MARK: - GET /sessions/{id}/context
+
+    /// GET /sessions/{id}/context?agent_id=...&model=... — the composer's
+    /// context ring for a phone chat (MOBILE_PROTOCOL §14.13, upstream
+    /// #3209). A session the Mac has no history for yet is priced as empty:
+    /// the prompt, tools and memory.
+    private func serveSessionContext(context: ChannelHandlerContext, head: HTTPRequestHead, path: String) {
+        guard callerOwnsThisMac(context) else {
+            sendOwnerOnlyForbidden(context: context)
+            return
+        }
+        let components = path.split(separator: "/")
+        let query = Self.queryItems(from: head.uri)
+        guard components.count == 3, let sessionId = UUID(uuidString: String(components[1])),
+            let agentId = query["agent_id"].flatMap({ UUID(uuidString: $0) })
+        else {
+            sendResponse(
+                context: context, status: .badRequest, headers: jsonHeaders(),
+                body: #"{"error":"bad_request","message":"Expected /sessions/{id}/context?agent_id="}"#)
+            return
+        }
+        let model = query["model"].flatMap { $0.isEmpty ? nil : $0 }
+        let eventLoop = context.eventLoop
+        runRequestTask {
+            let usage = await PhoneContextUsage.compute(sessionId: sessionId, agentId: agentId, model: model)
+            let json =
+                (try? JSONEncoder().encode(usage)).map { String(decoding: $0, as: UTF8.self) }
+                ?? #"{"error":"encoding_failed"}"#
+            self.respondOnLoop(eventLoop, status: .ok, headers: self.jsonHeaders(), body: json)
         }
     }
 

@@ -642,6 +642,7 @@ extension HTTPHandler {
                     }
                     writer.writeEnd(ctx)
                 }
+                transcript?.complete()
                 log(model: model, response: loggedResponseText, toolCalls: loggedToolCalls, error: nil)
             } catch {
                 // The 200 head is out: the failure is an in-band error chunk.

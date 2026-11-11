@@ -241,4 +241,14 @@ struct IntelRemoteSessionContinuationTests {
         RemoteSessionContinuation.endPhoneRun(id)
         #expect(!RemoteSessionContinuation.isPhoneReplying(id))
     }
+
+    @Test func aStoppedRunKeepsItsReplyWithoutAHalfWrittenToolCall() {
+        let stopped = PhoneRunTranscript()
+        stopped.content("Looking. <tool_call>{\"name\": \"sea")
+        #expect(stopped.finished().map(\.content) == ["Looking."])
+        let finished = PhoneRunTranscript()
+        finished.content("Done.")
+        finished.complete()
+        #expect(finished.finished().map(\.content) == ["Done."])
+    }
 }

@@ -73,8 +73,9 @@ struct IntelHTTPSessionsTests {
             #expect(try titles(list) == ["Taxes", "Groceries"], "\(list.body)")
             #expect(list.body.contains(#""origin":"mac""#))
 
+            // Archived only, a lens as on the Mac (#3305).
             let withArchived = try await server.send("GET", "/sessions?archived=true")
-            #expect(try titles(withArchived).count == 3, "\(withArchived.body)")
+            #expect(try titles(withArchived) == ["Old plan"], "\(withArchived.body)")
 
             // Message text matches, as the Mac's history search does.
             let search = try await server.send("GET", "/sessions?q=saffron")

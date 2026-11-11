@@ -87,7 +87,9 @@ extension HTTPHandler {
 
     /// `session_create`: a run may start a chat with `osaurus_create_session`
     /// (upstream). Intel advertises nothing until its runs can do that.
-    static let connectFeatures: [String] = []
+    /// `context_usage`: `GET /sessions/{id}/context` prices a chat's next send
+    /// (upstream #3209).
+    static let connectFeatures: [String] = ["context_usage"]
 
     /// An agent's own Action Bar, or nil for the client's chat defaults.
     static func clientQuickActions(for agent: Agent) -> [AgentQuickAction]? {

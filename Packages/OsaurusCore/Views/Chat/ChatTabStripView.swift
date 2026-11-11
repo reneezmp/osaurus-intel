@@ -568,7 +568,7 @@ private struct ChatTabItemView: View {
 
     // Intel: no workspaces, so no workspace origin.
     private var originLabel: String? {
-        if isFromPairedPhone { return "via iPhone" }
+        if isFromPairedPhone { return "via Mobile" }
         guard session.source != .chat else { return nil }
         let pluginName = session.sourcePluginId.map(PluginDisplayNameResolver.displayName(for:))
         return session.source.originLabel(pluginDisplayName: pluginName)

@@ -346,6 +346,7 @@ final class PhoneRunTranscript: @unchecked Sendable {
     private let lock = NSLock()
     private var turns: [ChatTurnData] = []
     private var current = PhoneRunTranscript.newAssistantTurn()
+    private var completed = false
 
     private static func newAssistantTurn() -> ChatTurnData {
         ChatTurnData(id: UUID(), role: .assistant, content: "", createdAt: Date())
@@ -384,10 +385,20 @@ final class PhoneRunTranscript: @unchecked Sendable {
         }
     }
 
+    /// The run ended normally, so its last reply is the final answer as
+    /// written. Without this, `finished()` treats the reply in progress as one
+    /// cut off by Stop or a failure.
+    func complete() {
+        lock.withLock { completed = true }
+    }
+
     /// Every turn so far, the reply in progress included unless it is empty.
+    /// A reply cut off by Stop or a failure keeps its text and thinking, with
+    /// a half-written text tool call cut out of it (#3305).
     func finished() -> [ChatTurnData] {
         lock.withLock {
             var last = current
+            if !completed { last.content = StringCleaning.stoppedReplyText(last.content) }
             let blank = last.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             guard !blank || !last.thinking.isEmpty || !(last.toolCalls?.isEmpty ?? true) else { return turns }
             last.completedAt = Date()
