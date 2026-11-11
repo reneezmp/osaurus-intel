@@ -72,6 +72,17 @@ jobs:
       - name: Check localizations
         run: bash scripts/i18n/check.sh
 
+      # Informational only (always exits 0): lists UI strings the Swift code
+      # references that still fall back to English in a required locale.
+      # Upstream's step (W-cov-reaudit stage 4, 2026-11-11).
+      - name: Report untranslated UI strings (non-blocking)
+        run: |
+          python3 -m unittest discover -s scripts/i18n -p 'test_*.py'
+          python3 scripts/i18n/report-untranslated-referenced.py \
+            --catalog Packages/OsaurusCore/Resources/Localizable.xcstrings \
+            --swift-root Packages/OsaurusCore \
+            --annotations 10
+
       - name: Set up Xcode ${{ env.XCODE_VERSION }}
         uses: maxim-lobanov/setup-xcode@v1
         with:

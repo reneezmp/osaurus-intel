@@ -18,8 +18,17 @@ All SwiftUI and `String` UI text in **OsaurusCore** must resolve against the **p
 | English | `en` | Source language |
 | German | `de` | Required |
 | Simplified Chinese | `zh-Hans` | Required |
+| Korean | `ko` | Required |
+| Russian | `ru` | Required |
+| Traditional Chinese | `zh-Hant` | Maintained (not yet CI-required) |
+| Spanish | `es` | Help wanted |
+| Japanese | `ja` | Help wanted |
 
-`zh-Hans` is listed in the Xcode project's `knownRegions`. Add new locales there when expanding support.
+All of the above are listed in the Xcode project's `knownRegions`, so the
+"help wanted" locales already have empty columns ready in the String Catalog
+editor. We're actively seeking contributors for them -- see
+**[TRANSLATORS.md](https://github.com/osaurus-ai/osaurus/blob/main/docs/TRANSLATORS.md)** (upstream's page; the Intel fork takes its translations from upstream) for the call to action and the contributor
+leaderboard. Add any further locales to `knownRegions` when expanding support.
 
 ## Swift API
 
@@ -38,7 +47,7 @@ Helpers live in `Packages/OsaurusCore/Utils/`:
 Text(LocalizedStringKey(title), bundle: .module)
 ```
 
-After adding a key in code, add **de** and **zh-Hans** in `Localizable.xcstrings` (Xcode String Catalog editor).
+After adding a key in code, add **de**, **zh-Hans**, **ko**, and **ru** in `Localizable.xcstrings` (Xcode String Catalog editor). Add **zh-Hant** too when you can — it is community-maintained and nearly complete, but not yet enforced by CI.
 
 Avoid raw `Text("…")`, `.help("…")`, `Button("…")`, `panel.title = "…"`, and `UNMutableNotificationContent.title = "…"` in `Packages/OsaurusCore`. CI flags these because they usually resolve against the wrong bundle.
 
@@ -67,6 +76,16 @@ bash scripts/i18n/check.sh
 
 CI runs this on every pull request. It validates catalog coverage, checks that Swift localization literals exist in the catalog, and runs a Swift literal lint. Keys with **no** `de`/`zh-Hans` yet (including Xcode `en`-only auto-extractions and empty stubs the catalog editor injects for raw `Text("…")` literals) are ignored — the catalog is allowed to grow without breaking CI. Run the pruner manually when you want to clean it up (see `scripts/i18n/prune-catalog.py` below).
 
+Because those keys are ignored, a string that is referenced from Swift but only has an `en` stub silently ships in English. CI therefore also runs a **non-blocking** report that lists such strings per UI surface in the job summary:
+
+```bash
+python3 scripts/i18n/report-untranslated-referenced.py \
+  --catalog Packages/OsaurusCore/Resources/Localizable.xcstrings \
+  --swift-root Packages/OsaurusCore
+```
+
+It always exits 0, so it never blocks a PR; it only makes the translation backlog visible. Add `--annotations 10` to also surface the first ten as inline warnings, or `--json out.json` for tooling.
+
 ## Export for external translators
 
 In Xcode: **Product → Export Localizations…** / **Import Localizations…** (XLIFF).
@@ -82,10 +101,14 @@ In Xcode: **Product → Export Localizations…** / **Import Localizations…** 
 | ------ | ------- |
 | `scripts/i18n/check.sh` | Validate core + InfoPlist catalogs, lint risky Swift literals, and dry-run pruning |
 | `scripts/i18n/check-swift-catalog-keys.py` | Ensure Swift localization references exist in the core catalog |
+| `scripts/i18n/report-untranslated-referenced.py` | Non-blocking report of referenced keys that still fall back to English per required locale, grouped by UI surface (CI job summary) |
 | `scripts/i18n/lint-swift-literals.py` | Flag Swift literals that bypass package-bundle localization |
 | `scripts/i18n/merge-locale.py` | Copy one locale from another catalog (existing keys only) |
 | `scripts/i18n/fill-zh-hans.py` | Optional machine-translation backfill (`pip install deep-translator`) |
+| `scripts/i18n/export-untranslated.py` | Export keys missing a locale into batched JSON for (LLM/human) translators |
+| `scripts/i18n/apply-ko.py` | Apply translated JSON maps back into a catalog with placeholder/coverage validation and Xcode-exact formatting (`--locale` is configurable) |
 | `scripts/i18n/prune-catalog.py` | Remove en-only / empty Xcode auto-extraction stubs and stale keys |
+| `scripts/i18n/leaderboard.py` | Upstream only: generates upstream's translator leaderboard from upstream's merged PRs (not on the Intel fork) |
 
 Shared logic: `scripts/i18n/xcstrings_util.py`.
 
@@ -96,3 +119,39 @@ python3 scripts/i18n/prune-catalog.py \
   Packages/OsaurusCore/Resources/Localizable.xcstrings \
   --remove-stale
 ```
+
+## Intel fork
+
+The Intel fork (`intel-fork`) takes upstream's translations rather than
+writing its own, and translates by hand only strings upstream doesn't have.
+Added 2026-11-11 (`W-cov-reaudit` stage 4); see `docs/COV_REAUDIT.md`.
+
+| Script | Purpose |
+| ------ | ------- |
+| `scripts/i18n/merge-upstream-keys.py <path filters>` | Copy upstream's catalog entries (all locales) for keys the named Swift files use and the Intel catalog lacks. Run after porting upstream code. |
+| `scripts/i18n/fill-upstream-translations.py [--dry-run]` | For keys both catalogs share, add the locales Intel lacks from `upstream/main` and take upstream's newer text where it is better (rules below). Run after each upstream sync. |
+| `scripts/i18n/add-translations.py file.json` | Hand translations for Intel-only strings: `{"key": {"de": …, "zh-Hans": …, "ko": …, "ru": …}}`. New keys are inserted in order; for existing keys only missing locales are added, never overwritten. |
+
+`fill-upstream-translations.py` takes upstream's text for a locale Intel
+already has only when upstream's is fully `translated`, keeps the same
+format specifiers, and doesn't replace Intel's plural variations with a
+plain string. `de` and `en` keep Intel's own translated text (Intel's German
+is hand-written to Intel's glossary; upstream's recent German regressed
+"Memory" to "Speicher" in places). `zh-Hans` takes upstream's glossary pass
+(智能体, 你) except where upstream's text would bring back 代理 or 您.
+
+House style for hand translations: German uses informal "du"; Chinese uses
+聊天, 智能体 and 你; Korean uses polite 합니다/하세요; Russian uses "вы"
+(lower case) and puts counts after a colon (`Событий: %d`) instead of plural
+forms. When word order swaps two arguments, use positional specifiers
+(`%2$d … %1$d`). Brand names keep their English text, marked
+`needs_review` in `de` / `zh-Hans` so the "equals English" check passes.
+
+`zh-Hant` is filled from upstream only; Intel-only strings don't get it
+(upstream doesn't require it either). `es` and `ja` are in `knownRegions`
+with no strings, as upstream.
+
+`check.sh`'s literal lint (raw `Text("…")`, `Button("…")`, `.help("…")` …)
+fails on Intel-own views until they are wrapped; as of 2026-11-11 that is
+56 sites (KnowledgeView, IntelNativePluginCard, AppDelegate, the
+Orchestrator sheets, …), the next part of stage 4.

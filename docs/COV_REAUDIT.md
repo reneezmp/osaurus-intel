@@ -344,7 +344,29 @@ now that Intel has both. Stage 6 re-reads them.
    plugin grid, glass header buttons). Translations (Check:i18n) go to
    stage 4; two rows (#1961, #1837) to stage 5.
 4. **Stage 4, translations:** bring upstream's translations for keys Intel
-   shows.
+   shows. **4a done 2026-11-11.** Measured at `upstream/main` (2026-11-11):
+   Intel 5,060 keys, upstream 14,648, 4,801 shared; 3,510 shared keys
+   lacked a locale upstream has (ko 3,507, ru 3,507, zh-Hant 3,454, de and
+   zh-Hans 13); 1,167 shared strings differed in the same locale (zh-Hans
+   1,037: upstream's 智能体 / 你 pass; de 124: mostly upstream's
+   untranslated `needs_review` English). New
+   `scripts/i18n/fill-upstream-translations.py` filled ~10,500 locales and
+   took 1,017 newer zh-Hans strings (rules in `LOCALIZATION.md`, "Intel
+   fork"); `merge-upstream-keys.py Packages/OsaurusCore` brought 795
+   upstream keys Intel's code uses; hand translations covered the rest:
+   ko + ru for 502 Intel-only keys, all four locales for 50 keys Intel
+   shows with no catalog entry, and de / zh-Hans / ko / ru for the 74
+   upstream keys upstream itself ships in English. `check.sh` now requires
+   de, zh-Hans, ko and ru as upstream does, and passes the catalog checks;
+   `knownRegions` matches upstream (adds es, ko, ja, ru, zh-Hant). Upstream's
+   i18n tooling came with it: the key checker (it read `URL("…")` as
+   `L("…")`, so test fixtures looked like missing keys, and missed
+   `LCached`), the SettingsKit label check, `lint-zh-style.py`,
+   `export-untranslated.py`, `apply-ko.py`, and the non-blocking
+   untranslated-strings report in CI (0 referenced keys fall back to
+   English now). **4b next:** the literal lint's 56 raw `Text` /
+   `Button` / `Label` / `.help` / toast / alert strings in Intel-own views
+   (failing before 4a too), wrapped and translated.
 5. **Stage 5, behaviour audit of the `COV-intel-own` files** (the item's
    original scope): commits since the fork are covered by stages 1–4; this
    compares behaviour Intel's replacements never had at all, starting with

@@ -4,8 +4,12 @@
 Reads a JSON object from the file argument (or stdin):
     {"English key": {"de": "…", "zh-Hans": "…"}, …}
 Each new key is inserted beside its sorted neighbours, as
-`merge-upstream-keys.py` does; existing keys are left alone. Conventions:
-German uses informal "du"; Chinese uses 聊天, 智能体 and 你.
+`merge-upstream-keys.py` does. For a key the catalog already has, only the
+languages it lacks are added (2026-11-11, ko/ru for Intel-only strings);
+existing translations are never overwritten. Conventions:
+German uses informal "du"; Chinese uses 聊天, 智能体 and 你; Korean uses
+polite 해요/합니다 style; Russian uses "вы" (lower case) and avoids plural
+forms by putting counts after a colon ("Событий: %d").
 
 Usage: scripts/i18n/add-translations.py strings.json
 """
@@ -34,6 +38,17 @@ def main() -> int:
             }
         }
 
+    filled = 0
+    for key, values in new.items():
+        if key not in strings:
+            continue
+        locs = strings[key].setdefault("localizations", {})
+        for locale, value in values.items():
+            if locale not in locs:
+                locs[locale] = {"stringUnit": {"state": "translated", "value": value}}
+                filled += 1
+        strings[key]["localizations"] = dict(sorted(locs.items()))
+
     pending = sorted(k for k in new if k not in strings)
     merged = {}
     for key, value in strings.items():
@@ -47,7 +62,7 @@ def main() -> int:
     catalog["strings"] = merged
     out = json.dumps(catalog, ensure_ascii=False, indent=2, separators=(",", " : "))
     CATALOG.write_text(out + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
-    print(f"added {added}, skipped {len(new) - added} already present")
+    print(f"added {added} keys, filled {filled} missing localizations")
     return 0
 
 

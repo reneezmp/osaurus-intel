@@ -1675,7 +1675,12 @@ Durable lessons from this batch:
   cannot have been billed (no endpoint, HTTP 404) may be retried immediately.
 - **`Localizable.xcstrings` merges:** keep Intel's file and insert only the
   commit's new keys; preserve Xcode's key order and the missing final newline,
-  or the diff rewrites the whole catalog.
+  or the diff rewrites the whole catalog. **Since 2026-11-11** run
+  `scripts/i18n/fill-upstream-translations.py` after each sync so shared
+  keys pick up upstream's newer locales and wording, and
+  `scripts/i18n/merge-upstream-keys.py <ported paths>` for keys the port
+  brings; `check.sh` requires de, zh-Hans, ko and ru (as upstream). Rules
+  and house style: `LOCALIZATION.md`, "Intel fork".
 
 ### Upstream provider/chat batch — 2026-09-25
 

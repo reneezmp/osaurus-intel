@@ -225,6 +225,11 @@
 				en,
 				de,
 				"zh-Hans",
+				es,
+				ko,
+				ja,
+				ru,
+				"zh-Hant",
 				Base,
 			);
 			mainGroup = F0BB3C1D2E51FBCC00895593;
