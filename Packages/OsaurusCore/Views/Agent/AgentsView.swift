@@ -1308,6 +1308,20 @@ struct AgentDetailView: View {
         .onChange(of: agent.id) { _ in
             refreshDetailCaches()
         }
+        // A change made in chat (the model picker) lands in the manager, not
+        // here: follow it so a later save here can't write the old value back
+        // over it (upstream #3291). Intel's temperature and max tokens are
+        // typed fields saved on a debounce, so they follow only when the live
+        // value differs from what the field already parses to.
+        .onChange(of: currentAgent.defaultModel) { value in
+            selectedModel = value
+        }
+        .onChange(of: currentAgent.temperature) { value in
+            if Float(temperature) != value { temperature = value.map { String($0) } ?? "" }
+        }
+        .onChange(of: currentAgent.maxTokens) { value in
+            if Int(maxTokens) != value { maxTokens = value.map { String($0) } ?? "" }
+        }
         .onChange(of: loadedPluginsRefreshNonce) { _ in
             refreshDetailCaches()
         }
@@ -5247,6 +5261,8 @@ struct AgentDetailView: View {
     // MARK: - Data Loading
 
     private func loadAgentData() {
+        // The navigation selection can predate a change made in chat (#3291).
+        let agent = currentAgent
         name = agent.name
         description = agent.description
         systemPrompt = agent.systemPrompt
@@ -5397,7 +5413,9 @@ struct AgentDetailView: View {
             description: description.trimmingCharacters(in: .whitespacesAndNewlines),
             systemPrompt: systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines),
             themeId: selectedThemeId,
-            defaultModel: selectedModel,
+            // The model picker saves straight to the manager; never write a
+            // stale local copy back over it (#3291).
+            defaultModel: current.defaultModel,
             temperature: Float(temperature),
             maxTokens: Int(maxTokens),
             chatQuickActions: chatQuickActions,
