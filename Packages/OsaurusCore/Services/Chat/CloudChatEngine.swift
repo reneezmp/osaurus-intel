@@ -1155,9 +1155,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         model: resolvedModel,
                         inputTokens: promptTokens ?? Self.estimatedInputTokens(request),
                         outputTokens: outputTokens,
+                        // upstream #3286: say whether the counts came from the provider.
+                        inputTokenSource: promptTokens == nil ? .estimated : .reported,
+                        outputTokenSource: completionTokens == nil ? .estimated : .reported,
                         durationMs: Date().timeIntervalSince(inferenceStartedAt) * 1_000,
                         temperature: request.temperature.map(Float.init),
-                        maxTokens: request.max_tokens ?? 0,
+                        maxTokens: request.max_tokens,  // upstream #3308: nil when the request set no limit
                         toolCalls: insightToolCalls.isEmpty ? nil : insightToolCalls,
                         finishReason: error == nil ? .stop : .error,
                         errorMessage: error?.localizedDescription,
@@ -2407,9 +2410,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 model: model,
                 inputTokens: response?.usage?.prompt_tokens ?? ChatEngine.estimatedInputTokens(request),
                 outputTokens: response?.usage?.completion_tokens ?? ((text?.count ?? 0) / 4),
+                inputTokenSource: response?.usage?.prompt_tokens == nil ? .estimated : .reported,
+                outputTokenSource: response?.usage?.completion_tokens == nil ? .estimated : .reported,
                 durationMs: Date().timeIntervalSince(started) * 1_000,
                 temperature: request.temperature.map(Float.init),
-                maxTokens: request.max_tokens ?? 0,
+                maxTokens: request.max_tokens,  // upstream #3308: nil when the request set no limit
                 finishReason: error == nil ? .stop : .error,
                 errorMessage: error?.localizedDescription,
                 requestBody: ChatEngine.serializeRequestForInsights(request),
