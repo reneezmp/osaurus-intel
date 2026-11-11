@@ -144,7 +144,8 @@ private struct ResourceSnapshot: Sendable {
 
 /// Off-main Mach sampling. `@unchecked Sendable`: `previousCPUInfo` is
 /// guarded by `lock`; `hostPort` is immutable after init.
-private final class ResourceSampler: @unchecked Sendable {
+// Internal (not private) so the pure reclaimable-memory arithmetic is unit-testable.
+final class ResourceSampler: @unchecked Sendable {
     /// Cached Mach host port to avoid leaking send rights.
     /// Each call to mach_host_self() allocates a new send right that must be
     /// deallocated with mach_port_deallocate(). Caching avoids the leak entirely.
@@ -228,7 +229,7 @@ private final class ResourceSampler: @unchecked Sendable {
         )
 
         let vmResult = withUnsafeMutablePointer(to: &vmInfo) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(vmCount)) {
                 host_statistics64(hostPort, HOST_VM_INFO64, $0, &vmCount)
             }
         }
@@ -236,7 +237,9 @@ private final class ResourceSampler: @unchecked Sendable {
         guard vmResult == KERN_SUCCESS else { return (0.0, 0.0, 0.0) }
 
         var rawPage: vm_size_t = 0
-        host_page_size(hostPort, &rawPage)
+        guard host_page_size(hostPort, &rawPage) == KERN_SUCCESS, rawPage > 0 else {
+            return (0.0, 0.0, 0.0)
+        }
         let pageSize = rawPage
         let totalMemory = Double(ProcessInfo.processInfo.physicalMemory)
         // Use the same reclaimable-capacity definition as normal loads and
@@ -249,10 +252,10 @@ private final class ResourceSampler: @unchecked Sendable {
         let availableMemory = Double(Self.reclaimableMemoryBytes(
             physicalBytes: Int64(ProcessInfo.processInfo.physicalMemory),
             pageSize: Int64(pageSize),
-            wiredPages: Int64(vmInfo.wire_count),
-            compressorPages: Int64(vmInfo.compressor_page_count),
-            internalPages: Int64(vmInfo.internal_page_count),
-            purgeablePages: Int64(vmInfo.purgeable_count)
+            freePages: Int64(vmInfo.free_count),
+            fileBackedPages: Int64(vmInfo.external_page_count),
+            purgeablePages: Int64(vmInfo.purgeable_count),
+            speculativePages: Int64(vmInfo.speculative_count)
         ))
 
         let usedMemory = max(0.0, totalMemory - availableMemory)
@@ -264,30 +267,37 @@ private final class ResourceSampler: @unchecked Sendable {
         return (min(100.0, max(0.0, percentage)), totalGB, usedGB)
     }
 
-    /// Bytes the system could reclaim for new work: physical memory minus
-    /// wired, compressor and non-purgeable anonymous pages. Intel: upstream's
-    /// `ChatResidencyHandoff.reclaimableMemoryBytes` (local models, not
-    /// compiled here), verbatim.
+    /// Host capacity available without swapping non-purgeable anonymous state
+    /// (upstream #3306; `ChatResidencyHandoff.reclaimableMemoryBytes`, local
+    /// models, not compiled on Intel). Counts the reclaimable page classes
+    /// directly. HOST_VM_INFO64's free count includes speculative pages, which
+    /// are also file-backed: subtract that overlap once. Purgeable pages are
+    /// unwired anonymous pages, separate from file-backed pages. Inactive
+    /// anonymous pages are not free capacity.
+    ///
+    /// Deriving this as physical - wired - compressed - internal can report
+    /// zero on hosts whose internal aggregate exceeds physical RAM.
+    /// Malformed/overflowing snapshots produce a zero-capacity result.
     static func reclaimableMemoryBytes(
         physicalBytes: Int64,
         pageSize: Int64,
-        wiredPages: Int64,
-        compressorPages: Int64,
-        internalPages: Int64,
-        purgeablePages: Int64
+        freePages: Int64,
+        fileBackedPages: Int64,
+        purgeablePages: Int64,
+        speculativePages: Int64
     ) -> Int64 {
-        guard physicalBytes > 0, pageSize > 0 else { return 0 }
-        let nonPurgeableInternal = max(0, internalPages - max(0, purgeablePages))
-        let (first, overflow1) = max(0, wiredPages).addingReportingOverflow(
-            max(0, compressorPages))
-        guard !overflow1 else { return 0 }
-        let (unreclaimablePages, overflow2) = first.addingReportingOverflow(
-            nonPurgeableInternal)
-        guard !overflow2 else { return 0 }
-        let (unreclaimableBytes, overflow3) = unreclaimablePages
-            .multipliedReportingOverflow(by: pageSize)
-        guard !overflow3 else { return 0 }
-        return max(0, physicalBytes - unreclaimableBytes)
+        guard physicalBytes > 0, pageSize > 0,
+            freePages >= 0, fileBackedPages >= 0, purgeablePages >= 0,
+            speculativePages >= 0,
+            speculativePages <= freePages,
+            speculativePages <= fileBackedPages
+        else { return 0 }
+        let (first, overflow1) = (freePages - speculativePages)
+            .addingReportingOverflow(fileBackedPages)
+        let (availablePages, overflow2) = first.addingReportingOverflow(purgeablePages)
+        let (availableBytes, overflow3) = availablePages.multipliedReportingOverflow(by: pageSize)
+        guard !overflow1, !overflow2, !overflow3, availableBytes <= physicalBytes else { return 0 }
+        return availableBytes
     }
 
     /// Returns the app's own physical memory footprint in MB.
