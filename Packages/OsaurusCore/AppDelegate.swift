@@ -597,6 +597,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         BrowserSessionManager.shared.shutdownAll()
         // Upstream: land pending off-main writes before the process exits, so
         // a setting or secret saved right before quit isn't dropped.
+        // #3351: drain queued retained Activity tab snapshots (no-op when the
+        // registry was never created, so nothing is pending).
+        if let retainedTabs = BackgroundTaskManager.sharedIfInitialized,
+            !retainedTabs.flushRetainedTabWrites(timeout: 2.5)
+        {
+            NSLog("Osaurus retained Activity tab flush timed out; writes may still be pending")
+        }
         ToolConfigurationStore.flushPendingWrites()
         ChatSessionsManager.flushPendingWrites()
         ScheduleManager.flushPendingWrites()

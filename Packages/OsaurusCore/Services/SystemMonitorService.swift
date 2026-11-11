@@ -134,7 +134,7 @@ class SystemMonitorService: ObservableObject {
 }
 
 /// One tick's worth of resource readings, rounded to display precision.
-private struct ResourceSnapshot: Sendable {
+struct ResourceSnapshot: Sendable {
     let cpuUsage: Double
     let memoryPercentage: Double
     let totalMemoryGB: Double

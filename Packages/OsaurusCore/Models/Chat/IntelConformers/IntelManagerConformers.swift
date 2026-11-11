@@ -1543,15 +1543,35 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         Task { await FileChangeJournal.shared.purgeSession(id.uuidString) }
     }
     func rename(id: UUID, title: String) {
+        rename(id: id, title: title, retainedTaskManager: nil)
+    }
+    /// Dependency seam for an isolated retained-task registry in tests (upstream
+    /// #3351). The ordinary UI entry point uses the shared registry when one exists.
+    func rename(id: UUID, title: String, retainedTaskManager: BackgroundTaskManager?) {
         if var s = sessions[id] {
             s.title = title
             sessions[id] = s
+            Self.synchronizeRetainedTitle(id: id, title: title, manager: retainedTaskManager)
             // Metadata-only mutation: the in-memory upsert above already
             // keeps the sidebar correct, so the disk write (encode + write
             // of the WHOLE session, turns included) can move off the
             // calling thread — a full synchronous persist on every rename
             // was a measured main-thread stall on large conversations.
             persistAsync(s)
+        }
+    }
+    /// Keep a retained Activity task's title in step with a canonical chat
+    /// rename (upstream #3351). `BackgroundTaskManager` is main-actor bound, so
+    /// off-main callers hop; the shared registry is only touched when it exists.
+    private static func synchronizeRetainedTitle(id: UUID, title: String, manager: BackgroundTaskManager?) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                (manager ?? BackgroundTaskManager.sharedIfInitialized)?.synchronizeCanonicalTitle(id, title: title)
+            }
+        } else {
+            Task { @MainActor in
+                (manager ?? BackgroundTaskManager.sharedIfInitialized)?.synchronizeCanonicalTitle(id, title: title)
+            }
         }
     }
     func setArchived(id: UUID, archived: Bool) {

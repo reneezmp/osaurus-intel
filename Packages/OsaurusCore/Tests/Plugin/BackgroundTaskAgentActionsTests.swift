@@ -364,6 +364,8 @@ struct BackgroundTaskQuickReplyTests {
             state.captureContextPreview()
             firstManager.registerTaskForTesting(state)
             firstManager.dehydrateTaskForTesting(state.id)
+            let saved = await Task.detached { firstManager.flushRetainedTabWrites() }.value
+            #expect(saved)
 
             // A fresh manager simulates the next app launch. It restores only
             // lightweight metadata; transcript hydration stays demand-driven.
@@ -376,6 +378,8 @@ struct BackgroundTaskQuickReplyTests {
 
             relaunchedManager.finalizeTask(state.id)
             #expect(relaunchedManager.taskState(for: state.id) == nil)
+            let cleared = await Task.detached { relaunchedManager.flushRetainedTabWrites() }.value
+            #expect(cleared)
         }
     }
 
