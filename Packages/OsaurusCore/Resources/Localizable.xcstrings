@@ -9642,6 +9642,9 @@
         }
       }
     },
+    "Claude Code isn't allowed to change this file. File changes need Allow file changes in the agent's Claude Code Options and stay limited to the chat folder." : {},
+    "Claude Code isn't allowed to run shell commands for this agent. Turn on Allow shell commands in the agent's Claude Code Options." : {},
+    "Claude Code isn't allowed to use this tool for this agent." : {},
     "Claude Code isn't installed" : {
       "localizations" : {
         "de" : {
@@ -44694,6 +44697,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "處理用時"
+          }
+        }
+      }
+    },
+    "Workflow" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Workflow"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "워크플로"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Рабочий процесс"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作流"
           }
         }
       }

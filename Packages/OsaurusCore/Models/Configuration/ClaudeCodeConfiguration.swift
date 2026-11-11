@@ -174,8 +174,48 @@ public enum ClaudeCodeConfiguration {
     /// Tools added when the agent opts into writes.
     public static let writeTools = ["Edit", "Write", "NotebookEdit"]
 
-    /// Tools added when the agent opts into shell access.
-    public static let shellTools = ["Bash"]
+    /// Tools added when the agent opts into shell access. `Monitor` runs a
+    /// shell command in the background under the same rules as Bash (#3293).
+    public static let shellTools = ["Bash", "Monitor"]
+
+    /// The other built-ins that run commands or code: what the CLI's own
+    /// `--restricted` mode strips, besides the shell tools and WebFetch.
+    /// Hidden without shell access; never auto-approved (#3293).
+    public static let codeRunningTools = ["CronCreate", "LSP", "RemoteTrigger", "Workflow"]
+
+    /// Built-ins no toggle grants (#3293).
+    public static let neverAllowedTools = ["WebFetch", "WebSearch"]
+
+    /// Built-ins to remove from the model's tool list for this run (#3293).
+    ///
+    /// `dontAsk` refuses an un-allowlisted tool only after the model calls it,
+    /// so a visible-but-refused tool shows up as a failed call the model keeps
+    /// retrying. Claude Code also auto-approves read-only shell commands, so a
+    /// visible Bash or Monitor would run `ls` with shell access off. A bare
+    /// name in `--disallowedTools` drops the tool from the list entirely, and
+    /// a deny beats an allow, so a granted tool must never appear here.
+    public static func hiddenBuiltinTools(allowWrites: Bool, allowShell: Bool) -> [String] {
+        var hidden: [String] = []
+        if !allowShell { hidden += shellTools + codeRunningTools }
+        if !allowWrites { hidden += writeTools }
+        return hidden + neverAllowedTools
+    }
+
+    /// What to say about a tool call Claude Code's permission rules refused,
+    /// naming the toggle that grants it (#3293).
+    public static func permissionDeniedMessage(tool: String) -> String {
+        if shellTools.contains(tool) {
+            return L(
+                "Claude Code isn't allowed to run shell commands for this agent. Turn on Allow shell commands in the agent's Claude Code Options."
+            )
+        }
+        if writeTools.contains(tool) {
+            return L(
+                "Claude Code isn't allowed to change this file. File changes need Allow file changes in the agent's Claude Code Options and stay limited to the chat folder."
+            )
+        }
+        return L("Claude Code isn't allowed to use this tool for this agent.")
+    }
 
     // MARK: - Osaurus tools over MCP
 
@@ -394,7 +434,8 @@ public enum ClaudeCodeConfiguration {
         mode: ClaudeCodeMode,
         allowedTools: [String],
         systemPrompt: String?,
-        mcpConfigPath: String? = nil
+        mcpConfigPath: String? = nil,
+        disallowedTools: [String] = []
     ) -> [String] {
         var args = [
             "--print",
@@ -422,6 +463,10 @@ public enum ClaudeCodeConfiguration {
             args += ["--permission-mode", "dontAsk"]
             if !allowedTools.isEmpty {
                 args += ["--allowedTools", allowedTools.joined(separator: ",")]
+            }
+            // Hidden from the model, not just refused (#3293).
+            if !disallowedTools.isEmpty {
+                args += ["--disallowedTools", disallowedTools.joined(separator: ",")]
             }
             // Ordering matters only for readability; `--strict-mcp-config`
             // above already guarantees nothing else loads.

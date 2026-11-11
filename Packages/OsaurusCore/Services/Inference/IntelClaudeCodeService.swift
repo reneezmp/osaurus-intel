@@ -41,6 +41,12 @@ actor IntelClaudeCodeService {
                 allowShell: config.allowShell
             )
             : []
+        let disallowedTools = mode == .agent
+            ? ClaudeCodeConfiguration.hiddenBuiltinTools(
+                allowWrites: config.allowWrites,
+                allowShell: config.allowShell
+            )
+            : []
         let systemNote: String
         if let workingFolder {
             systemNote = "Claude Code starts in the selected working folder at \(workingFolder.path). Treat that folder as the workspace root unless the user explicitly asks you to work elsewhere."
@@ -57,7 +63,8 @@ actor IntelClaudeCodeService {
             model: model,
             mode: mode,
             allowedTools: allowedTools,
-            systemPrompt: systemPrompt
+            systemPrompt: systemPrompt,
+            disallowedTools: disallowedTools
         )
         let events = ClaudeCodeProcessRunner.stream(
             executable: executable,
@@ -92,6 +99,12 @@ actor IntelClaudeCodeService {
                         } else if trace.phase == "started" {
                             continuation.yield(StreamingToolHint.encode(trace.name))
                         }
+                    case .toolDenied:
+                        // A refused tool is only a finished step here: Intel
+                        // shows Claude Code's tool activity as a status line,
+                        // not a card, so there is no card to carry
+                        // `permissionDeniedMessage` (#3293).
+                        continuation.yield(StreamingToolHint.encode(""))
                     case .rateLimit(let status, let utilization, _):
                         if let error = Self.rateLimitError(status: status, utilization: utilization) {
                             continuation.finish(throwing: error)

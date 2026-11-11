@@ -48,10 +48,48 @@ struct IntelClaudeCodeTests {
         let toolsIndex = try #require(args.firstIndex(of: "--allowedTools"))
         #expect(args[permissionIndex + 1] == "dontAsk")
         #expect(Set(args[toolsIndex + 1].split(separator: ",").map(String.init)) == Set([
-            "Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash",
+            "Read", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "Monitor",
         ]))
         #expect(!args.contains("--dangerously-skip-permissions"))
         #expect(!args.contains("--allow-dangerously-skip-permissions"))
+    }
+
+    // MARK: - Hidden tools (upstream #3293)
+
+    @Test func toolsWithoutATogglesAreHiddenNotJustRefused() {
+        let none = ClaudeCodeConfiguration.hiddenBuiltinTools(allowWrites: false, allowShell: false)
+        for tool in ["Bash", "Monitor", "CronCreate", "LSP", "RemoteTrigger", "Workflow", "Edit", "Write",
+            "NotebookEdit", "WebFetch", "WebSearch"]
+        {
+            #expect(none.contains(tool), "\(tool) must be hidden")
+        }
+        let all = ClaudeCodeConfiguration.hiddenBuiltinTools(allowWrites: true, allowShell: true)
+        #expect(Set(all) == Set(["WebFetch", "WebSearch"]))
+        // A deny beats an allow, so nothing granted may be hidden.
+        let granted = Set(ClaudeCodeConfiguration.allowedTools(allowWrites: false, allowShell: true))
+        let hidden = Set(ClaudeCodeConfiguration.hiddenBuiltinTools(allowWrites: false, allowShell: true))
+        #expect(granted.isDisjoint(with: hidden))
+        #expect(hidden.contains("Edit") && !hidden.contains("Bash") && !hidden.contains("Monitor"))
+    }
+
+    @Test func agentArgumentsPassDisallowedTools() throws {
+        let args = ClaudeCodeConfiguration.arguments(
+            model: .haiku,
+            mode: .agent,
+            allowedTools: ["Read"],
+            systemPrompt: nil,
+            disallowedTools: ["Bash", "Monitor"]
+        )
+        let index = try #require(args.firstIndex(of: "--disallowedTools"))
+        #expect(args[index + 1] == "Bash,Monitor")
+        let textOnly = ClaudeCodeConfiguration.arguments(
+            model: .haiku, mode: .textOnly, allowedTools: [], systemPrompt: nil, disallowedTools: ["Bash"])
+        #expect(!textOnly.contains("--disallowedTools"))
+    }
+
+    @Test func refusalMessagesNameTheSettingToChange() {
+        #expect(ClaudeCodeConfiguration.permissionDeniedMessage(tool: "Monitor").contains("Allow shell commands"))
+        #expect(ClaudeCodeConfiguration.permissionDeniedMessage(tool: "Write").contains("Allow file changes"))
     }
 
     @Test func nonStreamingCompatibilityKeepsOnlyVisibleText() {
