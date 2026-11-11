@@ -21,6 +21,8 @@ final class NativeThinkingView: NSView {
 
     private let headerButton = NSButton()
     private let iconView = NSImageView()
+    // Streaming status (in-progress), deliberately a separate catalog key from
+    // the mode label `thinking.mode.label` (upstream #3280).
     private let titleLabel = NSTextField(labelWithString: L("Thinking"))
     private let streamingSpinner = NSProgressIndicator()
     private let charCountLabel = NSTextField(labelWithString: "")

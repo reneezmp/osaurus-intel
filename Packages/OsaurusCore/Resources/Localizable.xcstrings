@@ -55983,6 +55983,48 @@
     "the Osaurus server is not running — tell the user to start it from the Osaurus app" : {
       "shouldTranslate" : false
     },
+    "thinking.mode.label" : {
+      "comment" : "Label for the thinking on/off control (model picker row, picker card section, agent generation override, model pill details). Noun context: the name of the mode, not the in-progress status. The streaming status in the chat transcript keeps the separate \"Thinking\" key.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Denken"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thinking"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "생각"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Мышление"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "思考"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "思考"
+          }
+        }
+      }
+    },
     "this agent runs Claude Code in text-only mode, which disables all tools" : {
       "localizations" : {
         "de" : {

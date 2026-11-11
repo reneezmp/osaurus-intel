@@ -2093,7 +2093,7 @@ extension FloatingInputCard {
             if let explicit {
                 details.append(explicit ? L("Thinking on") : L("Thinking off"))
             } else {
-                details.append([L("Thinking"), L("Default")].joined(separator: ": "))
+                details.append([L("thinking.mode.label"), L("Default")].joined(separator: ": "))
             }
         }
         if selectedPickerItem?.isVLM == true {

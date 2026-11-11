@@ -131,7 +131,7 @@ private struct ChatPickerOptionsSnapshot: Equatable {
             sections.append(
                 Section(
                     id: thinkingSectionID,
-                    title: hasEffortOption ? L("Thinking") : L("Reasoning Effort"),
+                    title: hasEffortOption ? L("thinking.mode.label") : L("Reasoning Effort"),
                     rows: rows,
                     footnote: nil,
                     reset: thinking.isExplicit && !thinking.supportsUnspecifiedDefault
