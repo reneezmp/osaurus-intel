@@ -35,6 +35,7 @@ changed three constraints at once. Check these before porting anything
 from 1.0 or later.
 
 - **Two upstream products since 2026-11-09** (`docs/RELEASING.md` upstream): **Osaurus 1.x** on `main` (1.0.0 on 2026-11-10, 1.0.1 on 2026-11-11, feed `docs/appcast-next.xml`) and **Osaurus Classic 0.25.x** on the new `classic` branch (fixes only; latest 0.25.33 on 2026-11-09, feed `docs/appcast.xml`, which offers 1.0.1 to Classic users as a beta). `classic` branched at `4d8af06b3`, just before the 1.0 commit, so 1.0 exists only on `main`.
+- **Intel follows Classic (Renée, 2026-11-11).** Fixes come from `upstream/classic`; 1.x features are a menu, ported one at a time only when Renée picks them. Classic = `bce907045..4d8af06b3` on `main` (already in the draft audit) plus the `classic`-only commits after `4d8af06b3` (2026-11-11: #3368, #3369, #3372 release-lane plumbing, Incompatible; #3373 cron DST fix, to check). Audit later ranges with `git log <last>..upstream/classic`; list 1.x additions separately from `upstream/main`.
 - **Minimum macOS 15 predates 1.0** (both appcasts say `minimumSystemVersion` 15.0; corrected 2026-11-11). `Packages/OsaurusCore/Package.swift` has
   `platforms: [.macOS(.v15)]`, so 1.0-era APIs need `#available(macOS 14 / 15, *)`
   branches with a Ventura fallback (the standing macOS 14 rule, extended
