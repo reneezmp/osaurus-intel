@@ -258,7 +258,37 @@ extension ToolRegistry {
     ///    re-wrapped with `truncated: true` plus a recovery hint, so no
     ///    single call (base64 payload, giant diff, runaway listing) can
     ///    blow the context window in one turn. Error-ness is preserved.
-    nonisolated static func normalizeToolResult(_ raw: String, tool: String) -> String {
+    ///
+    /// Upstream #3336: capture request identity before leaving task-local
+    /// context. The transform and bounded SSD retention run off the UI actor.
+    /// No read tool is added or granted: recovery is advertised only when
+    /// `file_read` is already offered to this run. Intel has no
+    /// `toolExecutionScope`; the engine binds `retainsOversizedToolResults`
+    /// from its offered tool list instead.
+    nonisolated static func normalizeExecutedToolResult(_ raw: String, tool: String) async throws -> String {
+        try Task.checkCancellation()
+        if raw.utf8.count <= ToolOutputCaps.universalResult {
+            return normalizeToolResult(raw, tool: tool)
+        }
+        let owner = ChatExecutionContext.retainsOversizedToolResults
+            ? RetainedToolResultStore.Owner.current : nil
+        let store = owner == nil ? nil : RetainedToolResultStore.current()
+        let work = Task.detached(priority: .utility) {
+            normalizeToolResult(raw, tool: tool, retainingFor: owner, store: store)
+        }
+        let result = await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            work.cancel()
+        }
+        try Task.checkCancellation()
+        return result
+    }
+
+    nonisolated static func normalizeToolResult(
+        _ raw: String, tool: String, retainingFor owner: RetainedToolResultStore.Owner? = nil,
+        store: RetainedToolResultStore? = nil
+    ) -> String {
         // The secret-prompt marker is deliberately NOT an envelope —
         // `SecretPromptParser` keys off `action` at the JSON root and the
         // chat loop replaces it with a real envelope after the overlay
@@ -286,13 +316,23 @@ extension ToolRegistry {
         // CJK/emoji-heavy payload is ~300 KB and ~3× the tokens of ASCII.
         // Measure in bytes; slice in characters at the proportional length so
         // ASCII payloads behave exactly as before (bytes == characters).
-        let cap = ToolOutputCaps.universalResult
+        let universalCap = ToolOutputCaps.universalResult
         let isEnvelope = ToolEnvelope.isSuccess(payload) || ToolEnvelope.isError(payload)
         let byteCount = payload.utf8.count
 
-        if byteCount <= cap {
+        if byteCount <= universalCap {
             return isEnvelope ? payload : ToolEnvelope.success(tool: tool, text: payload)
         }
+        let retained: RetainedToolResultStore.Reference?
+        if let owner, !Task.isCancelled {
+            retained = try? (store ?? RetainedToolResultStore.current()).retain(payload, tool: tool, owner: owner)
+        } else {
+            retained = nil
+        }
+        // A recoverable preview should not itself fill the conversation and
+        // force another summary. The existing universal cap remains the
+        // fallback when retention is unavailable or no reader was exposed.
+        let cap = retained == nil ? universalCap : 6_000
         // Head-biased: at the registry backstop the front of an oversized
         // payload is what identifies it (the recovery hint rides in the
         // envelope, not the marker). The cap is a BYTE budget: a proportional
@@ -315,31 +355,41 @@ extension ToolRegistry {
         if truncatedContent.utf8.count > cap {
             truncatedContent = HeadTailTruncation.applyByteExact(payload, byteCap: cap, headFraction: 2.0 / 3.0)
         }
-        let hint =
+        let genericHint =
             "Output exceeded the per-call cap and was truncated (head and tail kept). "
             + "Re-run with narrower arguments — filters, `max_results`, line ranges, or "
             + "head/tail options — to retrieve the missing region."
+        let hint = retained.map {
+            "Only a preview is included. The full normalized result is retained at \($0.path). "
+                + "Read it with file_read using that path and max_chars:60000; follow next_read for more pages. "
+                + "Lines are JSONL chunks: concatenate their text fields to reconstruct the result. "
+                + "Paging this reference reads the saved result without repeating the original tool call."
+        } ?? genericHint
+
+        var recovery: [String: Any] = [:]
+        if let retained { recovery["full_result"] = retained.payload }
+        if owner != nil, retained == nil { recovery["full_result_retained"] = false }
 
         if ToolEnvelope.isError(payload) {
             return ToolEnvelope.failure(
                 kind: .executionError,
                 message: "Tool '\(tool)' failed and its error output exceeded the per-call cap. " + hint,
                 tool: tool,
-                metadata: [
+                metadata: recovery.merging([
                     "truncated": true,
                     "original_chars": payload.count,
                     "content": truncatedContent,
-                ]
+                ]) { first, _ in first }
             )
         }
         return ToolEnvelope.success(
             tool: tool,
-            result: [
+            result: recovery.merging([
                 "kind": "truncated_output",
                 "truncated": true,
                 "original_chars": payload.count,
                 "content": truncatedContent,
-            ] as [String: Any],
+            ]) { first, _ in first },
             warnings: [hint]
         )
     }

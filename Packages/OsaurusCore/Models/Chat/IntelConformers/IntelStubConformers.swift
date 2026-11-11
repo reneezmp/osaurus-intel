@@ -1050,6 +1050,18 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// (see `AgentLoopRunEnd`).
     static let agentLoopToolNames: Set<String> = ["todo", "complete", "clarify", "get_current_time", "calculate"]
 
+    /// Optional built-ins a custom agent has switched off (upstream #3307
+    /// `disabledOptionalToolNames`; Intel has no redaction tools). The
+    /// Default agent never uses this.
+    static func disabledOptionalToolNames(_ settings: AgentSettings) -> Set<String> {
+        var names: Set<String> = []
+        if !settings.calculatorEnabled { names.insert(CalculatorTool.toolName) }
+        if !settings.taskChecklistEnabled { names.formUnion(["todo", "complete"]) }
+        if !settings.clarifyEnabled { names.insert("clarify") }
+        if !settings.artifactsEnabled { names.insert("share_artifact") }
+        return names
+    }
+
     /// Upstream's Agent Channel tool names (verbatim). Intel doesn't ship the
     /// channel tools yet (`W-channels`); the set is here for upstream's
     /// Insights redaction in `ToolCallLog`, which keys off these names.
@@ -1499,12 +1511,12 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         // race unless the tool streams and opts out (upstream).
         let runBody: () async throws -> String = {
             if tool.bypassRegistryTimeout {
-                return Self.normalizeToolResult(
+                return try await Self.normalizeExecutedToolResult(
                     try await Self.runToolBodyUntimed(tool, argumentsJSON: effectiveArgumentsJSON),
                     tool: name
                 )
             }
-            return Self.normalizeToolResult(
+            return try await Self.normalizeExecutedToolResult(
                 try await Self.runToolBody(
                     tool,
                     argumentsJSON: effectiveArgumentsJSON,
@@ -1730,6 +1742,13 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             {
                 return ToolEnvelope.failure(
                     kind: .unavailable, message: "Tools are disabled for this agent.", tool: name)
+            }
+            if let agentId = ChatExecutionContext.currentAgentId, agentId != Agent.defaultId,
+                let settings = AgentManager.shared.agent(for: agentId)?.settings,
+                Self.disabledOptionalToolNames(settings).contains(name)
+            {
+                return ToolEnvelope.failure(
+                    kind: .unavailable, message: "This tool is switched off for this agent.", tool: name)
             }
             return nil
         }

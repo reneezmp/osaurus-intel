@@ -1438,6 +1438,8 @@ struct SpawnTargetAuthority: Equatable, Sendable {
     let renderChartEnabled: Bool
     let speakEnabled: Bool
     let searchMemoryEnabled: Bool
+    let calculatorEnabled: Bool
+    let artifactsEnabled: Bool
     let webSearchEnabled: Bool
     let selfSchedulingEnabled: Bool
     let knowledgeEnabled: Bool
@@ -1462,6 +1464,8 @@ struct SpawnTargetAuthority: Equatable, Sendable {
         renderChartEnabled = agent.settings.renderChartEnabled
         speakEnabled = agent.settings.speakEnabled
         searchMemoryEnabled = agent.settings.searchMemoryEnabled
+        calculatorEnabled = agent.settings.calculatorEnabled
+        artifactsEnabled = agent.settings.artifactsEnabled
         webSearchEnabled = agent.settings.webSearchEnabled
         selfSchedulingEnabled = agent.settings.selfSchedulingEnabled
         knowledgeEnabled = agent.settings.knowledgeEnabled

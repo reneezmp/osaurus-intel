@@ -92,7 +92,7 @@ struct IntelToolDiscoveryTests {
                 let names = Set(context.tools.map(\.function.name))
                 #expect(!names.contains(weather) && !names.contains(stocks))
                 #expect(names.contains(CapabilitiesTool.toolName))
-                #expect(ToolRegistry.agentLoopToolNames.isSubset(of: names))  // built-ins stay
+                #expect(ToolRegistry.agentLoopToolNames.subtracting(["calculate"]).isSubset(of: names))  // built-ins stay (calculate is opt-in, #3307)
                 #expect(context.prompt.contains("## Enabled capabilities"))
                 #expect(context.prompt.contains("tool/\(weather)"))
                 #expect(context.prompt.contains("plugin/\(CapabilityCatalog.slug(group))"))

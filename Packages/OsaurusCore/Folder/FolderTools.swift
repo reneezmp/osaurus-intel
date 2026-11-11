@@ -851,6 +851,7 @@ struct FileReadTool: OsaurusTool {
         + "range. Directories return a listing; bound with "
         + "max_depth. Pass `mode: \"structure\"` on a .docx/.xlsx/.pptx/.pdf to get the numbered paragraphs, "
         + "cells, slides/shapes, or pages (and form fields) that `file_edit` `operations` address. "
+        + "To read several files in one call, put the first in `path` and the rest in `paths`. "
         + "Example: {\"path\": \"src/app.py\", \"start_line\": 1, \"end_line\": 120}"
     let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -859,6 +860,16 @@ struct FileReadTool: OsaurusTool {
             "path": .object([
                 "type": .string("string"),
                 "description": .string("Relative path to the file from the working directory"),
+            ]),
+            "paths": .object([
+                "type": .string("array"),
+                "items": .object(["type": .string("string")]),
+                "maxItems": .number(Double(FileReadTool.maxBatchPaths)),
+                "description": .string(
+                    "Optional more files read with `path` in the same call (\(FileReadTool.maxBatchPaths) total). "
+                        + "The other options apply to each file; results come back in order under `files`, "
+                        + "and one missing file does not fail the rest."
+                ),
             ]),
             "max_depth": .object([
                 "type": .string("integer"),
@@ -911,6 +922,14 @@ struct FileReadTool: OsaurusTool {
         "required": .array([.string("path")]),
     ])
 
+    /// Most files one `paths` call reads.
+    static let maxBatchPaths = 10
+
+    /// Characters one `paths` call returns across all its files. Each file
+    /// gets a fair share of what is left, so one large file cannot starve
+    /// the rest; a file cut short carries its usual continuation range.
+    static let batchOutputChars = ToolOutputCaps.fileReadMax
+
     private let fixedRootPath: URL?
     private let documentRegistry: DocumentFormatRegistry
 
@@ -919,6 +938,20 @@ struct FileReadTool: OsaurusTool {
         self.documentRegistry = documentRegistry
     }
 
+
+    /// The schema requires `path`; a call that lists every file in `paths`
+    /// gets the first one as its `path` so it reads instead of bouncing.
+    func normalizeArgumentsBeforeValidation(_ argumentsJSON: String) -> String {
+        guard var args = parseArguments(argumentsJSON),
+            ((args["path"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            let first = Self.batchPaths(args)?.first
+        else { return argumentsJSON }
+        args["path"] = first
+        guard let data = try? JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]),
+            let json = String(data: data, encoding: .utf8)
+        else { return argumentsJSON }
+        return json
+    }
 
 
     /// Maximum characters for file_read output to prevent context window exhaustion.
@@ -981,16 +1014,42 @@ struct FileReadTool: OsaurusTool {
 
     func execute(argumentsJSON: String) async throws -> String {
         let argsReq = requireArgumentsDictionary(argumentsJSON, tool: name)
-        guard case .value(let args) = argsReq else { return argsReq.failureEnvelope ?? "" }
+        guard case .value(var args) = argsReq else { return argsReq.failureEnvelope ?? "" }
+
+        if let paths = Self.batchPaths(args) {
+            guard paths.count == 1 else { return try await executeBatch(args, paths: paths) }
+            args["path"] = paths[0]
+        }
+        args.removeValue(forKey: "paths")
 
         let pathReq = requireString(
             args,
             "path",
-            expected: "relative path under the working folder (e.g. `src/app.py`)",
+            expected: "relative path under the working folder (e.g. `src/app.py`), or `paths` for several files",
             tool: name
         )
         guard case .value(let relativePath) = pathReq else {
             return pathReq.failureEnvelope ?? ""
+        }
+
+        // Opaque, read-only recovery references are scoped to this exact
+        // session and agent. They never resolve to model-supplied host paths.
+        // Ordinary permission/exposure gates still run before this tool (#3336).
+        if relativePath.hasPrefix(RetainedToolResultStore.scheme) {
+            let owner = RetainedToolResultStore.Owner.current
+            let store = RetainedToolResultStore.current()
+            let work = Task.detached(priority: .utility) {
+                let arguments = (try? JSONSerialization.jsonObject(
+                    with: Data(argumentsJSON.utf8))) as? [String: Any] ?? [:]
+                return store.read(path: relativePath, owner: owner, arguments: arguments)
+            }
+            let result = await withTaskCancellationHandler {
+                await work.value
+            } onCancel: {
+                work.cancel()
+            }
+            try Task.checkCancellation()
+            return result
         }
 
         // Intel: no Linux sandbox (`INC-containers`), so `/workspace/...` paths stay on the host workspace (upstream serves them from the sandbox bridge).
@@ -1042,6 +1101,110 @@ struct FileReadTool: OsaurusTool {
             isDirectory: isDirectory.boolValue,
             rootPath: rootPath,
             args: args
+        )
+    }
+
+    /// The files a call asks for when it is a batch: the `paths` entries
+    /// (an array, or an array encoded as a JSON string) plus a `path` sent
+    /// alongside them, deduplicated in order. Nil when `paths` is absent or
+    /// empty — models that fill every argument send `"paths": []` with a
+    /// plain `path`, which is a single-file read.
+    static func batchPaths(_ args: [String: Any]) -> [String]? {
+        var raw = args["paths"]
+        if let encoded = raw as? String {
+            let trimmed = encoded.trimmingCharacters(in: .whitespacesAndNewlines)
+            raw = trimmed.hasPrefix("[")
+                ? (try? JSONSerialization.jsonObject(with: Data(trimmed.utf8))) : [trimmed]
+        }
+        let listed = ((raw as? [Any]) ?? [])
+            .compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !listed.isEmpty else { return nil }
+        let single = (args["path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var seen: Set<String> = []
+        return ([single].compactMap { $0 }.filter { !$0.isEmpty } + listed)
+            .filter { seen.insert($0).inserted }
+    }
+
+    /// `paths` form: read each file through the single-path contract and
+    /// return the per-file results in request order under `files`. A file
+    /// that fails (missing, refused, unreadable) becomes an error entry and
+    /// the rest still read; only a call where every file fails is an error.
+    private func executeBatch(_ args: [String: Any], paths: [String]) async throws -> String {
+        guard paths.count <= Self.maxBatchPaths else {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "`paths` holds \(paths.count) files; one call reads at most \(Self.maxBatchPaths). "
+                    + "Split them across calls (they can go in the same response).",
+                field: "paths",
+                expected: "at most \(Self.maxBatchPaths) paths",
+                tool: name
+            )
+        }
+
+        let requestedCap = coerceInt(args["max_chars"]).map { max($0, 1) }
+        var remaining = Self.batchOutputChars
+        var files: [[String: Any]] = []
+        var failures = 0
+        for (index, path) in paths.enumerated() {
+            try Task.checkCancellation()
+            let share = remaining / (paths.count - index)
+            var single = args
+            single.removeValue(forKey: "paths")
+            single["path"] = path
+            single["max_chars"] = min(requestedCap ?? share, share)
+            let result: String
+            do {
+                let data = try JSONSerialization.data(withJSONObject: single)
+                result = try await execute(argumentsJSON: String(decoding: data, as: UTF8.self))
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                result = ToolEnvelope.fromError(error, tool: name)
+            }
+            if var payload = ToolEnvelope.successPayload(result) as? [String: Any] {
+                payload["ok"] = true
+                payload["path"] = payload["path"] ?? path
+                let text = payload["text"] as? String
+                    ?? (payload["kind"] as? String == "tool_result_page" ? payload["content"] as? String : nil)
+                remaining -= min(text?.count ?? 0, remaining)
+                files.append(payload)
+            } else {
+                failures += 1
+                var entry: [String: Any] = ["path": path, "ok": false]
+                if let data = result.data(using: .utf8),
+                    let failure = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                {
+                    entry["kind"] = failure["kind"]
+                    entry["message"] = failure["message"]
+                } else {
+                    entry["message"] = result
+                }
+                files.append(entry)
+            }
+        }
+        guard failures < paths.count else {
+            let reasons = files.compactMap { entry -> String? in
+                guard let path = entry["path"] as? String else { return nil }
+                return "\(path): \(entry["message"] as? String ?? "unreadable")"
+            }
+            return ToolEnvelope.failure(
+                kind: .notFound,
+                message: "None of the \(paths.count) files could be read. " + reasons.joined(separator: " | "),
+                field: "paths",
+                expected: "existing relative file paths",
+                tool: name
+            )
+        }
+        return ToolEnvelope.success(
+            tool: name,
+            result: [
+                "kind": "files",
+                "file_count": files.count,
+                "failed_count": failures,
+                "files": files,
+            ]
         )
     }
 
@@ -1105,7 +1268,9 @@ struct FileReadTool: OsaurusTool {
         // files so the model gets a field-level correction instead of a
         // silently ignored argument.
         let pagesSpec: String? = {
-            if let string = args["pages"] as? String { return string }
+            if let string = args["pages"] as? String {
+                return string.trimmingCharacters(in: .whitespaces).lowercased() == "all" ? nil : string
+            }
             if let number = coerceInt(args["pages"]) { return String(number) }
             return nil
         }()
@@ -4567,8 +4732,9 @@ struct FileSearchTool: OsaurusTool {
         if found.entries.isEmpty {
             let steer =
                 found.note
-                ?? "No files matched '\(originalQuery)'. List the parent directory with `file_read` "
-                + "to see what's there, or ask the user which file they mean."
+                ?? "No file names matched '\(originalQuery)'. `target: \"files\"` only matches names; "
+                + "search inside files with `target: \"content\"`. List the parent directory with "
+                + "`file_read` to see what's there, or ask the user which file they mean."
             return ToolEnvelope.search(
                 tool: name,
                 query: originalQuery,

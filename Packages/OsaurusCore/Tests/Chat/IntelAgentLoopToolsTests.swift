@@ -48,7 +48,9 @@ struct IntelAgentLoopToolsTests {
             AgentManager.shared.add(agent)
             let context = await SystemPromptComposer.composeChatContext(agentId: agent.id, query: "hi")
             let names = Set(context.tools.map(\.function.name))
-            #expect(ToolRegistry.agentLoopToolNames.isSubset(of: names))
+            // #3307: `calculate` is a per-agent opt-in (default off).
+            #expect(ToolRegistry.agentLoopToolNames.subtracting(["calculate"]).isSubset(of: names))
+            #expect(!names.contains("calculate"))
 
             let off = await SystemPromptComposer.composeChatContext(agentId: agent.id, query: "hi", toolsDisabled: true)
             #expect(off.tools.isEmpty)

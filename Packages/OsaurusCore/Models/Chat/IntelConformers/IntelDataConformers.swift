@@ -2720,6 +2720,12 @@ final class SystemPromptComposer: @unchecked Sendable {
             let settings = AgentManager.shared.agent(for: id)?.settings
             return (settings?.renderChartEnabled ?? false, settings?.searchMemoryEnabled ?? false)
         }
+        // Upstream #3307: optional built-ins this custom agent switched off.
+        let disabledOptionalTools: Set<String> = await MainActor.run {
+            guard id != Agent.defaultId, let settings = AgentManager.shared.agent(for: id)?.settings
+            else { return [] }
+            return ToolRegistry.disabledOptionalToolNames(settings)
+        }
         let appleAppToolNames = await MainActor.run {
             AppleApp.toolNames(for: AgentManager.shared.effectiveAppleApps(for: id))
         }
@@ -2869,6 +2875,7 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if name == ToolRegistry.videoToolName { return videoEnabled }
                 if ToolRegistry.appleScriptToolNames.contains(name) { return appleScriptEnabled }
                 if name == ToolRegistry.browserUseToolName { return browserUseEnabled }
+                if disabledOptionalTools.contains(name) { return false }
                 return true
             }
             if let enabled = enabledToolNames {

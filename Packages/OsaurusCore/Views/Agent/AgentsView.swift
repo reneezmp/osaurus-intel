@@ -2218,6 +2218,53 @@ struct AgentDetailView: View {
             theme: theme
         )
 
+        // Per-agent built-in tool switches (upstream #3307): a lean surface
+        // by default, specialist tools opt in. Redaction Tools are not on Intel.
+        if agent.id != Agent.defaultId {
+            AgentDetailSection(title: L("Built-in Tools"), icon: "wrench.and.screwdriver") {
+                abilityToggleRow(
+                    title: "Calculator",
+                    description: "Give the agent an exact-arithmetic tool. Turn it on for agents that work with numbers, such as budgets or data analysis.",
+                    icon: "plusminus",
+                    isOn: Binding(
+                        get: { currentAgent.settings.calculatorEnabled },
+                        set: { enabled in setAgentToolSetting(\.calculatorEnabled, enabled) }
+                    ),
+                    destination: nil
+                )
+                abilityToggleRow(
+                    title: "Task Checklist",
+                    description: "Let the agent track multi-step work with a checklist and mark it complete.",
+                    icon: "checklist",
+                    isOn: Binding(
+                        get: { currentAgent.settings.taskChecklistEnabled },
+                        set: { enabled in setAgentToolSetting(\.taskChecklistEnabled, enabled) }
+                    ),
+                    destination: nil
+                )
+                abilityToggleRow(
+                    title: "Clarify",
+                    description: "Let the agent stop and ask you a question when a request is ambiguous.",
+                    icon: "questionmark.bubble",
+                    isOn: Binding(
+                        get: { currentAgent.settings.clarifyEnabled },
+                        set: { enabled in setAgentToolSetting(\.clarifyEnabled, enabled) }
+                    ),
+                    destination: nil
+                )
+                abilityToggleRow(
+                    title: "Artifacts",
+                    description: "Let the agent share files and generated content as artifacts in the chat.",
+                    icon: "doc.richtext",
+                    isOn: Binding(
+                        get: { currentAgent.settings.artifactsEnabled },
+                        set: { enabled in setAgentToolSetting(\.artifactsEnabled, enabled) }
+                    ),
+                    destination: nil
+                )
+            }
+        }
+
         // Upstream's "Memory & Recall" group.
         if agent.id != Agent.defaultId {
             AgentDetailSection(title: L("Memory & Recall"), icon: "magnifyingglass") {
@@ -5478,7 +5525,12 @@ struct AgentDetailView: View {
                 speakEnabled: current.settings.speakEnabled,
                 // Written directly by the Charts / Memory Recall switches.
                 renderChartEnabled: current.settings.renderChartEnabled,
-                searchMemoryEnabled: current.settings.searchMemoryEnabled
+                searchMemoryEnabled: current.settings.searchMemoryEnabled,
+                // Written directly by the Built-in Tools switches (#3307).
+                calculatorEnabled: current.settings.calculatorEnabled,
+                taskChecklistEnabled: current.settings.taskChecklistEnabled,
+                clarifyEnabled: current.settings.clarifyEnabled,
+                artifactsEnabled: current.settings.artifactsEnabled
             ),
             order: current.order,
             workingFolderBookmark: current.workingFolderBookmark,

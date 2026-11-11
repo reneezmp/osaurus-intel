@@ -1781,10 +1781,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                                     call.callID
                                                 ) {
                                                     try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
-                                                        try await ToolRegistry.shared.execute(
-                                                            name: call.name,
-                                                            argumentsJSON: call.arguments
-                                                        )
+                                                        // #3336: retain oversized results only when `file_read` can page them.
+                                                        try await ChatExecutionContext.$retainsOversizedToolResults.withValue(
+                                                            activeTools?.contains(where: { $0.function.name == "file_read" }) == true
+                                                        ) {
+                                                            try await ToolRegistry.shared.execute(
+                                                                name: call.name,
+                                                                argumentsJSON: call.arguments
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
@@ -2210,10 +2215,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         ) {
                                             try await ChatExecutionContext.$currentToolCallId.withValue(callId) {
                                                 try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
-                                                    try await ToolRegistry.shared.execute(
-                                                        name: call.name,
-                                                        argumentsJSON: call.arguments
-                                                    )
+                                                    // #3336: retain oversized results only when `file_read` can page them.
+                                                    try await ChatExecutionContext.$retainsOversizedToolResults.withValue(
+                                                        activeTools?.contains(where: { $0.function.name == "file_read" }) == true
+                                                    ) {
+                                                        try await ToolRegistry.shared.execute(
+                                                            name: call.name,
+                                                            argumentsJSON: call.arguments
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }

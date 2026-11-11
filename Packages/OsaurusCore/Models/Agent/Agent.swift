@@ -714,6 +714,17 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     /// Independent of the memory switch (injection + recording); only
     /// controls mid-session recall through the tool. Default off.
     public var searchMemoryEnabled: Bool
+    /// Per-agent opt-in for the `calculate` tool (upstream #3307). Default off:
+    /// agents whose job involves numbers (finance, budgets, data analysis)
+    /// enable it.
+    public var calculatorEnabled: Bool
+    /// Per-agent gate for the `todo` checklist and its `complete` closer
+    /// (upstream #3307). Default on.
+    public var taskChecklistEnabled: Bool
+    /// Per-agent gate for `clarify` (upstream #3307). Default on.
+    public var clarifyEnabled: Bool
+    /// Per-agent gate for `share_artifact` (upstream #3307). Default on.
+    public var artifactsEnabled: Bool
     /// Self-scheduling bounds. Always present so the UI never has to disambiguate
     /// "schedule disabled" vs "schedule with default bounds"; `mode = .manual`
     /// (dailyRunCap = 0) is the off state.
@@ -779,6 +790,10 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         speakEnabled: Bool = false,
         renderChartEnabled: Bool = false,
         searchMemoryEnabled: Bool = false,
+        calculatorEnabled: Bool = false,
+        taskChecklistEnabled: Bool = true,
+        clarifyEnabled: Bool = true,
+        artifactsEnabled: Bool = true,
         imageEnabled: Bool = false,
         videoEnabled: Bool = false,
         imageGenerationTarget: MediaModelTarget? = nil,
@@ -821,6 +836,10 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         self.videoPermission = videoPermission
         self.renderChartEnabled = renderChartEnabled
         self.searchMemoryEnabled = searchMemoryEnabled
+        self.calculatorEnabled = calculatorEnabled
+        self.taskChecklistEnabled = taskChecklistEnabled
+        self.clarifyEnabled = clarifyEnabled
+        self.artifactsEnabled = artifactsEnabled
         self.dbEnabled = dbEnabled
         self.webSearchEnabled = webSearchEnabled
         self.enabledAppleApps = enabledAppleApps
@@ -841,6 +860,12 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         speakEnabled = try c.decodeIfPresent(Bool.self, forKey: .speakEnabled) ?? false
         renderChartEnabled = try c.decodeIfPresent(Bool.self, forKey: .renderChartEnabled) ?? false
         searchMemoryEnabled = try c.decodeIfPresent(Bool.self, forKey: .searchMemoryEnabled) ?? false
+        // Agents written before the toggles existed: the specialist tool
+        // decodes to off, the agent-loop tools keep their always-on past.
+        calculatorEnabled = try c.decodeIfPresent(Bool.self, forKey: .calculatorEnabled) ?? false
+        taskChecklistEnabled = try c.decodeIfPresent(Bool.self, forKey: .taskChecklistEnabled) ?? true
+        clarifyEnabled = try c.decodeIfPresent(Bool.self, forKey: .clarifyEnabled) ?? true
+        artifactsEnabled = try c.decodeIfPresent(Bool.self, forKey: .artifactsEnabled) ?? true
         imageEnabled = try c.decodeIfPresent(Bool.self, forKey: .imageEnabled) ?? false
         videoEnabled = try c.decodeIfPresent(Bool.self, forKey: .videoEnabled) ?? false
         // Tolerant: a malformed target means "choose automatically".
@@ -881,6 +906,10 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         case speakEnabled
         case renderChartEnabled
         case searchMemoryEnabled
+        case calculatorEnabled
+        case taskChecklistEnabled
+        case clarifyEnabled
+        case artifactsEnabled
         case imageEnabled
         case videoEnabled
         case imageGenerationTarget
@@ -914,6 +943,10 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         try c.encode(speakEnabled, forKey: .speakEnabled)
         try c.encode(renderChartEnabled, forKey: .renderChartEnabled)
         try c.encode(searchMemoryEnabled, forKey: .searchMemoryEnabled)
+        try c.encode(calculatorEnabled, forKey: .calculatorEnabled)
+        try c.encode(taskChecklistEnabled, forKey: .taskChecklistEnabled)
+        try c.encode(clarifyEnabled, forKey: .clarifyEnabled)
+        try c.encode(artifactsEnabled, forKey: .artifactsEnabled)
         try c.encode(imageEnabled, forKey: .imageEnabled)
         try c.encode(videoEnabled, forKey: .videoEnabled)
         try c.encodeIfPresent(imageGenerationTarget, forKey: .imageGenerationTarget)

@@ -123,6 +123,13 @@ public enum ChatExecutionContext {
     /// chat binds it around `engine.streamChat` since 2026-10-10.
     @TaskLocal public static var toolResultImagesEnabled: Bool = false
 
+    /// Upstream #3336: an oversized tool result may be saved to disk and
+    /// advertised to the model as an `osaurus-tool-result://` reference. True
+    /// only while `file_read` is offered to the run (upstream checks its
+    /// `toolExecutionScope`, which Intel lacks), so a reference is never
+    /// handed to a model that cannot read it.
+    @TaskLocal static var retainsOversizedToolResults: Bool = false
+
     /// Intel: the run comes from the chat window, which supplies what
     /// upstream wires through chat-only `AgentLoopHooks`. The cloud engine
     /// then runs the grounded-claim checks (the chat splits an ungrounded

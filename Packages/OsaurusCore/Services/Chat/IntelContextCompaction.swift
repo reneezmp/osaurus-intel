@@ -345,6 +345,10 @@ enum IntelContextCompaction {
                 }
                 if !parts.isEmpty { lines.append(parts.joined(separator: "\n")) }
             case .tool:
+                // #3336: the short clip must not hide the only way to recover omitted content.
+                if let recovery = RetainedToolResultStore.compactionContext(turn.content) {
+                    lines.append("[Tool result recovery metadata]: \(recovery)")
+                }
                 lines.append("[Tool result]: \(clip(turn.content, to: 1_200))")
             default:
                 continue
