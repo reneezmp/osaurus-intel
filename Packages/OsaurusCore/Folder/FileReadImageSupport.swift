@@ -118,9 +118,13 @@ enum FileReadImageSupport {
 
     static func recognizeTextLines(in image: CGImage) async -> [String] {
         await withCheckedContinuation { (continuation: CheckedContinuation<[String], Never>) in
+            // Vision can call the completion handler AND throw from `perform`
+            // for the same request (seen 2026-11-11 as a "continuation resumed
+            // more than once" crash in the full test run), so resume once.
+            let once = ResumeOnce(continuation)
             let request = VNRecognizeTextRequest { request, _ in
                 let observations = (request.results as? [VNRecognizedTextObservation]) ?? []
-                continuation.resume(returning: orderedLines(from: observations))
+                once.resume(orderedLines(from: observations))
             }
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
@@ -129,9 +133,23 @@ enum FileReadImageSupport {
                 do {
                     try handler.perform([request])
                 } catch {
-                    continuation.resume(returning: [])
+                    once.resume([])
                 }
             }
+        }
+    }
+
+    /// Resumes a continuation at most once, from any thread.
+    private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<[String], Never>?
+        init(_ continuation: CheckedContinuation<[String], Never>) { self.continuation = continuation }
+        func resume(_ lines: [String]) {
+            lock.lock()
+            let pending = continuation
+            continuation = nil
+            lock.unlock()
+            pending?.resume(returning: lines)
         }
     }
 
