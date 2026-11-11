@@ -112,6 +112,12 @@ struct IntelContextCompactionTests {
             _ = try await IntelContextCompaction.summarize(
                 turns: turns, existingSummary: nil, model: "m", engine: SummaryEngine(reply: "   "))
         }
+        // #3249: a summary no smaller than what it replaces is refused.
+        await #expect(throws: IntelContextCompaction.Failure.summaryNotSmaller) {
+            _ = try await IntelContextCompaction.summarize(
+                turns: turns, existingSummary: nil, model: "m",
+                engine: SummaryEngine(reply: String(repeating: "explanation ", count: 4000)))
+        }
         await #expect(throws: IntelContextCompaction.Failure.noModel) {
             _ = try await IntelContextCompaction.summarize(
                 turns: turns, existingSummary: nil, model: nil, engine: SummaryEngine(reply: "x"))

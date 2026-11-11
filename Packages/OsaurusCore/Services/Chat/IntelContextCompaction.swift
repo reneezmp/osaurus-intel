@@ -67,6 +67,9 @@ enum IntelContextCompaction {
         case nothingToCompact
         case noModel
         case emptySummary
+        /// A summary that costs at least as much context cannot reclaim
+        /// anything (upstream #3249).
+        case summaryNotSmaller
         case timedOut
         /// The summary hit the output limit before it finished; a partial
         /// summary is never applied over the conversation (upstream #3036).
@@ -80,6 +83,8 @@ enum IntelContextCompaction {
                 return L("Choose a model for this chat first.")
             case .emptySummary:
                 return L("The model returned an empty summary. Nothing was changed.")
+            case .summaryNotSmaller:
+                return L("The summary would not reduce context usage, so no conversation history was replaced")
             case .timedOut:
                 return L("Compaction timed out. Nothing was changed.")
             case .truncatedSummary(let model):
@@ -271,10 +276,11 @@ enum IntelContextCompaction {
 
         let draft = ConversationSummary(
             summaryText: text, coveredTurnIds: covered.map(\.id), modelIdentifier: model, savedTokensEstimate: 0)
-        let saved = max(
-            0,
-            ContextBudgetManager.estimateTokens(for: covered)
-                - ContextBudgetManager.estimateTokens(for: draft.contextMessageText))
+        let coveredTokens = ContextBudgetManager.estimateTokens(for: covered)
+        let summaryTokens = ContextBudgetManager.estimateTokens(for: draft.contextMessageText)
+        // #3249: a summary no smaller than the turns it replaces is rejected.
+        guard summaryTokens < coveredTokens else { throw Failure.summaryNotSmaller }
+        let saved = coveredTokens - summaryTokens
         return ConversationSummary(
             id: draft.id, summaryText: text, coveredTurnIds: draft.coveredTurnIds,
             createdAt: draft.createdAt, modelIdentifier: model, savedTokensEstimate: saved)
