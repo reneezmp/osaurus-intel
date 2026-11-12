@@ -191,6 +191,8 @@ enum IntelAnthropicMessagesAdapter {
         if !deprecatesSamplerKnobs {
             if let temperature = body["temperature"] { request["temperature"] = temperature }
             if let topP = body["top_p"] { request["top_p"] = topP }
+            // Agent generation overrides (upstream #3226: `top_k` on Messages).
+            if let topK = body["top_k"] { request["top_k"] = topK }
         }
         if let stop = body["stop"] { request["stop_sequences"] = stop }
         // Upstream `AnthropicCacheControl.forConversation(lastMessageRole:)`.

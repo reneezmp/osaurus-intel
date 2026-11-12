@@ -66,6 +66,10 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     public var temperature: Float?
     /// Optional max tokens override
     public var maxTokens: Int?
+    /// Optional advanced generation defaults for this custom agent (upstream
+    /// #3233): top P/K, min P, penalties, seed, stop sequences, Thinking and
+    /// reasoning effort. Nil inherits the model and provider defaults.
+    public var generationSettings: AgentGenerationSettings?
     /// Per-agent chat quick actions. nil = use defaults, empty = hidden, non-empty = custom list
     public var chatQuickActions: [AgentQuickAction]?
     /// User-authored override for the chat empty-state greeting line.
@@ -160,6 +164,7 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         defaultModel: String? = nil,
         temperature: Float? = nil,
         maxTokens: Int? = nil,
+        generationSettings: AgentGenerationSettings? = nil,
         chatQuickActions: [AgentQuickAction]? = nil,
         chatGreeting: String? = nil,
         chatSubtitle: String? = nil,
@@ -197,6 +202,7 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         self.defaultModel = defaultModel
         self.temperature = temperature
         self.maxTokens = maxTokens
+        self.generationSettings = generationSettings
         self.chatQuickActions = chatQuickActions
         self.chatGreeting = chatGreeting
         self.chatSubtitle = chatSubtitle
@@ -372,6 +378,8 @@ extension Agent {
             .first { !$0.isEmpty }
         temperature = try c.decodeIfPresent(Float.self, forKey: .temperature)
         maxTokens = try c.decodeIfPresent(Int.self, forKey: .maxTokens)
+        // A malformed block must not make the whole agent unloadable.
+        generationSettings = (try? c.decodeIfPresent(AgentGenerationSettings.self, forKey: .generationSettings)) ?? nil
         chatQuickActions = try c.decodeIfPresent([AgentQuickAction].self, forKey: .chatQuickActions)
         chatGreeting = try c.decodeIfPresent(String.self, forKey: .chatGreeting)
         chatSubtitle = try c.decodeIfPresent(String.self, forKey: .chatSubtitle)

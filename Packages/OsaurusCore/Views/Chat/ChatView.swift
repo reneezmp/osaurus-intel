@@ -3460,8 +3460,15 @@ final class ChatSession: ObservableObject {
         // Freeze prompt-affecting model controls at send time (upstream
         // #2101). Every tool round rebuilds its request; reading the live
         // picker inside the loop could change Thinking halfway through a run.
+        // The custom agent's saved generation settings and the explicit
+        // temperature / Top P freeze with it (`W-agent-generation-overrides`,
+        // upstream #3226 / #3233); the built-in agent has no saved settings.
+        let generationAgentId = agentId ?? Agent.defaultId
         let turnGenerationControls = ChatTurnGenerationControls.capture(
-            activeModelOptions: activeModelOptions
+            activeModelOptions: activeModelOptions,
+            agentSettings: AgentManager.shared.effectiveGenerationSettings(for: generationAgentId),
+            temperature: AgentManager.shared.effectiveTemperature(for: generationAgentId).map { Float($0) },
+            topP: ChatConfigurationStore.load().topPOverride.map { Float($0) }
         )
 
         currentTask = Task { @MainActor [weak self] in
@@ -3510,6 +3517,11 @@ final class ChatSession: ObservableObject {
             do {
                 let engine = chatEngineFactory()
                 let chatCfg = ChatConfigurationStore.load()
+                // A saved agent reasoning default the selected model cannot
+                // honor stops the send with a clear message (upstream #3233).
+                if let model = selectedModel, !IntelClaudeCodeService.handles(model) {
+                    try turnGenerationControls.validateAgentReasoning(modelID: model)
+                }
 
                 // MARK: - Capability Setup
                 let effectiveAgentId = agentId ?? Agent.defaultId

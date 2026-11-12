@@ -159,6 +159,12 @@ struct ChatCompletionRequest: Codable, Sendable {
     var session_id: String?
     var samplingParametersAreImplicit: Bool = false
     var modelOptions: [String: ModelOptionValue]? = nil
+    /// Intel (`W-agent-generation-overrides`, upstream #3233): sampling the
+    /// user set explicitly (the agent's saved generation settings, an explicit
+    /// temperature or Top P), frozen with the turn. Only these reach a cloud
+    /// provider, and only where it accepts them (`IntelSamplingWire`). Not
+    /// encoded: API clients keep today's behavior.
+    var explicitSampling: ChatExplicitSampling? = nil
     /// Intel (docs/SUBAGENTS_INTEL.md): a desktop subagent's model step. The
     /// engine ends the stream at the first round that proposes tool calls,
     /// yielding them as one `StreamingToolHint.encodeProposed` sentinel,

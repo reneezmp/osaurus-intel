@@ -1372,6 +1372,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             )
                             return terminalRecovery.action(for: step, completedToolWork: toolWorkThisRun)
                         }
+                        // Explicit sampling (the agent's saved generation
+                        // settings, upstream #3233): only what this provider
+                        // accepts, else a clear error before any HTTP call.
+                        try IntelSamplingWire.apply(
+                            request.explicitSampling,
+                            wire: IntelSamplingWire.wire(
+                                providerType: endpoint.provider?.providerType,
+                                host: URL(string: endpoint.url)?.host ?? "",
+                                usesResponsesWire: endpoint.usesResponsesWire),
+                            rejectsSamplers: Self.rejectsSamplingTemperature(modelId: endpoint.modelId),
+                            providerLabel: endpoint.providerLabel,
+                            into: &body)
                         if let liveToolSpecs {
                             body["tools"] = liveToolSpecs
                             // The caller's choice (an API client's

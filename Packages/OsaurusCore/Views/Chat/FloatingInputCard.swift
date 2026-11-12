@@ -2089,7 +2089,7 @@ extension FloatingInputCard {
         if let model = selectedModel, inlineReasoningSuffix == nil,
             ModelProfileRegistry.profile(for: model)?.thinkingOption != nil
         {
-            let explicit = ModelProfileRegistry.thinkingEnabled(for: model, values: activeModelOptions)
+            let explicit = ModelProfileRegistry.thinkingEnabled(for: model, values: effectiveReasoningOptions)
             if let explicit {
                 details.append(explicit ? L("Thinking on") : L("Thinking off"))
             } else {
@@ -2105,10 +2105,34 @@ extension FloatingInputCard {
     /// "· Medium": the explicit `reasoningEffort` choice, else the profile
     /// default (upstream's "model · effort").
     private var inlineReasoningSuffix: String? {
+        // The saved agent default does not fit this model: keep showing the
+        // mismatch instead of silently resetting it (upstream #3261).
+        if reasoningSelectionNeedsChoice { return L("Choose reasoning") }
         guard let model = selectedModel, IntelGeminiReasoningRoute.offersEffort(forModelId: model) else {
             return nil
         }
-        return ModelProfileRegistry.inlineReasoningSuffixLabel(for: model, values: activeModelOptions)
+        return ModelProfileRegistry.inlineReasoningSuffixLabel(for: model, values: effectiveReasoningOptions)
+    }
+
+    /// What dispatch will use: the picker's options with the agent's saved
+    /// Thinking / reasoning effort on top (`W-agent-generation-overrides`,
+    /// upstream #3233 / #3261). Display only; neither source is written into
+    /// the per-model option store.
+    private var effectiveReasoningOptions: [String: ModelOptionValue] {
+        guard let model = selectedModel else { return activeModelOptions }
+        return ChatTurnGenerationControls.capture(
+            activeModelOptions: activeModelOptions,
+            agentSettings: agentManager.effectiveGenerationSettings(for: effectiveAgentId)
+        ).reasoningOptions(for: model)
+    }
+
+    /// The agent saved a Thinking / effort choice this model cannot honor.
+    private var reasoningSelectionNeedsChoice: Bool {
+        guard let model = selectedModel, !IntelClaudeCodeService.handles(model),
+            let settings = agentManager.effectiveGenerationSettings(for: effectiveAgentId),
+            settings.hasReasoningOverride
+        else { return false }
+        return AgentGenerationReasoningChoices.resolve(modelID: model).reasoningIssue(settings: settings) != nil
     }
 
     private var modelSelectorChip: some View {
@@ -2241,7 +2265,7 @@ extension FloatingInputCard {
         let thinkingOption = ModelProfileRegistry.profile(for: model)?.thinkingOption
         let options = activeProfileOptions.filter { $0.id != thinkingOption?.id }
         let thinking: ModelPickerThinkingControl? = thinkingOption.map { _ in
-            let explicit = ModelProfileRegistry.thinkingEnabled(for: model, values: activeModelOptions)
+            let explicit = ModelProfileRegistry.thinkingEnabled(for: model, values: effectiveReasoningOptions)
             return ModelPickerThinkingControl(
                 isEnabled: explicit ?? false,
                 isExplicit: explicit != nil,
@@ -2267,7 +2291,7 @@ extension FloatingInputCard {
             capabilities: capabilities,
             thinking: thinking,
             options: options,
-            values: ModelProfileRegistry.normalizedOptions(for: model, persisted: activeModelOptions),
+            values: ModelProfileRegistry.normalizedOptions(for: model, persisted: effectiveReasoningOptions),
             defaults: defaults,
             onChange: { optionId, newValue in
                 DispatchQueue.main.async {

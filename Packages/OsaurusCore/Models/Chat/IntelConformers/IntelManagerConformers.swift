@@ -878,6 +878,13 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         return ChatConfigurationStore.load().temperature.map { Double($0) }
     }
 
+    /// Custom-agent overrides only; the built-in agent keeps its existing
+    /// configuration contract (upstream #3233).
+    func effectiveGenerationSettings(for agentId: UUID) -> AgentGenerationSettings? {
+        guard let agent = resolvedAgent(agentId) else { return nil }
+        return agent.generationSettings
+    }
+
     func effectiveMaxTokens(for agentId: UUID) -> Int? {
         if agentId == Agent.defaultId,
             let maxTokens = DefaultAgentConfigurationStore.load().maxTokens

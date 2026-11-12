@@ -152,6 +152,9 @@ enum IntelGeminiAdapter {
             generation["maxOutputTokens"] = maxTokens
         }
         if let topP = body["top_p"] { generation["topP"] = topP }
+        // Agent generation overrides (upstream #3226): `topK` and `seed`.
+        if let topK = body["top_k"] { generation["topK"] = topK }
+        if let seed = body["seed"] { generation["seed"] = seed }
         if let stop = body["stop"] { generation["stopSequences"] = stop }
         // Upstream #3115: the picker's effort becomes Gemini's native thinking
         // control, `thinkingLevel` on Gemini 3 and a `thinkingBudget` on 2.5;

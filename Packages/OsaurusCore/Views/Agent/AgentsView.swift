@@ -419,6 +419,7 @@ struct AgentsView: View {
             defaultModel: agent.defaultModel,
             temperature: agent.temperature,
             maxTokens: agent.maxTokens,
+            generationSettings: agent.generationSettings,
             chatQuickActions: agent.chatQuickActions,
             chatGreeting: agent.chatGreeting,
             chatSubtitle: agent.chatSubtitle,
@@ -1003,6 +1004,10 @@ struct AgentDetailView: View {
     @State private var systemPrompt: String = ""
     @State private var temperature: String = ""
     @State private var maxTokens: String = ""
+    /// Saved advanced generation settings (`W-agent-generation-overrides`,
+    /// upstream #3233). Written only by the editor's Save; never autosaved
+    /// from half-typed text.
+    @State private var generationSettings: AgentGenerationSettings?
     @State private var selectedThemeId: UUID?
     @State private var chatQuickActions: [AgentQuickAction]?
     @State private var editingQuickActionId: UUID?
@@ -1321,6 +1326,9 @@ struct AgentDetailView: View {
         }
         .onChange(of: currentAgent.maxTokens) { value in
             if Int(maxTokens) != value { maxTokens = value.map { String($0) } ?? "" }
+        }
+        .onChange(of: currentAgent.generationSettings) { value in
+            if generationSettings != value { generationSettings = value }
         }
         .onChange(of: loadedPluginsRefreshNonce) { _ in
             refreshDetailCaches()
@@ -2112,7 +2120,7 @@ struct AgentDetailView: View {
     /// moved to the Customization tab and are no longer reachable from here.
     private var advancedSummary: String {
         var parts: [String] = []
-        if !temperature.isEmpty || !maxTokens.isEmpty { parts.append("generation") }
+        if !temperature.isEmpty || !maxTokens.isEmpty || generationSettings != nil { parts.append("generation") }
         if disableTools { parts.append("tools off") }
         if disableMemory { parts.append("memory off") }
         return parts.isEmpty ? L("Defaults") : parts.joined(separator: " · ")
@@ -3250,40 +3258,22 @@ struct AgentDetailView: View {
     /// 90% case.
     private var generationOverridesSection: some View {
         AgentDetailSection(title: L("Generation Overrides"), icon: "slider.horizontal.3") {
-            VStack(spacing: 12) {
-                HStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label {
-                            Text("Temperature", bundle: .module)
-                        } icon: {
-                            Image(systemName: "thermometer.medium")
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(theme.secondaryText)
-
-                        StyledTextField(placeholder: "0.7", text: $temperature, icon: nil)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label {
-                            Text("Max Tokens", bundle: .module)
-                        } icon: {
-                            Image(systemName: "number")
-                        }
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(theme.secondaryText)
-
-                        StyledTextField(placeholder: "4096", text: $maxTokens, icon: nil)
-                    }
+            // Upstream #3233 / #3246: an explicit Save (so half-typed text never
+            // erases a saved value) and Inherit/Custom rows. Temperature and
+            // Max Tokens live here too; they stay on the agent, not in
+            // `generationSettings`.
+            AgentGenerationSettingsEditor(
+                modelID: selectedModel ?? agentManager.effectiveModel(for: agent.id),
+                savedTemperature: Float(temperature),
+                savedMaxTokens: Int(maxTokens),
+                savedSettings: generationSettings,
+                onSave: { values in
+                    temperature = values.temperature.map { String($0) } ?? ""
+                    maxTokens = values.maxTokens.map { String($0) } ?? ""
+                    generationSettings = values.settings
+                    saveAgent()
                 }
-
-                Text("Leave empty to use default values from global settings.", bundle: .module)
-                    .font(.system(size: 11))
-                    .foregroundColor(theme.tertiaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .onChange(of: temperature) { _ in debouncedSave() }
-            .onChange(of: maxTokens) { _ in debouncedSave() }
+            )
         }
     }
 
@@ -5331,6 +5321,7 @@ struct AgentDetailView: View {
         systemPrompt = agent.systemPrompt
         temperature = agent.temperature.map { String($0) } ?? ""
         maxTokens = agent.maxTokens.map { String($0) } ?? ""
+        generationSettings = agent.generationSettings
         selectedThemeId = agent.themeId
         chatQuickActions = agent.chatQuickActions
         chatGreetingDraft = agent.chatGreeting ?? ""
@@ -5481,6 +5472,7 @@ struct AgentDetailView: View {
             defaultModel: current.defaultModel,
             temperature: Float(temperature),
             maxTokens: Int(maxTokens),
+            generationSettings: generationSettings,
             chatQuickActions: chatQuickActions,
             chatGreeting: {
                 let trimmed = chatGreetingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
