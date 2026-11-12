@@ -3401,3 +3401,12 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] A custom agent with an empty system prompt answers "what is your role?" as a Mac chat agent, not a blank assistant. In a project with instructions ("Always answer in French"), replies follow them on the first and a later turn.
 - [ ] Give the agent a knowledge collection and ask something it answers: it searches knowledge first. With a cloud image model on, ask for a picture: it calls `image` instead of saying it's text-only.
 - [ ] With AppleScript on, open a document in TextEdit, switch to Osaurus and say "summarize the document": it uses AppleScript on that app instead of asking for a path.
+
+## Context readout and per-chat prompt freeze (2026-11-12)
+
+`W-cov-reaudit` 5b slices 4–5. Not in candidate 67.
+
+- [ ] Agents › a custom agent › Abilities: a "Context" capsule with `~N` and a Low/Moderate chip sits at the right end of the sub-tab bar (also on the Tools tab). Switch Tools off: the figure drops and a `-N` chip shows briefly. Click the capsule: the popover lists Agent instructions, Enabled abilities, Tool descriptions and Memory, and "N of M abilities on". With a small-window model the chip turns High.
+- [ ] New chat with a custom agent (Auto tools, one plugin installed): open the context popover before sending. It lists Platform, Persona, the discipline sections and Enabled Capabilities, with a non-zero Tools rail.
+- [ ] Send two messages in one chat, then toggle Image (or Speak) for that agent in Abilities and send a third: the new tool is offered on the third message. Installing or removing a plugin between messages doesn't break the chat.
+- [ ] Switch the agent chip mid-chat: the reply uses the new agent's persona and tools.
