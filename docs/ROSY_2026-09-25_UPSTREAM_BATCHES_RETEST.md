@@ -3379,3 +3379,13 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
       once and the app does not hang.
 - [ ] Ask an agent to read an image or a scanned PDF with text recognition: it
       returns the text and the app does not crash.
+
+## Anthropic thinking replay and per-agent generation settings (2026-11-12)
+
+`W-anthropic-thinking-replay`, `W-agent-generation-overrides` (backlog rows). Not in candidate 67.
+
+- [ ] Anthropic provider, a thinking-capable Claude model, reasoning above Off, a tool on (web search or a folder tool). Ask something that needs the tool: the Think panel, the tool card and a final answer appear, with no "thinking block … signature" error.
+- [ ] Quit and reopen, open that chat, ask a follow-up that uses the tool again: no API error about thinking blocks. Switch the chat to an OpenAI-compatible model and send: a normal reply.
+- [ ] Agents › a custom agent › Generation Overrides: set Temperature Custom 0.3, Top P Custom 0.9, a stop sequence `END`, save; reopen the agent: the values stay. Typing `abc` shows a red error and isn't saved.
+- [ ] Chat with that agent on DeepSeek or OpenRouter: it works, and Insights' request body shows temperature, top_p and stop. Set Min P Custom 0.05 and switch to an Anthropic model: the send stops with a message naming `min_p`.
+- [ ] Set reasoning effort Custom, then pick a model without effort levels: the composer chip says "Choose reasoning"; set it back to Inherit and sending works.
