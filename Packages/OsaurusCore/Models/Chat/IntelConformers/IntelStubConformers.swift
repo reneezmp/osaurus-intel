@@ -1222,6 +1222,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             ListKnowledgeTool(),
             WriteKnowledgeTool(),
             EditKnowledgeTool(),
+            // Skill self-improvement (upstream Classic `update_skill`); on demand,
+            // see `onDemandBuiltInToolNames`.
+            SkillUpdateTool(),
             DeleteKnowledgeTool(),
             FlagKnowledgeStaleTool(),
             ListKnowledgeTicketsTool(),
@@ -1416,8 +1419,19 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// OpenAI-compatible specs for the currently registered tools, fed into
     /// `ComposedContext.tools` so the model sees them on the next send.
     /// Globally-disabled tools are filtered out.
+    /// Built-ins kept out of every default tool list and sent only when a caller
+    /// asks for them by name through `openAISpecs(named:)` (upstream Classic's
+    /// `onDemandBuiltInToolNames`: a spec in the baseline is a spec in every
+    /// cached prompt prefix). Intel has no `capabilities_load`, so the
+    /// composer pre-loads `update_skill` for an editable slash-invoked skill
+    /// (`SkillManager.preloadedToolNames`), once that wiring lands.
+    nonisolated static let onDemandBuiltInToolNames: Set<String> = [
+        "update_skill"
+    ]
+
     func openAISpecs(for agentID: UUID? = nil) -> [Tool] {
         toolsByName.values
+            .filter { !Self.onDemandBuiltInToolNames.contains($0.name) }
             .filter {
                 Self.orchestratorOnlyToolNames.contains($0.name)
                     || !disabledToolNames.contains($0.name)

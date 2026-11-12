@@ -571,6 +571,116 @@ extension SkillManager {
             throw SkillFileError.archiveEntryEscapes(path: fileURL.path)
         }
     }
+
+    // MARK: - update_skill support (upstream Classic)
+    //
+    // Helpers for the `update_skill` tool. The composer-side wiring that
+    // pre-loads the tool for a slash-invoked skill is a follow-up (see
+    // `ToolRegistry.onDemandBuiltInToolNames`).
+
+    /// Wrap a slash-selected skill as instructions that are already active,
+    /// not as the name of another tool the model still needs to discover.
+    /// Local models otherwise commonly turn `## Active Skill: foo` into a
+    /// hallucinated `foo(...)` call (or search for the skill) instead of
+    /// following the bundled instructions with their exposed file/shell tools.
+    ///
+    /// `editable` adds the one line that makes skill self-improvement work
+    /// from the slash path. Without it the wrapper's own "use only the tools
+    /// exposed in this request" rule steers a compliant model AWAY from
+    /// `update_skill`: asked to change the skill it answered "Updated" with
+    /// nothing saved (a user report on 0.24.7, GPT-5.6). The tool is
+    /// pre-loaded for editable skills by `preloadedToolNames`, so the sentence
+    /// is true, and it sits in this per-turn section rather than the static
+    /// prefix, so it costs nothing in prompt-cache terms.
+    static func activeSkillPromptSection(
+        name: String,
+        body: String,
+        editable: Bool = false
+    ) -> String {
+        let editNote =
+            editable
+            ? """
+
+
+            If the user asks to change this skill's instructions, call `update_skill` \
+            (it is exposed in this request) and report only what its result says. Never \
+            state that the skill was updated unless that call succeeded.
+            """
+            : """
+
+
+            This skill is built in or provided by a plugin, so its instructions cannot be \
+            edited. If the user asks to change it, say so plainly and suggest duplicating it \
+            as a custom skill; do not describe a preference as "updated" or "saved".
+            """
+        return """
+            ## Active Skill Instructions: \(name)
+
+            This skill is already loaded for this turn. Do not search for it, call \
+            `capabilities` to load it, or invoke a tool named after the skill. Follow \
+            the instructions below using only the actual tools exposed in this request.\(editNote)
+
+            \(body)
+            """
+    }
+
+    /// Tools to ride into the turn's schema when `skill` is invoked by slash
+    /// command: the dynamic tools its instructions name (see
+    /// `toolNames(referencedIn:from:)`) plus, for a user-editable skill,
+    /// `update_skill`.
+    ///
+    /// `update_skill` is an on-demand built-in kept out of every baseline for
+    /// prompt-cache stability, and the slash wrapper forbids discovery, so
+    /// this is the ONLY way it can reach a slash-invoked turn. Loading it here
+    /// is free in cache terms: a session with an active skill already carries
+    /// that skill's text, so its prefix is unique to the session regardless.
+    /// Built-in and plugin skills are not editable, so nothing is added for
+    /// them and the wrapper does not advertise editing either.
+    public nonisolated static func preloadedToolNames(
+        for skill: Skill,
+        body: String,
+        dynamicCandidates: Set<String>
+    ) -> [String] {
+        var names = toolNames(referencedIn: body, from: dynamicCandidates)
+        if isEditable(skill) { names.append("update_skill") }
+        return names
+    }
+
+    /// Whether `update_skill` may modify this skill: user-authored only.
+    public nonisolated static func isEditable(_ skill: Skill) -> Bool {
+        !skill.isBuiltIn && !skill.isFromPlugin
+    }
+
+    /// Tool names out of `candidates` that `text` mentions as a whole
+    /// identifier token.
+    ///
+    /// A skill's instructions routinely name the exact tools they expect the
+    /// model to call (`runalyze_mcp_get_activities`, …), but the `/skill-name`
+    /// slash path injects those instructions AFTER the turn's tool schema and
+    /// execution scope are frozen — so the model calls a tool it was told
+    /// about and the registry refuses it as not exposed (issue #2145). The
+    /// send path uses this scan to pre-load the mentioned tools into the same
+    /// turn's schema, mirroring what `capabilities_load skill/<name>` already
+    /// does for plugin tool groups.
+    ///
+    /// Matching is token-exact: the text is split on every character that
+    /// cannot appear in a tool name, so `use runalyze_mcp_get_activities.`
+    /// matches but a substring like `activities` inside a longer name never
+    /// does. Sorted output keeps downstream schema composition deterministic.
+    public nonisolated static func toolNames(
+        referencedIn text: String,
+        from candidates: Set<String>
+    ) -> [String] {
+        guard !candidates.isEmpty, !text.isEmpty else { return [] }
+        // Function-name charset (`[A-Za-z0-9_-]`): everything outside it is a
+        // separator, so surrounding prose, backticks and punctuation fall away.
+        let toolNameCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-"))
+        let tokens = Set(
+            text.components(separatedBy: toolNameCharacters.inverted)
+                .filter { !$0.isEmpty }
+        )
+        return candidates.intersection(tokens).sorted()
+    }
 }
 
 // MARK: - FileManager ZIP Extension
