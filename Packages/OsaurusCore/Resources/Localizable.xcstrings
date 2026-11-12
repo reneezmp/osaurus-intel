@@ -2704,6 +2704,40 @@
       }
     },
     "1 item" : {},
+    "1 item installed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 item installed"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 item installed"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 item installed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装 1 个项目"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安裝 1 個項目"
+          }
+        }
+      }
+    },
     "1 manual-model provider" : {
       "localizations" : {
         "de" : {
@@ -2874,6 +2908,40 @@
         }
       }
     },
+    "1 plugin available" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 plugin available"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 plugin available"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 plugin available"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 个插件可用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 個插件可用"
+          }
+        }
+      }
+    },
     "1 redaction" : {
       "localizations" : {
         "de" : {
@@ -3040,6 +3108,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 個技能"
+          }
+        }
+      }
+    },
+    "1 skill available" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 skill available"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 skill available"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 skill available"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 个技能可用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 個技能可用"
           }
         }
       }
@@ -4668,6 +4770,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加到收藏"
+          }
+        }
+      }
+    },
+    "Add token" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token hinzufügen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "토큰 추가"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить токен"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加令牌"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增令牌"
           }
         }
       }
@@ -11748,6 +11885,40 @@
         }
       }
     },
+    "Connect GitHub to update plugins" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub verbinden, um Plugins zu aktualisieren"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인을 업데이트하려면 GitHub 연결"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключите GitHub для обновления плагинов"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接 GitHub 以更新插件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連接 GitHub 以更新插件程式"
+          }
+        }
+      }
+    },
     "Connect Provider" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13288,6 +13459,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 programmablesearchengine.google.com 建立可程式化搜尋引擎（啟用「搜尋整個網路」）。"
+          }
+        }
+      }
+    },
+    "Create a token using [this link](https://github.com/settings/tokens/new?description=Osaurus) (no scopes needed)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erstelle über [diesen Link](https://github.com/settings/tokens/new?description=Osaurus) ein Token (keine Berechtigungen nötig)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[이 링크](https://github.com/settings/tokens/new?description=Osaurus)를 사용해 토큰을 만드세요 (권한 범위 불필요)"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создайте токен по [этой ссылке](https://github.com/settings/tokens/new?description=Osaurus) (доступы не нужны)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用[此链接](https://github.com/settings/tokens/new?description=Osaurus)创建令牌（无需任何权限范围）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用[此連結](https://github.com/settings/tokens/new?description=Osaurus)建立令牌（不需要任何權限範圍）"
           }
         }
       }
@@ -19300,6 +19505,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Git"
+          }
+        }
+      }
+    },
+    "GitHub connected" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub verbunden"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub 연결됨"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub подключён"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已连接 GitHub"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已連接 GitHub"
+          }
+        }
+      }
+    },
+    "GitHub limits how often this app can browse and update plugins before it starts showing errors. Connecting a free GitHub account raises that limit so updates keep working." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub begrenzt, wie oft diese App Plugins durchsuchen und aktualisieren kann, bevor Fehler auftreten. Wenn du ein kostenloses GitHub-Konto verbindest, wird dieses Limit erhöht, sodass Aktualisierungen weiter funktionieren."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub는 오류가 나타나기 전까지 이 앱이 플러그인을 탐색하고 업데이트할 수 있는 횟수를 제한합니다. 무료 GitHub 계정을 연결하면 이 한도가 늘어나 업데이트가 계속 작동합니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub ограничивает, как часто это приложение может просматривать и обновлять плагины, прежде чем начнут появляться ошибки. Подключение бесплатного аккаунта GitHub повышает этот лимит, чтобы обновления продолжали работать."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub 会限制此应用浏览和更新插件的频率，超出后就会报错。连接一个免费的 GitHub 账户可以提高该限制，让更新持续可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub 會限制此應用程式瀏覽和更新插件程式的頻率，超出後就會出現錯誤。連接一個免費的 GitHub 帳戶可以提高該限制，讓更新持續可用。"
+          }
+        }
+      }
+    },
+    "GitHub limits how often this app can check for updates. Connect a free GitHub account to update plugins without hitting that limit." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub begrenzt, wie oft diese App nach Updates suchen kann. Verbinde ein kostenloses GitHub-Konto, um Plugins zu aktualisieren, ohne an dieses Limit zu stoßen."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub는 이 앱이 업데이트를 확인할 수 있는 횟수를 제한합니다. 무료 GitHub 계정을 연결하면 이 한도에 걸리지 않고 플러그인을 업데이트할 수 있습니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub ограничивает, как часто это приложение может проверять обновления. Подключите бесплатный аккаунт GitHub, чтобы обновлять плагины, не достигая этого лимита."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub 会限制此应用检查更新的频率。连接一个免费的 GitHub 账户，即可更新插件而不触及该限制。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub 會限制此應用程式檢查更新的頻率。連接一個免費的 GitHub 帳戶，即可更新插件程式而不觸及該限制。"
           }
         }
       }
@@ -30302,6 +30609,40 @@
         }
       }
     },
+    "Paste it below. It stays in your macOS Keychain" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Füge ihn unten ein. Er bleibt in deinem macOS-Schlüsselbund."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아래에 붙여넣으세요. macOS 키체인에 저장됩니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вставьте его ниже. Он останется в связке ключей macOS."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将其粘贴在下方。它会保存在你的 macOS 钥匙串中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "將其貼在下方。它會保存在您的 macOS 鑰匙圈中。"
+          }
+        }
+      }
+    },
     "Paste the URL of any OpenAI-compatible server. Local endpoints don't need a key." : {
       "comment" : "Caption of the onboarding connect dialog for a custom OpenAI-compatible endpoint.",
       "localizations" : {
@@ -31121,6 +31462,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "插件调用 — %@。"
+          }
+        }
+      }
+    },
+    "Plugins can now browse and update reliably without hitting GitHub's limit." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plugins lassen sich jetzt zuverlässig durchsuchen und aktualisieren, ohne an GitHubs Limit zu stoßen."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이제 GitHub의 한도에 걸리지 않고 플러그인을 안정적으로 탐색하고 업데이트할 수 있습니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Теперь плагины можно надёжно просматривать и обновлять, не достигая лимита GitHub."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "现在可以稳定地浏览和更新插件，不会触及 GitHub 的限制。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "現在可以穩定地瀏覽和更新插件程式，不會觸及 GitHub 的限制。"
           }
         }
       }
@@ -34622,6 +34997,40 @@
         }
       }
     },
+    "Replace…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Replace…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Replace…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Заменять…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "替换…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "替換…"
+          }
+        }
+      }
+    },
     "Replies" : {
       "comment" : "Section title for the agent's reply routing information.",
       "isCommentAutoGenerated" : true,
@@ -36855,6 +37264,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "保存生成默认值"
+          }
+        }
+      }
+    },
+    "Save token" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token speichern"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "토큰 저장"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сохранить токен"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存令牌"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存令牌"
           }
         }
       }
@@ -39845,6 +40288,40 @@
         }
       }
     },
+    "Sign in (or sign up free) at github.com" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Melde dich an (oder registriere dich kostenlos) auf github.com"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "github.com에서 로그인하거나 무료로 가입하세요"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Войдите (или зарегистрируйтесь бесплатно) на github.com"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 github.com 登录（或免费注册）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 github.com 登入（或免費註冊）"
+          }
+        }
+      }
+    },
     "Sign in at kagi.com and open the API portal at kagi.com/api." : {
       "localizations" : {
         "de" : {
@@ -41305,6 +41782,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "股票、外匯和經濟市場資料"
+          }
+        }
+      }
+    },
+    "Stop plugin update errors" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plugin-Update-Fehler beheben"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플러그인 업데이트 오류 방지"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Устраните ошибки обновления плагинов"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解决插件更新错误"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解決插件程式更新錯誤"
           }
         }
       }

@@ -983,25 +983,6 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     }
 }
 
-// MARK: - ClaudePluginInstallReport (Intel stub)
-//
-// Upstream `ClaudePluginInstallReport` lives in the excluded
-// `Services/Skill/ClaudePluginInstaller.swift`. The type only
-// surfaces through `GitHubImportSheet.onPluginInstallComplete:
-// ((ClaudePluginInstallReport) -> Void)?` and the closure body at
-// `SkillsView:190` reads four computed totals. The Intel stub
-// returns zeros because the GitHub-installer path itself is Apple-
-// Silicon only (its sheet renders the `AppleSiliconOnlyTab`
-// placeholder), so the callback will never fire with non-zero
-// counts on Intel.
-public struct ClaudePluginInstallReport: Sendable {
-    public init() {}
-    public var totalImportedSkills: Int { 0 }
-    public var totalImportedAgents: Int { 0 }
-    public var totalImportedCommands: Int { 0 }
-    public var totalImportedMCPProviders: Int { 0 }
-}
-
 /// Tools that belong to a capability group (e.g. one Apple app) declare it
 /// so pickers can bucket them. Upstream declares this in the excluded
 /// Tools/ToolRegistry.swift.

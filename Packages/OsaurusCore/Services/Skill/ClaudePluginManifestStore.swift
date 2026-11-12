@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  ClaudePluginManifestStore.swift
 //  osaurus
@@ -345,5 +344,3 @@ public enum ClaudePluginManifestStore {
         return OsaurusPaths.directorySize(at: url)
     }
 }
-
-#endif

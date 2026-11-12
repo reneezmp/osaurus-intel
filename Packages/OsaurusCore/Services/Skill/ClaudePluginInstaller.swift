@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  ClaudePluginInstaller.swift
 //  osaurus
@@ -508,7 +507,12 @@ public final class ClaudePluginInstaller {
                     // batch of stdio servers in the same plugin doesn't kick
                     // off the macOS-version probe N times.
                     let sandboxAvailable: Bool
-                    #if os(macOS)
+                    #if OSAURUS_INTEL
+                        // Intel: no sandbox (macOS 13 / x86_64), so stdio MCP
+                        // servers are always reported as blocked, as upstream
+                        // does when the sandbox is unavailable.
+                        sandboxAvailable = false
+                    #elseif os(macOS)
                         sandboxAvailable = await SandboxManager.shared
                             .checkAvailability().isAvailable
                     #else
@@ -1832,5 +1836,3 @@ enum MCPJSONParser {
         return false
     }
 }
-
-#endif

@@ -7,6 +7,8 @@
 //
 
 import Foundation
+import OsaurusRepository
+import os
 
 // MARK: - Models
 
@@ -66,6 +68,10 @@ public enum MarketplaceSource: Sendable {
 
     private enum ObjectKey: String, CodingKey {
         case source, url, sha, ref, path
+        // Aliases used by some marketplace entries (e.g. `fullstory`,
+        // `jfrog` in claude-plugins-official) that ship `repo`/`commit`
+        // instead of `url`/`sha`.
+        case repo, commit
     }
 
     /// Hand-rolled decode: try `String` first (legacy shape), fall back to the
@@ -79,14 +85,20 @@ public enum MarketplaceSource: Sendable {
         }
         let container = try decoder.container(keyedBy: ObjectKey.self)
         let kind = (try? container.decode(String.self, forKey: .source)) ?? "url"
-        guard let urlOrSlug = try? container.decode(String.self, forKey: .url) else {
+        // Accept `url` or its `repo` alias (bare `owner/repo` slug).
+        let urlValue = try? container.decode(String.self, forKey: .url)
+        let repoValue = try? container.decode(String.self, forKey: .repo)
+        guard let urlOrSlug = urlValue ?? repoValue else {
             throw DecodingError.dataCorruptedError(
                 forKey: .url,
                 in: container,
-                debugDescription: "MarketplaceSource object requires `url`"
+                debugDescription: "MarketplaceSource object requires `url` or `repo`"
             )
         }
-        let sha = try? container.decode(String.self, forKey: .sha)
+        // Prefer `sha`, then its `commit` alias, then `ref`.
+        let sha =
+            (try? container.decode(String.self, forKey: .sha))
+            ?? (try? container.decode(String.self, forKey: .commit))
         let ref = try? container.decode(String.self, forKey: .ref)
         let path = try? container.decode(String.self, forKey: .path)
         // Prefer a pinned sha over a moving ref for reproducibility.
@@ -188,6 +200,18 @@ public struct MarketplacePlugin: Codable, Sendable {
     public let strict: Bool?
     public let skills: [String]?
     public let author: MarketplaceOwner?
+    /// Optional `version` field declared on the marketplace entry itself.
+    /// Falls back to `plugin.json.version` per the spec resolution order
+    /// (see `ClaudePluginVersionResolver`).
+    public let version: String?
+    public let homepage: String?
+    public let repository: String?
+    public let license: String?
+    public let keywords: [String]?
+    /// Discovery category declared on the marketplace entry (e.g.
+    /// `development`, `productivity`, `database`). Drives the browse-tab
+    /// category chips. `nil` when the entry omits it.
+    public let category: String?
 
     public init(
         name: String,
@@ -195,7 +219,13 @@ public struct MarketplacePlugin: Codable, Sendable {
         source: MarketplaceSource? = nil,
         strict: Bool? = nil,
         skills: [String]? = nil,
-        author: MarketplaceOwner? = nil
+        author: MarketplaceOwner? = nil,
+        version: String? = nil,
+        homepage: String? = nil,
+        repository: String? = nil,
+        license: String? = nil,
+        keywords: [String]? = nil,
+        category: String? = nil
     ) {
         self.name = name
         self.description = description
@@ -203,6 +233,22 @@ public struct MarketplacePlugin: Codable, Sendable {
         self.strict = strict
         self.skills = skills
         self.author = author
+        self.version = version
+        self.homepage = homepage
+        self.repository = repository
+        self.license = license
+        self.keywords = keywords
+        self.category = category
+    }
+}
+
+/// Decodes `T` but never throws — a failed element yields `nil`. Used to make
+/// array decoding resilient so one malformed entry can't fail the whole list.
+private struct FailableDecodable<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        value = try? container.decode(T.self)
     }
 }
 
@@ -212,6 +258,37 @@ public struct GitHubMarketplace: Codable, Sendable {
     public let owner: MarketplaceOwner?
     public let metadata: MarketplaceMetadata?
     public let plugins: [MarketplacePlugin]
+
+    public init(
+        name: String,
+        owner: MarketplaceOwner?,
+        metadata: MarketplaceMetadata?,
+        plugins: [MarketplacePlugin]
+    ) {
+        self.name = name
+        self.owner = owner
+        self.metadata = metadata
+        self.plugins = plugins
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, owner, metadata, plugins
+    }
+
+    /// Lossy decode for `plugins`: entries that fail to decode (e.g. a future
+    /// `source` shape we don't understand) are skipped rather than failing the
+    /// entire catalog. The official marketplace ships 200+ entries; losing one
+    /// must not blank out the whole Browse grid.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = (try? container.decode(String.self, forKey: .name)) ?? ""
+        self.owner = try? container.decode(MarketplaceOwner.self, forKey: .owner)
+        self.metadata = try? container.decode(MarketplaceMetadata.self, forKey: .metadata)
+        let lossy =
+            (try? container.decode([FailableDecodable<MarketplacePlugin>].self, forKey: .plugins))
+            ?? []
+        self.plugins = lossy.compactMap { $0.value }
+    }
 }
 
 /// Preview of a skill available for import
@@ -331,6 +408,36 @@ public struct ClaudePluginManifest: Sendable {
     /// In that case only `skills` is populated.
     public let isLegacy: Bool
 
+    // MARK: - Spec fields lifted from `.claude-plugin/plugin.json`
+    //
+    // All optional: legacy marketplaces and plugins without a per-plugin
+    // `plugin.json` keep working with these nil. The installer treats
+    // `displayName` as falling back to `name`, `version` as resolving via
+    // the precedence list in `resolvedVersion`, and `keywords/license/...`
+    // as purely display-side metadata.
+
+    /// Human-readable name. Falls back to `name` when omitted.
+    public let displayName: String?
+    /// Pinned version per spec resolution (plugin.json > marketplace > git SHA).
+    /// `nil` only when none of the three sources had a value.
+    public let version: String?
+    public let authorEmail: String?
+    public let authorURL: String?
+    public let homepage: String?
+    public let repository: String?
+    public let license: String?
+    public let keywords: [String]
+    public let userConfigSpec: [ClaudePluginUserConfigField]
+    /// Explicit `dependencies` array from `plugin.json` (vs the body-scan
+    /// heuristic). Stored but not yet honored (see `dependencies` in plan).
+    public let declaredDependencies: [String]
+    /// True when the plugin declared `hooks` (any shape). We don't execute
+    /// hooks yet — the detail view surfaces this so users know.
+    public let declaresHooks: Bool
+    /// True when the plugin declared `monitors` / `lspServers` / `themes`
+    /// / `outputStyles` / `bin/` (collectively the things we don't run yet).
+    public let declaresUnsupportedComponents: [String]
+
     public init(
         name: String,
         description: String?,
@@ -343,7 +450,19 @@ public struct ClaudePluginManifest: Sendable {
         claudeMdPath: String? = nil,
         auxMarkdownPaths: [String] = [],
         mcpJsonPath: String? = nil,
-        isLegacy: Bool = false
+        isLegacy: Bool = false,
+        displayName: String? = nil,
+        version: String? = nil,
+        authorEmail: String? = nil,
+        authorURL: String? = nil,
+        homepage: String? = nil,
+        repository: String? = nil,
+        license: String? = nil,
+        keywords: [String] = [],
+        userConfigSpec: [ClaudePluginUserConfigField] = [],
+        declaredDependencies: [String] = [],
+        declaresHooks: Bool = false,
+        declaresUnsupportedComponents: [String] = []
     ) {
         self.name = name
         self.description = description
@@ -357,12 +476,235 @@ public struct ClaudePluginManifest: Sendable {
         self.auxMarkdownPaths = auxMarkdownPaths
         self.mcpJsonPath = mcpJsonPath
         self.isLegacy = isLegacy
+        self.displayName = displayName
+        self.version = version
+        self.authorEmail = authorEmail
+        self.authorURL = authorURL
+        self.homepage = homepage
+        self.repository = repository
+        self.license = license
+        self.keywords = keywords
+        self.userConfigSpec = userConfigSpec
+        self.declaredDependencies = declaredDependencies
+        self.declaresHooks = declaresHooks
+        self.declaresUnsupportedComponents = declaresUnsupportedComponents
     }
+
+    /// User-facing display name. Falls back to `name`.
+    public var resolvedDisplayName: String { displayName ?? name }
 
     /// True when there is anything importable beyond skills.
     public var hasNonSkillArtifacts: Bool {
         !agents.isEmpty || !commands.isEmpty || claudeMdPath != nil || mcpJsonPath != nil
             || !auxMarkdownPaths.isEmpty
+    }
+
+    /// True when the plugin ships at least one component Osaurus can actually
+    /// import: a skill, agent, command, or MCP server. Plugins composed only
+    /// of `hooks` / `outputStyles` / `monitors` / `lspServers` / `themes` /
+    /// `bin` resolve to `false` here — there's nothing for Osaurus to install.
+    /// Auxiliary markdown (CLAUDE.md/README) does NOT count, since those are
+    /// only attached as references to skills that get imported.
+    public var hasImportableComponents: Bool {
+        !skills.isEmpty || !agents.isEmpty || !commands.isEmpty || mcpJsonPath != nil
+    }
+}
+
+/// One entry in a plugin's `userConfig` block. Mirrors the schema documented
+/// at https://code.claude.com/docs/en/plugins-reference#user-configuration
+public struct ClaudePluginUserConfigField: Codable, Sendable, Hashable {
+    public enum FieldType: String, Codable, Sendable {
+        case string
+        case number
+        case boolean
+        case directory
+        case file
+    }
+
+    public let key: String
+    public let type: FieldType
+    public let title: String
+    public let description: String
+    public let sensitive: Bool
+    public let required: Bool
+    public let defaultValue: String?
+    /// For `string`, allow an array of values rather than a single one.
+    public let multiple: Bool
+    public let min: Double?
+    public let max: Double?
+
+    public init(
+        key: String,
+        type: FieldType,
+        title: String,
+        description: String,
+        sensitive: Bool = false,
+        required: Bool = false,
+        defaultValue: String? = nil,
+        multiple: Bool = false,
+        min: Double? = nil,
+        max: Double? = nil
+    ) {
+        self.key = key
+        self.type = type
+        self.title = title
+        self.description = description
+        self.sensitive = sensitive
+        self.required = required
+        self.defaultValue = defaultValue
+        self.multiple = multiple
+        self.min = min
+        self.max = max
+    }
+}
+
+/// Decoded shape of `.claude-plugin/plugin.json`. Unknown top-level keys are
+/// ignored per the spec ("Unrecognized fields"). The decoder is *defensive*:
+/// fields with the wrong type are dropped instead of failing the whole file,
+/// because the only thing the installer truly needs is the manifest from
+/// `marketplace.json` — `plugin.json` is purely additive metadata.
+public struct ClaudePluginJSON: Sendable {
+    public let name: String?
+    public let displayName: String?
+    public let version: String?
+    public let description: String?
+    public let authorName: String?
+    public let authorEmail: String?
+    public let authorURL: String?
+    public let homepage: String?
+    public let repository: String?
+    public let license: String?
+    public let keywords: [String]
+    public let userConfig: [ClaudePluginUserConfigField]
+    public let declaredDependencies: [String]
+    public let hasHooks: Bool
+    public let unsupportedComponents: [String]
+
+    /// Parse a `plugin.json` payload tolerantly. Returns `nil` on malformed
+    /// JSON; otherwise extracts whatever recognised fields are present and
+    /// silently drops the rest.
+    public static func parse(_ raw: String) -> ClaudePluginJSON? {
+        guard let data = raw.data(using: .utf8),
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+
+        let name = root["name"] as? String
+        let displayName = root["displayName"] as? String
+        let version = root["version"] as? String
+        let description = root["description"] as? String
+
+        var authorName: String? = nil
+        var authorEmail: String? = nil
+        var authorURL: String? = nil
+        if let author = root["author"] as? [String: Any] {
+            authorName = author["name"] as? String
+            authorEmail = author["email"] as? String
+            authorURL = author["url"] as? String
+        } else if let authorStr = root["author"] as? String {
+            authorName = authorStr
+        }
+
+        let homepage = root["homepage"] as? String
+        let repository = root["repository"] as? String
+        let license = root["license"] as? String
+
+        let keywords: [String] = (root["keywords"] as? [String]) ?? []
+
+        let userConfig = Self.parseUserConfig(root["userConfig"])
+        let declaredDependencies = Self.parseDependencies(root["dependencies"])
+
+        // Hooks may show up as an object, an array, or a path string. We
+        // treat any of them as "declares hooks". The installer just surfaces
+        // this — it doesn't execute them yet.
+        let hasHooks = root["hooks"] != nil
+
+        var unsupported: [String] = []
+        if root["lspServers"] != nil { unsupported.append("lspServers") }
+        if root["outputStyles"] != nil { unsupported.append("outputStyles") }
+        if root["channels"] != nil { unsupported.append("channels") }
+        if let experimental = root["experimental"] as? [String: Any] {
+            if experimental["themes"] != nil { unsupported.append("themes") }
+            if experimental["monitors"] != nil { unsupported.append("monitors") }
+        }
+
+        return ClaudePluginJSON(
+            name: name,
+            displayName: displayName,
+            version: version,
+            description: description,
+            authorName: authorName,
+            authorEmail: authorEmail,
+            authorURL: authorURL,
+            homepage: homepage,
+            repository: repository,
+            license: license,
+            keywords: keywords,
+            userConfig: userConfig,
+            declaredDependencies: declaredDependencies,
+            hasHooks: hasHooks,
+            unsupportedComponents: unsupported
+        )
+    }
+
+    private static func parseUserConfig(_ value: Any?) -> [ClaudePluginUserConfigField] {
+        guard let dict = value as? [String: Any] else { return [] }
+        var out: [ClaudePluginUserConfigField] = []
+        for (key, entryAny) in dict {
+            guard let entry = entryAny as? [String: Any] else { continue }
+            let typeStr = (entry["type"] as? String) ?? "string"
+            let type = ClaudePluginUserConfigField.FieldType(rawValue: typeStr) ?? .string
+            let title = (entry["title"] as? String) ?? key
+            let description = (entry["description"] as? String) ?? ""
+            let sensitive = (entry["sensitive"] as? Bool) ?? false
+            let required = (entry["required"] as? Bool) ?? false
+            let multiple = (entry["multiple"] as? Bool) ?? false
+            var defaultValue: String? = nil
+            if let s = entry["default"] as? String {
+                defaultValue = s
+            } else if let n = entry["default"] as? NSNumber {
+                defaultValue = n.stringValue
+            } else if let b = entry["default"] as? Bool {
+                defaultValue = b ? "true" : "false"
+            }
+            let minV =
+                (entry["min"] as? Double)
+                ?? (entry["min"] as? NSNumber).map { $0.doubleValue }
+            let maxV =
+                (entry["max"] as? Double)
+                ?? (entry["max"] as? NSNumber).map { $0.doubleValue }
+            out.append(
+                ClaudePluginUserConfigField(
+                    key: key,
+                    type: type,
+                    title: title,
+                    description: description,
+                    sensitive: sensitive,
+                    required: required,
+                    defaultValue: defaultValue,
+                    multiple: multiple,
+                    min: minV,
+                    max: maxV
+                )
+            )
+        }
+        return out.sorted { $0.key < $1.key }
+    }
+
+    private static func parseDependencies(_ value: Any?) -> [String] {
+        guard let arr = value as? [Any] else { return [] }
+        var out: [String] = []
+        for entry in arr {
+            if let s = entry as? String {
+                out.append(s)
+            } else if let dict = entry as? [String: Any],
+                let name = dict["name"] as? String
+            {
+                out.append(name)
+            }
+        }
+        return out
     }
 }
 
@@ -383,6 +725,22 @@ public struct GitHubPluginsResult: Sendable {
     public var isLegacyOnly: Bool {
         plugins.allSatisfy { $0.isLegacy && !$0.hasNonSkillArtifacts }
     }
+}
+
+/// Lightweight result of fetching just a repo's `marketplace.json` without
+/// resolving each plugin's full manifest. Used by the browse/discovery grid
+/// where rendering 200+ entries should cost a single network request — the
+/// per-plugin `buildManifest` round-trips only happen at install time.
+public struct MarketplaceCatalog: Sendable {
+    public let repo: GitHubRepo
+    public let marketplace: GitHubMarketplace
+
+    public init(repo: GitHubRepo, marketplace: GitHubMarketplace) {
+        self.repo = repo
+        self.marketplace = marketplace
+    }
+
+    public var entries: [MarketplacePlugin] { marketplace.plugins }
 }
 
 /// Sibling-plugin dependency map computed by `resolvePluginDependencies(_:)`.
@@ -460,6 +818,10 @@ public enum GitHubSkillError: Error, LocalizedError {
     /// optional date carries the `X-RateLimit-Reset` value so the UI can
     /// tell the user when to try again.
     case rateLimited(resetAt: Date?)
+    /// The plugin resolved cleanly but ships nothing Osaurus can import
+    /// (only hooks / output styles / monitors / etc.). Carries the plugin
+    /// name so the UI can name it in the message.
+    case noImportableComponents(pluginName: String)
 
     public var errorDescription: String? {
         switch self {
@@ -480,13 +842,23 @@ public enum GitHubSkillError: Error, LocalizedError {
         case .branchNotFound:
             return "Could not determine the default branch"
         case .rateLimited(let resetAt):
+            // #1719: when no token is configured we're on the 60/hr anonymous
+            // limit; tell the user how to raise it instead of only "wait an hour"
+            // (which, for a large repo, never finishes anyway).
+            let tokenHint =
+                GitHubSkillService.gitHubToken() == nil
+                ? " Add a GitHub token in the Plugins tab to raise the limit to 5,000/hr."
+                : ""
             if let resetAt {
                 let formatter = RelativeDateTimeFormatter()
                 formatter.unitsStyle = .short
                 let when = formatter.localizedString(for: resetAt, relativeTo: Date())
-                return "GitHub rate-limited this app. Try again \(when)."
+                return "GitHub rate-limited this app. Try again \(when).\(tokenHint)"
             }
-            return "GitHub rate-limited this app. Sign in or wait an hour to retry."
+            return "GitHub rate-limited this app. Wait an hour to retry.\(tokenHint)"
+        case .noImportableComponents(let pluginName):
+            return
+                "\(pluginName) has no components Osaurus can import (it only ships hooks, output styles, or other unsupported parts)."
         }
     }
 }
@@ -500,13 +872,78 @@ public final class GitHubSkillService: ObservableObject {
     @Published public var isLoading = false
     @Published public var error: GitHubSkillError?
 
-    private let session: URLSession
+    /// The token is baked into the session's headers at build time, so a
+    /// freshly-added in-app token requires rebuilding the session. Hold it
+    /// behind a lock so `reloadAuthentication()` can swap it in place while the
+    /// nonisolated fetch paths read it concurrently.
+    private let sessionHolder: OSAllocatedUnfairLock<URLSession>
+
+    /// The session used for every GitHub request. Reads the current value
+    /// under the lock, so it reflects the latest configured token.
+    private nonisolated var session: URLSession { sessionHolder.withLock { $0 } }
 
     private init() {
+        self.sessionHolder = OSAllocatedUnfairLock(initialState: Self.makeSession())
+    }
+
+    /// Rebuild the session so a token added (or removed) through the in-app
+    /// GitHub-token flow takes effect immediately — no app restart. Called by
+    /// the token card after saving or clearing the token.
+    public func reloadAuthentication() {
+        sessionHolder.withLock { $0 = Self.makeSession() }
+    }
+
+    nonisolated static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 60
-        self.session = URLSession(configuration: config)
+        // Optional GitHub auth (#1719): unauthenticated GitHub is capped at
+        // 60 req/hr per IP, so importing a large plugin/skill repo (e.g.
+        // anthropics/knowledge-work-plugins, ~200 SKILL.md across ~22 plugins)
+        // fans out enough Contents-API calls to trip a 403 mid-enumeration and
+        // never completes. Attach a token — added in-app (Keychain) or via
+        // GITHUB_TOKEN / GH_TOKEN — to raise the limit to 5,000/hr. Absent ⇒
+        // byte-identical prior behavior.
+        // This session is dedicated to GitHubSkillService and only contacts
+        // GitHub-controlled hosts (api.github.com / *.githubusercontent.com), so
+        // the header stays on GitHub. The token is never logged or surfaced in
+        // any error string.
+        if let token = Self.gitHubToken() {
+            var headers = config.httpAdditionalHeaders ?? [:]
+            headers["Authorization"] = "Bearer \(token)"
+            config.httpAdditionalHeaders = headers
+        }
+        return GlobalProxySettings.makeSession(base: config)
+    }
+
+    /// The GitHub API token to authenticate with, if any. Never logged. A
+    /// token added through the in-app flow (Keychain) wins over the
+    /// GITHUB_TOKEN / GH_TOKEN environment variables, so an app user isn't
+    /// stuck on the 60/hr anonymous limit just because they launched from
+    /// Finder without an env var.
+    nonisolated static func gitHubToken() -> String? {
+        resolveToken(stored: GitHubAuth.token, environment: ProcessInfo.processInfo.environment)
+    }
+
+    /// Pure precedence resolution so the "in-app token wins over env vars" rule
+    /// is unit-testable without the keychain or process env. A non-blank stored
+    /// token wins; otherwise fall back to GITHUB_TOKEN / GH_TOKEN.
+    nonisolated static func resolveToken(stored: String?, environment: [String: String]) -> String? {
+        if let stored = GitHubAuth.normalize(stored) { return stored }
+        return gitHubToken(from: environment)
+    }
+
+    /// Pure token resolution over an explicit environment, so the precedence
+    /// and trimming rules are unit-testable without mutating the process env.
+    /// GITHUB_TOKEN wins over GH_TOKEN; values are whitespace-trimmed; blank or
+    /// whitespace-only values are treated as absent.
+    nonisolated static func gitHubToken(from env: [String: String]) -> String? {
+        for key in ["GITHUB_TOKEN", "GH_TOKEN"] {
+            if let v = env[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+                return v
+            }
+        }
+        return nil
     }
 
     // MARK: - URL Parsing
@@ -710,6 +1147,41 @@ public final class GitHubSkillService: ObservableObject {
         }
     }
 
+    /// Fetch just the repo's `marketplace.json` and return its entries
+    /// without resolving each plugin's full manifest.
+    ///
+    /// This is the cheap path that powers the browse/discovery grid: the
+    /// official `claude-plugins-official` marketplace lists 200+ plugins,
+    /// each carrying enough metadata (name, description, author, category,
+    /// homepage, source) to render a card. Resolving every manifest up front
+    /// would fan out to ~9 round-trips per plugin and blow GitHub's
+    /// unauthenticated rate limit, so `buildManifest` is deferred to install
+    /// time via `resolveManifest(rootRepo:entry:)`.
+    public func fetchMarketplaceCatalog(from urlString: String) async throws -> MarketplaceCatalog {
+        do {
+            var repo = try parseGitHubURL(urlString)
+            repo = try await detectDefaultBranch(repo)
+            let marketplace = try await fetchMarketplace(repo)
+            return MarketplaceCatalog(repo: repo, marketplace: marketplace)
+        } catch let err as GitHubSkillError {
+            throw err
+        } catch {
+            throw GitHubSkillError.networkError(error)
+        }
+    }
+
+    /// Resolve a single marketplace entry into a full `ClaudePluginManifest`.
+    ///
+    /// Wraps the private `buildManifest` so the browse grid can defer the
+    /// expensive per-plugin directory probing until the user actually
+    /// installs (or opens the detail for) one plugin.
+    public func resolveManifest(
+        rootRepo: GitHubRepo,
+        entry: MarketplacePlugin
+    ) async throws -> ClaudePluginManifest {
+        try await buildManifest(rootRepo: rootRepo, plugin: entry)
+    }
+
     /// Fetch the SKILL.md content for a specific skill
     public nonisolated func fetchSkillContent(from repo: GitHubRepo, skillPath: String) async throws -> String {
         // Clean up the path
@@ -896,6 +1368,40 @@ public final class GitHubSkillService: ObservableObject {
             result.append(ClaudeSkillEntry(path: entry.path))
         }
         return result.sorted { $0.displayName < $1.displayName }
+    }
+
+    // MARK: - Tolerant discovery probes
+
+    // Tolerate a missing directory (404 → none) but re-throw `.rateLimited`
+    // so `fetchPlugins` surfaces it. Plain `try?` swallowed the 403 too,
+    // making a throttled import silently report 0 skills.
+
+    private nonisolated func discoverSkillDirectoriesTolerant(
+        repo: GitHubRepo,
+        source: String
+    ) async throws -> [ClaudeSkillEntry] {
+        do {
+            return try await discoverSkillDirectories(repo: repo, source: source)
+        } catch let error as GitHubSkillError {
+            if case .rateLimited = error { throw error }
+            return []
+        } catch {
+            return []
+        }
+    }
+
+    private nonisolated func listDirectoryTolerant(
+        repo: GitHubRepo,
+        path: String
+    ) async throws -> [GitHubTreeEntry]? {
+        do {
+            return try await listDirectory(repo: repo, path: path)
+        } catch let error as GitHubSkillError {
+            if case .rateLimited = error { throw error }
+            return nil
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - Sibling Dependency Resolution
@@ -1090,23 +1596,18 @@ public final class GitHubSkillService: ObservableObject {
             )
         }
 
-        // New-style plugins: discover from the source directory.  Walk it
-        // with a trailing slash semantically: when `source == ""` (external
-        // repo at root) we probe top-level paths like `skills`, `agents`.
+        // New-style plugins: discover from the source directory. Empty
+        // `source` (external repo at root) probes top-level `skills`/`agents`.
         let prefix = source.isEmpty ? "" : "\(source)/"
 
-        // Run the discovery probes concurrently. Each one is at least one
-        // HTTP round-trip; serializing them was the main contributor to the
-        // ~10-second wait on the picker for repos with ~13 plugins like
-        // `claude-for-legal`. The probes themselves go through the shared
-        // concurrency limiter (`SharedFetchLimiter`) to keep total in-flight
-        // GitHub calls below the rate-limit budget.
+        // Probe concurrently — serializing these round-trips was the main
+        // cause of the ~10s picker wait for repos with ~13 plugins.
         async let skillsTask: [ClaudeSkillEntry] =
-            (try? await discoverSkillDirectories(repo: sourceRepo, source: source)) ?? []
-        async let agentsListing =
-            (try? await listDirectory(repo: sourceRepo, path: "\(prefix)agents")) ?? nil
-        async let commandsListing =
-            (try? await listDirectory(repo: sourceRepo, path: "\(prefix)commands")) ?? nil
+            discoverSkillDirectoriesTolerant(repo: sourceRepo, source: source)
+        async let agentsListing: [GitHubTreeEntry]? =
+            listDirectoryTolerant(repo: sourceRepo, path: "\(prefix)agents")
+        async let commandsListing: [GitHubTreeEntry]? =
+            listDirectoryTolerant(repo: sourceRepo, path: "\(prefix)commands")
         async let hasClaudeMd: Bool = fileExists(repo: sourceRepo, path: "\(prefix)CLAUDE.md")
         async let hasConnectorsMd: Bool = fileExists(
             repo: sourceRepo,
@@ -1114,17 +1615,25 @@ public final class GitHubSkillService: ObservableObject {
         )
         async let hasReadmeMd: Bool = fileExists(repo: sourceRepo, path: "\(prefix)README.md")
         async let hasMCPJson: Bool = fileExists(repo: sourceRepo, path: "\(prefix).mcp.json")
+        async let pluginJSONRaw: String? = fetchOptionalFileContent(
+            from: sourceRepo,
+            path: "\(prefix).claude-plugin/plugin.json"
+        )
+        async let sha: String? = fetchSourceSHA(
+            repo: sourceRepo,
+            path: source.isEmpty ? nil : source
+        )
 
-        let skills = await skillsTask
+        let skills = try await skillsTask
         let agents: [ClaudeAgentEntry] =
-            (await agentsListing).map { entries in
+            (try await agentsListing).map { entries in
                 entries
                     .filter { $0.type == "file" && $0.name.hasSuffix(".md") }
                     .map { ClaudeAgentEntry(path: $0.path) }
                     .sorted { $0.displayName < $1.displayName }
             } ?? []
         let commands: [ClaudeCommandEntry] =
-            (await commandsListing).map { entries in
+            (try await commandsListing).map { entries in
                 entries
                     .filter { $0.type == "file" && $0.name.hasSuffix(".md") }
                     .map { ClaudeCommandEntry(path: $0.path) }
@@ -1137,20 +1646,177 @@ public final class GitHubSkillService: ObservableObject {
         if await hasReadmeMd { auxPaths.append("\(prefix)README.md") }
         let mcpJsonPath = await hasMCPJson ? "\(prefix).mcp.json" : nil
 
+        // Merge per-plugin `plugin.json` metadata on top of marketplace
+        // entry fields. Spec precedence:
+        //   displayName: plugin.json > <none>; falls back to `name` at use.
+        //   version: plugin.json > marketplace entry > git SHA > nil.
+        //   description: plugin.json > marketplace entry.
+        //   keywords/license/homepage/repository: plugin.json > marketplace entry.
+        //   author.{name,email,url}: plugin.json author block > marketplace `author.name`.
+        let pluginJSONString = await pluginJSONRaw
+        let parsedJSON = pluginJSONString.flatMap { ClaudePluginJSON.parse($0) }
+        let sourceSHA = await sha
+
+        let resolvedDescription = parsedJSON?.description ?? plugin.description
+        let resolvedAuthorName = parsedJSON?.authorName ?? plugin.author?.name
+        let resolvedAuthorEmail = parsedJSON?.authorEmail
+        let resolvedAuthorURL = parsedJSON?.authorURL
+        let resolvedHomepage = parsedJSON?.homepage ?? plugin.homepage
+        let resolvedRepository = parsedJSON?.repository ?? plugin.repository
+        let resolvedLicense = parsedJSON?.license ?? plugin.license
+        let resolvedKeywords: [String] = {
+            if let kw = parsedJSON?.keywords, !kw.isEmpty { return kw }
+            return plugin.keywords ?? []
+        }()
+        let resolvedVersion = ClaudePluginVersionResolver.resolve(
+            pluginJSONVersion: parsedJSON?.version,
+            marketplaceVersion: plugin.version,
+            sha: sourceSHA
+        )
+
         return ClaudePluginManifest(
             name: plugin.name,
-            description: plugin.description,
+            description: resolvedDescription,
             source: source.isEmpty ? plugin.name : source,
             sourceRepo: sourceRepo,
-            authorName: plugin.author?.name,
+            authorName: resolvedAuthorName,
             skills: skills,
             agents: agents,
             commands: commands,
             claudeMdPath: claudeMdPath,
             auxMarkdownPaths: auxPaths,
             mcpJsonPath: mcpJsonPath,
-            isLegacy: false
+            isLegacy: false,
+            displayName: parsedJSON?.displayName,
+            version: resolvedVersion,
+            authorEmail: resolvedAuthorEmail,
+            authorURL: resolvedAuthorURL,
+            homepage: resolvedHomepage,
+            repository: resolvedRepository,
+            license: resolvedLicense,
+            keywords: resolvedKeywords,
+            userConfigSpec: parsedJSON?.userConfig ?? [],
+            declaredDependencies: parsedJSON?.declaredDependencies ?? [],
+            declaresHooks: parsedJSON?.hasHooks ?? false,
+            declaresUnsupportedComponents: parsedJSON?.unsupportedComponents ?? []
         )
+    }
+
+    /// Spec-defined version resolution: prefer the value declared in
+    /// `plugin.json`, fall back to the marketplace entry, then the git
+    /// SHA at fetch time, then `nil`.
+    public enum ClaudePluginVersionResolver {
+        public static func resolve(
+            pluginJSONVersion: String?,
+            marketplaceVersion: String?,
+            sha: String?
+        ) -> String? {
+            if let v = pluginJSONVersion?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !v.isEmpty
+            {
+                return v
+            }
+            if let v = marketplaceVersion?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !v.isEmpty
+            {
+                return v
+            }
+            if let s = sha?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !s.isEmpty
+            {
+                // Short SHA (first 7 chars) matches the Claude Code spec's
+                // SHA-as-version convention.
+                return String(s.prefix(7))
+            }
+            return nil
+        }
+
+        /// True when `available` is strictly newer than `installed`.
+        ///
+        /// Both sides parse as semver → compare semver. Either side is a
+        /// SHA (or unparseable) → fall back to string inequality, matching
+        /// the spec's "SHA-versioned plugins update whenever the recorded
+        /// SHA differs" behavior.
+        public static func hasUpdate(installed: String?, available: String?) -> Bool {
+            guard
+                let available = available?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                !available.isEmpty
+            else {
+                return false
+            }
+            let installedTrimmed = (installed ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if installedTrimmed.isEmpty { return true }
+            if installedTrimmed == available { return false }
+            if let lhs = SemanticVersion.parse(installedTrimmed),
+                let rhs = SemanticVersion.parse(available)
+            {
+                return lhs < rhs
+            }
+            // Either side is a SHA / non-semver → any difference counts.
+            return true
+        }
+    }
+
+    /// Public helper used by `InstalledClaudePluginsAggregator` to probe
+    /// the source path's HEAD commit when checking for SHA-versioned
+    /// plugin updates.
+    public nonisolated func fetchSourceSHANonIsolated(
+        owner: String,
+        repo: String,
+        branch: String,
+        path: String?
+    ) async -> String? {
+        let r = GitHubRepo(owner: owner, name: repo, branch: branch)
+        return await fetchSourceSHA(repo: r, path: path)
+    }
+
+    /// Fetch the head commit SHA for the source path. Used to pin a
+    /// SHA-style version when neither `plugin.json` nor the marketplace
+    /// entry declare one (per the Claude Code plugin spec).
+    ///
+    /// Returns `nil` when the API call fails or the response is
+    /// unexpected — version resolution then falls back to `nil` and the
+    /// plugin is recorded as "unknown" version. `path == nil` queries
+    /// the whole repo HEAD (used when the plugin lives at the repo root).
+    private nonisolated func fetchSourceSHA(
+        repo: GitHubRepo,
+        path: String?
+    ) async -> String? {
+        var urlString = "https://api.github.com/repos/\(repo.owner)/\(repo.name)/commits"
+        var queryItems: [String] = ["per_page=1", "sha=\(repo.branch)"]
+        if let path, !path.isEmpty {
+            // Percent-encode the path so directories with characters like
+            // `+` / spaces round-trip safely through GitHub's query parser.
+            let allowed = CharacterSet.urlQueryAllowed.subtracting(
+                CharacterSet(charactersIn: "&=?")
+            )
+            let encoded = path.addingPercentEncoding(withAllowedCharacters: allowed) ?? path
+            queryItems.append("path=\(encoded)")
+        }
+        urlString += "?" + queryItems.joined(separator: "&")
+        guard let url = URL(string: urlString) else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                http.statusCode == 200
+            else {
+                return nil
+            }
+            guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                let first = arr.first
+            else {
+                return nil
+            }
+            return first["sha"] as? String
+        } catch {
+            return nil
+        }
     }
 
     /// Resolve a `MarketplaceSource` to the concrete `(repo, basePath)` pair

@@ -108,6 +108,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             MasterKey.warmExistsCacheInBackground()
         }
 
+        // Warm the GitHub API token cache off the main thread so the first
+        // skill/plugin import or update doesn't pay a synchronous keychain
+        // read (upstream `GitHubAuth.preloadInBackground`).
+        if !KeychainQueryHelpers.disablesKeychainForProcess {
+            GitHubAuth.preloadInBackground()
+        }
+
         #if OSAURUS_INTEL
             // Headless replacement for the Apple Silicon "Securing your
             // data" overlay (`StorageMigrationOverlay`, entirely

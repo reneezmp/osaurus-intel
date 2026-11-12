@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  InstalledClaudePluginsAggregator.swift
 //  osaurus
@@ -71,10 +70,10 @@ public enum ClaudePluginArtifactKind: CaseIterable, Sendable {
     /// instead of an abbreviation.
     public var titlePlural: String {
         switch self {
-        case .skill: return "Skills"
-        case .schedule: return "Schedules"
-        case .command: return "Slash commands"
-        case .mcp: return "MCP providers"
+        case .skill: return L("Skills")
+        case .schedule: return L("Schedules")
+        case .command: return L("Slash commands")
+        case .mcp: return L("MCP providers")
         }
     }
 }
@@ -451,7 +450,9 @@ public final class InstalledClaudePluginsAggregator: ObservableObject {
     /// memory; rebuilt by `checkForUpdates()`.
     private var availableVersions: [String: String] = [:]
 
-    public init(
+    // Intel: internal, not public. `SkillManager` / `SlashCommandRegistry` are
+    // Intel's internal conformers.
+    init(
         skillManager: SkillManager = .shared,
         scheduleManager: ScheduleManager = .shared,
         slashCommands: SlashCommandRegistry = .shared,
@@ -746,5 +747,3 @@ public final class InstalledClaudePluginsAggregator: ObservableObject {
         refresh()
     }
 }
-
-#endif

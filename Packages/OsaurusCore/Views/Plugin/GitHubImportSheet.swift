@@ -1,9 +1,10 @@
-#if !OSAURUS_INTEL
 //
 //  GitHubImportSheet.swift
 //  osaurus
 //
-//  Sheet for importing skills from GitHub repositories.
+//  Sheet for importing Claude plugins / skills from GitHub
+//  repositories. Owned by the Plugins tab — historically lived under
+//  `Views/Skill/` while Claude plugins were grouped with skills.
 //
 
 import SwiftUI
@@ -69,7 +70,7 @@ struct GitHubImportSheet: View {
             contentView
             footerView
         }
-        .frame(width: 560, height: 540)
+        .fittedSheetFrame(width: 560, height: 540)
         .background(theme.primaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
@@ -172,15 +173,19 @@ struct GitHubImportSheet: View {
         case .urlInput: return L("Paste a repository URL to get started")
         case .loading: return L("Fetching repository information")
         case .skillSelection(let result):
-            return L("\(result.skills.count) skills available")
+            return result.skills.count == 1
+                ? L("1 skill available")
+                : L("\(result.skills.count) skills available")
         case .pluginSelection(let result):
-            return L("\(result.plugins.count) plugins available")
-        case .importing(let progress, let total): return L("Importing \(progress) of \(total)")
+            return result.plugins.count == 1
+                ? L("1 plugin available")
+                : L("\(result.plugins.count) plugins available")
+        case .importing: return L("Installing selected plugins")
         case .installComplete(let report):
             let totals =
                 report.totalImportedSkills + report.totalImportedAgents
                 + report.totalImportedCommands + report.totalImportedMCPProviders
-            return L("\(totals) items installed")
+            return totals == 1 ? L("1 item installed") : L("\(totals) items installed")
         case .error(let error): return error.localizedDescription
         }
     }
@@ -742,8 +747,9 @@ struct GitHubImportSheet: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(theme.primaryText)
 
-                Text("Importing \(progress) of \(total)...", bundle: .module)
+                Text("\(progress) of \(total)", bundle: .module)
                     .font(.system(size: 12))
+                    .monospacedDigit()
                     .foregroundColor(theme.secondaryText)
             }
 
@@ -895,14 +901,12 @@ struct GitHubImportSheet: View {
         cancel()
     }
 
-    /// Deep-link from the install summary to the Remote MCP providers tab.
+    /// Deep-link from the install summary to the Tools & MCP Services tab.
     /// Used by the OAuth + placeholder-token install notices so the user
     /// doesn't have to hunt through the sidebar for where Sign In lives.
     private func openMCPProvider(id: UUID?) {
         ManagementStateManager.shared.selectedTab = .tools
-        // ToolsTab is internal to OsaurusCore; we know the Remote sub-tab is
-        // raw value "Remote" from `ToolsTab.remote = "Remote"`.
-        ManagementStateManager.shared.pendingToolsSubTab = "Remote"
+        ManagementStateManager.shared.pendingToolsSubTab = ToolsTab.services.rawValue
         ManagementStateManager.shared.pendingMCPProviderEditId = id
         cancel()
     }
@@ -994,21 +998,21 @@ struct GitHubImportSheet: View {
         importState = .importing(progress: 0, total: totalSteps)
 
         activeTask = Task { @MainActor in
-            let report = await ClaudePluginInstaller.shared.install(
-                selections: selections,
-                from: result.repo,
-                progressHandler: { @MainActor current, total in
-                    // The installer runs on the main actor, so this fires
-                    // synchronously inside `install`. Updating `@State`
-                    // directly (no inner `Task`) avoids two problems:
-                    //   1. a flood of queued Tasks racing to set
-                    //      `importState`, which can leave us stuck at
-                    //      "N of N" because a late-arriving progress task
-                    //      overwrites `.installComplete`.
-                    //   2. one extra runloop tick of jank per artifact.
-                    importState = .importing(progress: current, total: total)
-                }
-            )
+            // Batch so SkillManager reloads `skills` once at the end instead
+            // of after every per-skill save — which made the Skills view
+            // behind this sheet flash continuously during a 170-skill import.
+            let report = await SkillManager.shared.batchUpdates {
+                await ClaudePluginInstaller.shared.install(
+                    selections: selections,
+                    from: result.repo,
+                    progressHandler: { @MainActor current, total in
+                        // Fires synchronously on the main actor; set `@State`
+                        // directly so late progress Tasks can't overwrite
+                        // `.installComplete`.
+                        importState = .importing(progress: current, total: total)
+                    }
+                )
+            }
             guard !Task.isCancelled else { return }
             onPluginInstallComplete?(report)
             importState = .installComplete(report)
@@ -1502,34 +1506,4 @@ private extension View {
             onCancel: {}
         )
     }
-#endif
-#else
-import SwiftUI
-
-/// Intel stub. GitHub skill / plugin import depends on
-/// `GitHubSkillService` + `ClaudePluginInstaller` (both excluded on
-/// Intel); the sheet renders the standard "Apple Silicon only"
-/// placeholder. Init signature mirrors the upstream surface in
-/// `GitHubImportSheet` at line ~13 of this file so the call site in
-/// `SkillsView` (un-body-swapped in M11 Phase 11.A.2) type-checks.
-struct GitHubImportSheet: View {
-    let onImport: ([Skill]) -> Void
-    let onCancel: () -> Void
-    var onPluginInstallComplete: ((ClaudePluginInstallReport) -> Void)?
-
-    init(
-        onImport: @escaping ([Skill]) -> Void,
-        onCancel: @escaping () -> Void,
-        onPluginInstallComplete: ((ClaudePluginInstallReport) -> Void)? = nil
-    ) {
-        self.onImport = onImport
-        self.onCancel = onCancel
-        self.onPluginInstallComplete = onPluginInstallComplete
-    }
-
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Import Skills", symbol: "apple.logo")
-            .frame(minWidth: 520, minHeight: 420)
-    }
-}
 #endif
