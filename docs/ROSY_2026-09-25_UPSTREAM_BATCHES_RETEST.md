@@ -3410,3 +3410,12 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] New chat with a custom agent (Auto tools, one plugin installed): open the context popover before sending. It lists Platform, Persona, the discipline sections and Enabled Capabilities, with a non-zero Tools rail.
 - [ ] Send two messages in one chat, then toggle Image (or Speak) for that agent in Abilities and send a third: the new tool is offered on the third message. Installing or removing a plugin between messages doesn't break the chat.
 - [ ] Switch the agent chip mid-chat: the reply uses the new agent's persona and tools.
+
+## Lean prompt for custom agents (2026-11-12)
+
+`W-cov-reaudit` 5b slice 6 (upstream #2250; Renée chose to follow upstream). Not in candidate 67. **Watch tool calling on weaker models here.**
+
+- [ ] Default agent, no folder, a cloud model: the context popover shows Grounding, Code Style (with file tools) and Agent Loop.
+- [ ] Custom agent (Auto tools): the popover shows only Platform and Persona (plus Enabled Capabilities with plugins); the agent still calls tools when asked (todo, share_artifact, capabilities).
+- [ ] **Weak model:** custom agent + working folder + DeepSeek. Ask "list the files in this folder and show me README.md", then "create notes.txt with three bullet points". Expect real file tool calls, not typed-out listings or fake `ls` output. Repeat with the Default agent + folder. Report any reply that describes a tool call instead of making it.
+- [ ] Disable Tools with a folder attached: the "Folder tools are disabled" notice, no tool calls.
