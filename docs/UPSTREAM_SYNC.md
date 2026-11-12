@@ -60,6 +60,67 @@ Stage 5a details are in `COV_REAUDIT.md`, "Stage 5".
 
 ---
 
+## Classic fixes, 2026-11-11 (groups A–D)
+
+Intel follows Osaurus Classic first (goal: parity with Classic 0.25.33), 1.x
+later. The Classic rows (1–100, plus Classic-only #3373) of
+`UPSTREAM_AUDIT_2026-11-11.md` were ported the same day by four groups; each
+row's "Intel note" there names the commit (`git log --oneline
+f917d667c..intel-fork`, 30 commits). What users get:
+
+- **Chat and composer.** A streaming reply keeps auto-scrolling, and "Follow
+  up" suggestions no longer appear mid-turn (including after attaching a
+  working folder). Settings → Chat has a "Collapse Long Pastes" toggle and a
+  pasted chip has a labeled "Insert as Text" button. Model cards reflow
+  source-wrapped paragraphs. Several main-thread hangs are gone (appearance
+  change, toast panel, placeholder lookups, blank-content checks, Credits
+  activity, Knowledge git adoption). The model picker's thinking label has its
+  own string.
+- **Insights and context.** Insights shows Input/Output tokens marked Reported
+  or Estimated, a request rate, and no invented output limit. Bodies are capped
+  by UTF-8 bytes, exports carry truncation columns, presence checks skip payload
+  decode, and the RAM gauge counts reclaimable memory properly. A tool result
+  is counted once in the context estimate, a compaction summary that would not
+  shrink the context is rejected, and retained Activity tabs are written off the
+  main thread and flushed at quit.
+- **Phone, providers and Claude Code.** Re-pairing the iPhone keeps every agent
+  on the relay; a stopped phone reply keeps its text (a half-written tool call
+  is cut); archived chats list only archived ones; the phone can read a chat's
+  context usage. Anthropic, Claude Code and OpenAI offer reasoning levels from
+  their live contracts (an Intel subset of #3229). A Claude Code agent no longer
+  sees tools whose toggle is off. The File and Agents menus refresh after an
+  agent is created, renamed or deleted.
+- **Tools and schedules.** `file_read` takes several paths at once. Agents have
+  per-agent switches for calculator, task checklist, clarify and artifacts
+  (Agents → Abilities → Built-in Tools). A very long tool result is saved, the
+  model gets a 6,000-byte preview and a `full_result` reference it can page with
+  `file_read`. A schedule across a repeated DST hour fires once instead of
+  looping. `MockHost.uninstall` only clears its own slot.
+
+**OCR crash fix (lead).** `file_read` of an image or scanned PDF resumed its
+text-recognition continuation twice and could crash
+(`Folder/FileReadImageSupport.swift`, now guarded by `ResumeOnce`). The same code
+is in upstream Classic. The retained-tab tests (#3351) and the file-diff card
+test (#3301) were also updated to the new behavior.
+
+**Left over** (backlog): `W-agent-generation-overrides`, the #3209 non-context
+phone parts, the #3293 effort picker (`W-harness-runtimes`), the #3229 and #3307
+declarative-config parts (`W-declarative-config`), #3307's remaining prompt
+changes. Compaction deadlines (#3336) are Incompatible (local MLX swap only).
+
+**Method.** Four Sonnet subagents each ported one group in its own git worktree
+(reset to `intel-fork` first, build with `--arch x86_64 --build-tests`, filtered
+gate). The lead then rebased the groups, ran the full suite on the combined
+branch and only then fast-forwarded `intel-fork`.
+
+**Lesson.** Narrow per-agent test filters missed two broken tests (the retained
+tab tests after #3351 and the file-diff card test after #3301), and one group's
+filtered gate hid a failing `agentLoopToolNames` expectation until the full run.
+Always run the full suite on the combined branch before fast-forwarding; a
+filtered gate only proves the suites you named.
+
+---
+
 ## 2026-09-25 — Full upstream feasibility audit through `a4daf94c4`
 
 Fetched `upstream/main` and classified every commit in

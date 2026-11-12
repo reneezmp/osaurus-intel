@@ -500,3 +500,15 @@ other gate failures.
   separately with `swift build --package-path Packages/OsaurusCore --arch x86_64`
   (or `--triple x86_64-apple-macosx13.0` under the interim setup), and Intel
   behaviour by Rosy QA.
+
+## 2026-11-11 gate "live hits" were the running Classic app
+
+Several gate runs during the Classic port showed "live hits" under `~/.osaurus`
+(memory WAL, chat-history WAL and blobs, activity, file-history manifests,
+`memory/vectura/`) while Renée's upstream Classic app
+(`/Applications/osaurus.app`) was running and in use. `lsof` showed only that
+app holding those files, the writes continued after the tests ended, a rerun of
+the same tests was clean, and Intel never writes VecturaKit stores. Conclusion:
+app writes, not test leaks. The check stays. A hit inside the test window should
+be re-run (ideally with the other app quit, or compared against `lsof` and a
+second run) before concluding that a test leaked.

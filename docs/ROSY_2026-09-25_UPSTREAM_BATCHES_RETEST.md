@@ -3343,3 +3343,39 @@ Region (move the language to the top, relaunch Osaurus), then set back.
 - [ ] Chat normally, quit and relaunch: chats are all still there (the save
       path changed slightly). No yellow "History isn't saved yet" bar
       appears above the composer during normal use.
+
+## Classic fixes (2026-11-11)
+
+Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
+
+- [ ] Send a long prompt and let the reply stream: the chat keeps scrolling to
+      the newest text without you touching it.
+- [ ] Attach a working folder and send a message: no "Follow up" rows appear
+      while the turn is still running; they show only after it ends.
+- [ ] Settings → Chat → "Collapse Long Pastes": turn it off and paste a long
+      text, it stays as text; turn it on, it becomes a chip with an "Insert as
+      Text" button that puts the text back in the composer.
+- [ ] Open a model card in the model manager: paragraphs reflow to the window
+      width instead of breaking at the source's line ends.
+- [ ] Insights → a request's detail: "Input tokens" and "Output tokens" say
+      Reported or Estimated, and a request rate is shown (no made-up output
+      limit).
+- [ ] Insights → export CSV: the file has truncation columns and token-source
+      columns.
+- [ ] Re-pair the iPhone: every agent is still reachable over the relay, not
+      just one. Stopping a phone reply keeps the text written so far.
+- [ ] Create, rename and delete an agent: the File and Agents menus update
+      without a relaunch.
+- [ ] A Claude Code agent with the shell tool off cannot run Bash; its
+      Claude effort picker offers levels.
+- [ ] Anthropic models in the picker offer reasoning levels (and Off).
+- [ ] Ask an agent to read several files at once with `file_read`: all come
+      back, and one missing file does not fail the rest.
+- [ ] A very long tool result shows a short preview and the agent can page the
+      rest with `file_read`.
+- [ ] Agents → Abilities → Built-in Tools (non-Default agent): the calculator,
+      checklist, clarify and artifacts switches take effect.
+- [ ] A schedule set across a daylight-saving change (the repeated hour) fires
+      once and the app does not hang.
+- [ ] Ask an agent to read an image or a scanned PDF with text recognition: it
+      returns the text and the app does not crash.
