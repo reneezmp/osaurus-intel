@@ -387,7 +387,7 @@ now that Intel has both. Stage 6 re-reads them.
    today's sizes), encryption (with `W-storage-encryption-optin`, since
    upstream made it opt-in in #1600). `isUnattendedDispatch` needs nothing
    now: upstream's auto-approvable list is empty and its other use is
-   channel publishing (deferred). Rest of the original scope: commits since the fork are covered by stages 1–4; this
+   channel publishing (deferred). **5b (prompt composer) audited 2026-11-12** ([`COV_REAUDIT_STAGE5B_COMPOSER.md`](COV_REAUDIT_STAGE5B_COMPOSER.md): 50 behaviours, 6 port slices); Renée chose to follow upstream's lean custom-agent prompt (#2250). Rest of the original scope: commits since the fork are covered by stages 1–4; this
    compares behaviour Intel's replacements never had at all, starting with
    chat storage, the prompt composer (with the Abilities context-impact
    readout, #2306 / #2323, and upstream's per-chat freeze of the prompt and
