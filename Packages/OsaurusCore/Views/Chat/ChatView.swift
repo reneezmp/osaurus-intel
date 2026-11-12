@@ -1261,32 +1261,20 @@ final class ChatSession: ObservableObject {
         }
 
         #if OSAURUS_INTEL
-        // No cached context yet — e.g. a session restored after launch that
-        // hasn't sent this run. Build a lightweight preview from the agent's
-        // effective system prompt + currently-registered tools so the budget
-        // shows the real prefix (System Prompt + Tools + Conversation), not just
-        // typing tokens. `from(context:)` estimates the tool-token cost.
-        let previewPrompt = AgentManager.shared.effectiveSystemPrompt(for: effectiveId)
-        let previewTools =
-            ChatConfiguration.shared.disableTools ? [] : ToolRegistry.shared.openAISpecs()
-        // Mirror the section split that `composeChatContext` emits on send, so
-        // the preview popover lists the same rails (Persona, and Working
-        // Directory when a working folder is mounted) rather than a single "System Prompt".
-        var previewSections: [PromptSection] = []
-        if !previewPrompt.isEmpty {
-            previewSections.append(
-                PromptSection(id: "persona", label: "Persona", text: previewPrompt, tint: .purple))
-        }
-        let previewFolderSection = SystemPromptTemplates.folderContext(
-            from: folderState.context)
-        if !previewFolderSection.isEmpty {
-            previewSections.append(
-                PromptSection(id: "folderContext", label: "Working Directory", text: previewFolderSection, tint: .teal))
-        }
-        let preview = ComposedContext(
-            prompt: previewPrompt + previewFolderSection,
-            tools: previewTools,
-            promptSections: previewSections)
+        // No cached context yet (the welcome screen, or a session restored
+        // after launch that hasn't sent this run): price what the next send
+        // would compose. Stage 5b slice 5: `composePreviewContext` runs the
+        // same section and tool gates as `composeChatContext` (persona,
+        // folder, discipline, manifest, tools), without memory recall and
+        // without opening the agent database (upstream #2306/#2323).
+        let preview = SystemPromptComposer.composePreviewContext(
+            agentId: effectiveId,
+            model: selectedModel,
+            toolsDisabled: ChatConfiguration.shared.disableTools,
+            projectId: projectId,
+            folderContext: folderState.context,
+            offerFolderPrompt: canPromptForWorkingFolder
+        )
         return .from(
             context: preview,
             conversationTokens: conversationTokens,
@@ -3548,7 +3536,8 @@ final class ChatSession: ObservableObject {
                 let liveToolMode = AgentManager.shared.effectiveToolSelectionMode(for: effectiveAgentId)
                 let liveFingerprint = SessionToolState.fingerprint(
                     executionMode: executionMode,
-                    toolMode: liveToolMode
+                    toolMode: liveToolMode,
+                    agentId: effectiveAgentId
                 )
                 let cachedSession: SessionToolState?
                 if let sid = sessionId {
@@ -3593,7 +3582,11 @@ final class ChatSession: ObservableObject {
                     toolsDisabled: chatCfg.disableTools,
                     cachedPreflight: cachedSession?.initialPreflight,
                     additionalToolNames: cachedSession?.loadedToolNames ?? [],
+                    // Upstream #2171: the first compose's baseline names, tool
+                    // specs and manifest, frozen per chat.
                     frozenAlwaysLoadedNames: cachedSession?.initialAlwaysLoadedNames,
+                    frozenToolSpecs: cachedSession?.initialToolSpecs,
+                    frozenManifest: cachedSession?.frozenManifest,
                     trace: ttftTrace,
                     projectId: projectId,
                     folderContext: folderState.context,
@@ -3659,12 +3652,17 @@ final class ChatSession: ObservableObject {
                 // already accumulated this session. Stamp the live
                 // fingerprint so the invalidation rule above can detect
                 // a flip on the next turn.
-                if let sid = sessionId, cachedSession == nil {
+                // Upstream fills only the fields still missing, so this runs on
+                // every send: a grant edit clears the frozen fields and the
+                // next compose records fresh ones.
+                if let sid = sessionId {
                     await SessionToolStateStore.shared.setInitial(
                         sessionStateKey(sid),
                         preflight: context.preflight,
                         alwaysLoadedNames: context.alwaysLoadedNames,
-                        fingerprint: liveFingerprint
+                        toolSpecs: context.initialToolSpecs,
+                        fingerprint: liveFingerprint,
+                        manifest: context.enabledManifest
                     )
                 }
 

@@ -1140,6 +1140,12 @@ struct AgentDetailView: View {
     @State private var linkedWatchers: [Watcher] = []
     @State private var chatSessions: [ChatSessionData] = []
     @State private var agentPlugins: [PluginManager.LoadedPlugin] = []
+    /// Abilities context readout (upstream #2306/#2323): the priced draft, the
+    /// last change in tokens (shown briefly), and the task that hides it.
+    @State private var abilityContextPreview: AgentAbilityContextPreview?
+    @State private var abilityContextDelta: Int?
+    @State private var abilityContextDeltaDismissTask: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var agentFailedPlugins: [PluginManager.FailedPlugin] = []
     private var currentAgent: Agent {
         agentManager.agent(for: agent.id) ?? agent
@@ -1312,6 +1318,15 @@ struct AgentDetailView: View {
         }
         .onChange(of: agent.id) { _ in
             refreshDetailCaches()
+        }
+        // Re-price the Abilities readout whenever a budget input changes: the
+        // local toggles, the saved agent, the capability revision or the
+        // loaded plugins. The short debounce inside keeps bulk flips cheap.
+        .task(id: abilityPreviewTrigger) {
+            await refreshAbilityContextPreview()
+        }
+        .onDisappear {
+            abilityContextDeltaDismissTask?.cancel()
         }
         // A change made in chat (the model picker) lands in the manager, not
         // here: follow it so a later save here can't write the old value back
@@ -1756,13 +1771,127 @@ struct AgentDetailView: View {
     /// Two-level navigation: five stable groups on top, the active
     /// group's tabs as pills below. `AgentDetailGroupedTabStrip` owns the
     /// chrome; this view only maps the agent's tab sources into groups.
-    /// Upstream shows its abilities context readout as the trailing
-    /// accessory; Intel's Abilities overview has no such readout yet.
+    /// The Abilities group carries the context readout at the trailing edge
+    /// of its sub-tab bar (upstream #2306/#2323).
     private var tabBar: some View {
         AgentDetailGroupedTabStrip(
             groups: tabGroups,
-            selection: $selectedTab
+            selection: $selectedTab,
+            trailingAccessory:
+                isAbilitiesGroupSelected
+                ? AnyView(
+                    AgentAbilityContextPreviewBar(
+                        preview: abilityContextPreview,
+                        delta: abilityContextDelta,
+                        enabledCount: abilityFlagValues.filter { $0 }.count,
+                        totalCount: abilityFlagValues.count
+                    )
+                )
+                : nil
         )
+    }
+
+    /// The readout is an Abilities-group status, not destination content:
+    /// it stays visible for the built-in and plugin tabs of the group.
+    private var isAbilitiesGroupSelected: Bool {
+        switch selectedTab {
+        case .builtIn(.abilities), .builtIn(.capabilities), .builtIn(.subagents),
+            .builtIn(.sandbox), .plugin, .failedPlugin:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Everything that changes the priced context. Equatable so `.task(id:)`
+    /// restarts only on a real change.
+    private struct AbilityPreviewTrigger: Equatable {
+        var draft: AgentAbilityContextPreview.Draft
+        var agent: Agent
+        var capabilityRevision: UInt64
+        var pluginsNonce: UInt
+        var isAbilitiesGroup: Bool
+    }
+
+    private var abilityDraft: AgentAbilityContextPreview.Draft {
+        AgentAbilityContextPreview.Draft(
+            toolsEnabled: !disableTools,
+            memoryEnabled: !disableMemory,
+            dbEnabled: dbEnabled,
+            webSearchEnabled: webSearchEnabled,
+            model: selectedModel
+        )
+    }
+
+    private var abilityPreviewTrigger: AbilityPreviewTrigger {
+        AbilityPreviewTrigger(
+            draft: abilityDraft,
+            agent: currentAgent,
+            capabilityRevision: agentManager.currentCapabilityRevision(),
+            pluginsNonce: loadedPluginsRefreshNonce,
+            isAbilitiesGroup: isAbilitiesGroupSelected
+        )
+    }
+
+    /// Recompose only when a budget input changes, and only while the
+    /// Abilities group is on screen. Compose reads the agent store and the
+    /// tool registry, so it runs from here and never from a view body.
+    @MainActor
+    private func refreshAbilityContextPreview() async {
+        guard isAbilitiesGroupSelected else { return }
+        try? await Task.sleep(nanoseconds: 140_000_000)
+        guard !Task.isCancelled else { return }
+        let next = AgentAbilityContextPreview.compute(agentId: agent.id, draft: abilityDraft)
+        if let previous = abilityContextPreview {
+            let delta = next.highTokens - previous.highTokens
+            if delta != 0 {
+                abilityContextDelta = delta
+                abilityContextDeltaDismissTask?.cancel()
+                abilityContextDeltaDismissTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 2_600_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
+                        abilityContextDelta = nil
+                    }
+                }
+            }
+        }
+        withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9)) {
+            abilityContextPreview = next
+        }
+    }
+
+    /// On/off values behind the popover's "N of M abilities on" counter. The
+    /// built-in agent only has the switches it can use.
+    private var abilityFlagValues: [Bool] {
+        let manager = agentManager
+        let id = agent.id
+        var flags: [Bool] = [!disableTools]
+        if id != Agent.defaultId {
+            let settings = currentAgent.settings
+            flags += [
+                !disableMemory,
+                settings.renderChartEnabled,
+                settings.speakEnabled,
+                settings.artifactsEnabled,
+                settings.taskChecklistEnabled,
+                settings.clarifyEnabled,
+                settings.calculatorEnabled,
+                settings.searchMemoryEnabled,
+                settings.selfSchedulingEnabled,
+                dbEnabled,
+            ]
+        } else {
+            flags.append(!disableMemory)
+        }
+        flags += [
+            webSearchEnabled,
+            manager.effectiveImageEnabled(for: id),
+            manager.effectiveVideoEnabled(for: id),
+            manager.effectiveAppleScriptEnabled(for: id),
+            manager.effectiveBrowserUseEnabled(for: id),
+        ]
+        return flags
     }
 
     private func tabItem(for tab: DetailTab) -> AgentDetailTabItem<AgentTab> {

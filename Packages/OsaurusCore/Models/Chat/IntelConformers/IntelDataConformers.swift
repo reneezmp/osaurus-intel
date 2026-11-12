@@ -1225,29 +1225,72 @@ enum SessionCapability: String, Codable, Hashable, Sendable, CaseIterable {
 struct SessionToolState: @unchecked Sendable {
     var initialPreflight: Any?
     var loadedToolNames: [String]
-    var initialAlwaysLoadedNames: Any?
+    /// Baseline tool names of the FIRST compose of this chat, echoed back on
+    /// turn 2+ so the schema stays byte-stable (upstream #2171).
+    var initialAlwaysLoadedNames: Set<String>?
+    /// The exact tool specs of the first compose (upstream #2171): a name can
+    /// stay while its schema changes, which would invalidate the prefix.
+    var initialToolSpecs: [Tool]?
     var sessionFingerprint: String?
+    /// The rendered enabled-capabilities block of the first compose (#2171).
+    var frozenManifest: String?
+    /// Frozen per-user-message memory/time prefixes for surfaces whose
+    /// history the caller owns (HTTP `/agents/{id}/run`, plugin host),
+    /// keyed by `SystemPromptComposer.frozenPrefixKeys` (upstream #2173).
+    var frozenUserPrefixes: [String: String] = [:]
 
     init(
         initialPreflight: Any? = nil,
         loadedToolNames: [String] = [],
-        initialAlwaysLoadedNames: Any? = nil,
-        sessionFingerprint: String? = nil
+        initialAlwaysLoadedNames: Set<String>? = nil,
+        initialToolSpecs: [Tool]? = nil,
+        sessionFingerprint: String? = nil,
+        frozenManifest: String? = nil,
+        frozenUserPrefixes: [String: String] = [:]
     ) {
         self.initialPreflight = initialPreflight
         self.loadedToolNames = loadedToolNames
         self.initialAlwaysLoadedNames = initialAlwaysLoadedNames
+        self.initialToolSpecs = initialToolSpecs
         self.sessionFingerprint = sessionFingerprint
+        self.frozenManifest = frozenManifest
+        self.frozenUserPrefixes = frozenUserPrefixes
     }
 
-    static func fingerprint(executionMode: Any?, toolMode: Any?) -> String {
-        // Upstream's shape: execution mode + tool mode. The process-wide
-        // capability revision is NOT part of it any more: a grant or catalog
-        // edit goes through `SessionToolStateStore.reconcileToolGrants`, which
-        // keeps the tools the chat already loaded (upstream `SessionToolState`).
-        let mode = String(describing: executionMode)
-        let tools = String(describing: toolMode)
-        return "intel/\(mode)/\(tools)"
+    /// Upstream's shape: execution mode (the folder ROOT is part of the
+    /// identity, as a stable path hash and never the raw path), tool mode,
+    /// and the AGENT. A grant or catalog edit is NOT part of it: that goes
+    /// through `SessionToolStateStore.reconcileToolGrants`, which keeps the
+    /// tools the chat already loaded. The agent is part of it because the
+    /// baseline schema is per agent, so the first-turn snapshot is only valid
+    /// for the agent that produced it. Arguments stay `Any?` so callers and
+    /// tests can pass plain strings for the mode components.
+    static func fingerprint(executionMode: Any?, toolMode: Any?, agentId: UUID? = nil) -> String {
+        let mode: String
+        if let executionMode = executionMode as? ExecutionMode {
+            switch executionMode {
+            case .hostFolder(let context): mode = "host@\(folderIdentity(context))"
+            case .sandbox: mode = "sandbox"
+            case .none: mode = "none"
+            }
+        } else {
+            mode = String(describing: executionMode)
+        }
+        let tools = (toolMode as? ToolSelectionMode)?.rawValue ?? String(describing: toolMode)
+        var fingerprint = "intel/\(mode)/\(tools)"
+        if let agentId { fingerprint += "/agent:\(agentId.uuidString)" }
+        return fingerprint
+    }
+
+    /// FNV-1a rather than `Hasher`, which is seeded per process; this
+    /// identity must be stable across composes.
+    private static func folderIdentity(_ context: FolderContext) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in context.rootPath.standardizedFileURL.path.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x1_0000_01b3
+        }
+        return String(format: "%016llx", hash)
     }
 }
 
@@ -2014,7 +2057,17 @@ final class LiveExecSink: @unchecked Sendable {
 
 
 final actor SessionToolStateStore {
-    static let shared = SessionToolStateStore()
+    /// The process-wide store also drops every chat's frozen tool fields when
+    /// the tool catalog changes (upstream `invalidateToolCatalog`, which
+    /// upstream calls from its MCP manager; Intel listens to
+    /// `.toolsListChanged`, which plugins and MCP servers both post).
+    static let shared: SessionToolStateStore = {
+        let store = SessionToolStateStore()
+        NotificationCenter.default.addObserver(forName: .toolsListChanged, object: nil, queue: nil) { _ in
+            Task { await store.invalidateToolCatalog() }
+        }
+        return store
+    }()
 
     /// What a session's tool grants looked like when it last composed
     /// (upstream `ToolGrantSnapshot`). Intel's grants live in the agent
@@ -2023,12 +2076,23 @@ final actor SessionToolStateStore {
     struct ToolGrantSnapshot: Equatable, Sendable {
         let capabilityRevision: UInt64
         let allowedNames: Set<String>?
+        /// Every other gate that decides the composed tools and sections
+        /// (`IntelAgentConfigSnapshot.gateSignature`): toggling an ability
+        /// resets the per-chat freeze so it applies on the next send.
+        let gates: String
+
+        init(capabilityRevision: UInt64, allowedNames: Set<String>?, gates: String = "") {
+            self.capabilityRevision = capabilityRevision
+            self.allowedNames = allowedNames
+            self.gates = gates
+        }
 
         @MainActor
         static func current(agentId: UUID) -> ToolGrantSnapshot {
             ToolGrantSnapshot(
                 capabilityRevision: AgentManager.shared.currentCapabilityRevision(),
-                allowedNames: AgentManager.shared.effectiveEnabledToolNames(for: agentId).map(Set.init))
+                allowedNames: AgentManager.shared.effectiveEnabledToolNames(for: agentId).map(Set.init),
+                gates: IntelAgentConfigSnapshot.capture(agentId: agentId, projectId: nil).gateSignature)
         }
     }
 
@@ -2045,8 +2109,43 @@ final actor SessionToolStateStore {
         guard previous != current, var entry = states[key] else { return }
         entry.initialPreflight = nil
         entry.initialAlwaysLoadedNames = nil
+        entry.initialToolSpecs = nil
+        entry.frozenManifest = nil
         states[key] = entry
         lastSendCacheHints.removeValue(forKey: key)
+    }
+
+    /// Upstream `invalidateToolCatalog`: the process-wide tool catalog changed
+    /// (a plugin or MCP server added, removed or replaced a schema), so every
+    /// chat re-resolves its frozen tool fields on the next send. Tools the
+    /// model loaded and the frozen user prefixes survive.
+    func invalidateToolCatalog() {
+        for key in Array(states.keys) {
+            guard var entry = states[key] else { continue }
+            entry.initialAlwaysLoadedNames = nil
+            entry.initialToolSpecs = nil
+            entry.frozenManifest = nil
+            states[key] = entry
+        }
+        lastSendCacheHints.removeAll()
+    }
+
+    // MARK: Frozen user-message prefixes (HTTP / plugin paths)
+
+    /// The session's frozen per-user-message memory prefixes (empty when none
+    /// recorded). Upstream `frozenUserPrefixes`.
+    func frozenUserPrefixes(_ key: Any) -> [String: String] {
+        states[stateKey(key)]?.frozenUserPrefixes ?? [:]
+    }
+
+    /// Record the prefix injected into a user message so later requests of
+    /// the same session replay the exact bytes. Creates the entry if the
+    /// session has not composed yet. Upstream `recordUserPrefix`.
+    func recordUserPrefix(_ key: Any, key prefixKey: String, prefix: String) {
+        let key = stateKey(key)
+        var entry = states[key] ?? SessionToolState()
+        entry.frozenUserPrefixes[prefixKey] = prefix
+        states[key] = entry
     }
 
     private var states: [String: SessionToolState] = [:]
@@ -2089,19 +2188,26 @@ final actor SessionToolStateStore {
         states[stateKey(key)]
     }
 
+    /// Upstream `setInitial`: a capabilities load or a frozen-prefix write can
+    /// create the entry before the first compose reaches this point, so fill
+    /// only the fields still missing instead of returning early, and keep
+    /// whatever the entry already accumulated (#2171).
     func setInitial(
         _ key: Any,
-        preflight: Any?,
-        alwaysLoadedNames: Any?,
-        fingerprint: String
+        preflight: Any? = nil,
+        alwaysLoadedNames: Set<String>?,
+        toolSpecs: [Tool]? = nil,
+        fingerprint: String,
+        manifest: String? = nil
     ) {
         let key = stateKey(key)
-        guard states[key] == nil else { return }
-        states[key] = SessionToolState(
-            initialPreflight: preflight,
-            initialAlwaysLoadedNames: alwaysLoadedNames,
-            sessionFingerprint: fingerprint
-        )
+        var entry = states[key] ?? SessionToolState()
+        if entry.initialPreflight == nil { entry.initialPreflight = preflight }
+        if entry.initialAlwaysLoadedNames == nil { entry.initialAlwaysLoadedNames = alwaysLoadedNames }
+        if entry.initialToolSpecs == nil { entry.initialToolSpecs = toolSpecs }
+        if entry.sessionFingerprint == nil { entry.sessionFingerprint = fingerprint }
+        if entry.frozenManifest == nil { entry.frozenManifest = manifest }
+        states[key] = entry
     }
 
     func recordSend(sessionId: Any, cacheHint: Any?, trace: Any?) {
@@ -2116,7 +2222,7 @@ final actor SessionToolStateStore {
         _ key: Any,
         names: [String],
         fallbackPreflight: Any? = nil,
-        fallbackAlwaysLoadedNames: Any?
+        fallbackAlwaysLoadedNames: Set<String>?
     ) {
         let key = stateKey(key)
         var state = states[key] ?? SessionToolState(
@@ -2725,8 +2831,6 @@ final class SystemPromptComposer: @unchecked Sendable {
         return tools.sorted { sortKey($0) < sortKey($1) }
     }
 
-    static func composePreviewContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil) -> ComposedContext { ComposedContext() }
-
     static func folderToolIsVisible(
         _ name: String,
         folder: FolderContext?,
@@ -2738,99 +2842,139 @@ final class SystemPromptComposer: @unchecked Sendable {
         return folder.isGitRepo || !gitToolNames.contains(name)
     }
     // M12 Gap 1 follow-up: the real `SystemPromptComposer` is excluded on
-    // Intel (it pulls in preflight / memory / tool-resolution machinery that
-    // depends on amputated subsystems). Returning an empty `ComposedContext`
-    // meant `context.prompt` was always "" — so the chat ignored the selected
-    // agent entirely (Renée 2026-06-03). We can't run the full pipeline, but
-    // we CAN honor the one thing that matters here: the agent's effective
-    // system prompt (custom prompt for custom agents, global config prompt
-    // for Default). Memory/tools stay inert, matching the amputated build.
-    static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil, projectId: UUID? = nil, folderContext: FolderContext? = nil, offerFolderPrompt: Bool = false) async -> ComposedContext {
+    // Intel; this is Intel's own composer. Stage 5b slices 4-5 split it the
+    // way upstream does: a synchronous, main-actor `buildStaticContext`
+    // (everything but memory recall) fed by one `IntelAgentConfigSnapshot`,
+    // shared by the send path (`composeChatContext`) and the preview path
+    // (`composePreviewContext`, upstream #2306/#2323), plus the per-chat
+    // freeze (upstream #2171).
+    static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Set<String>? = nil, frozenToolSpecs: [Tool]? = nil, frozenManifest: String? = nil, trace: Any? = nil, projectId: UUID? = nil, folderContext: FolderContext? = nil, offerFolderPrompt: Bool = false) async -> ComposedContext {
         let id = (agentId as? UUID) ?? Agent.defaultId
-        // Keep these snapshots separate. A single six-element actor-returned
-        // tuple trips a Swift 6 compiler diagnostic-generation bug in the
-        // Intel target once the Knowledge collection types are present.
-        let editablePrompt = await MainActor.run {
-            AgentManager.shared.effectiveSystemPrompt(for: id)
+        await KnowledgeManager.shared.ensureLoaded()
+        // One main-actor read for every gate (upstream `AgentConfigSnapshot`),
+        // so a settings edit mid-compose cannot mix two states.
+        let snapshot = await MainActor.run {
+            IntelAgentConfigSnapshot.capture(agentId: id, projectId: projectId)
         }
-        let delegationTargets = await MainActor.run {
-            guard id == Agent.defaultId else { return [IntelOrchestratorPrompt.DelegationTarget]() }
-            let manager = AgentManager.shared
-            let delegation = DefaultAgentConfigurationStore.load().delegation
-            return IntelOrchestratorAdmission.evaluate(
-                configuration: delegation,
-                agents: manager.agents,
-                effectiveModel: { manager.effectiveModel(for: $0) }
-            ).targets
+        let built = await MainActor.run {
+            buildStaticContext(
+                snapshot: snapshot, model: model, toolsDisabled: toolsDisabled,
+                additionalToolNames: additionalToolNames,
+                frozenAlwaysLoadedNames: frozenAlwaysLoadedNames, frozenToolSpecs: frozenToolSpecs,
+                frozenManifest: frozenManifest, folderContext: folderContext,
+                offerFolderPrompt: offerFolderPrompt, allowDatabaseOpen: true)
         }
+
+        // Recall: assemble the layered memory block (identity → pinned →
+        // episodes → transcript fallback) that `injectMemoryPrefix` will splice
+        // in just before the user's message.
+        var memorySection: String? = nil
+        let memCfg = MemoryConfigurationStore.load()
+        if memCfg.enabled,
+            !snapshot.memoryDisabled,
+            case let q = resolveEffectiveQuery(
+                query: query ?? "", messages: messages.compactMap { $0 as? ChatMessage }),
+            !q.isEmpty
+        {
+            // `projectId` additionally opens the project's own namespace as a
+            // second lane, mirroring upstream: a chat inside a project recalls
+            // what the whole project has learned, floored at a share of the
+            // budget and deduped against what the agent lane already surfaced.
+            // It is additive — passing nil keeps the previous behaviour exactly.
+            let days = memCfg.episodeRetentionDays > 0 ? memCfg.episodeRetentionDays : 3650
+            memorySection = await MemorySearchService.shared.recall(
+                query: q, agentId: id.uuidString, projectId: projectId, days: days,
+                budgetTokens: memCfg.memoryBudgetTokens)
+        }
+
+        if let databaseSchemaSection = built.databaseSchemaSection, !databaseSchemaSection.isEmpty {
+            memorySection = [databaseSchemaSection, memorySection].compactMap { $0 }
+                .joined(separator: "\n\n")
+        }
+
+        return ComposedContext(
+            prompt: built.prompt, toolTokens: built.toolTokens, tools: built.tools,
+            alwaysLoadedNames: built.alwaysLoadedNames,
+            memorySection: memorySection, promptSections: built.sections,
+            initialToolSpecs: built.initialToolSpecs, enabledManifest: built.enabledManifest)
+    }
+
+    /// Upstream `composePreviewContext` (#2306/#2323): the same sections and
+    /// tools the next send would compose, without memory and without opening
+    /// the agent database (`allowOpen: false`). Drives the Context Budget
+    /// popover and the Abilities context readout.
+    @MainActor
+    static func composePreviewContext(
+        agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil,
+        toolsDisabled: Bool = false, projectId: UUID? = nil, folderContext: FolderContext? = nil,
+        offerFolderPrompt: Bool = false
+    ) -> ComposedContext {
+        let id = (agentId as? UUID) ?? Agent.defaultId
+        return composePreviewContext(
+            snapshot: IntelAgentConfigSnapshot.capture(agentId: id, projectId: projectId), model: model,
+            toolsDisabled: toolsDisabled, folderContext: folderContext, offerFolderPrompt: offerFolderPrompt)
+    }
+
+    /// Snapshot-taking variant, so the Abilities editor can price a DRAFT
+    /// state (toggles not yet saved) through the exact same gates.
+    @MainActor
+    static func composePreviewContext(
+        snapshot: IntelAgentConfigSnapshot, model: String? = nil, toolsDisabled: Bool = false,
+        folderContext: FolderContext? = nil, offerFolderPrompt: Bool = false
+    ) -> ComposedContext {
+        let built = buildStaticContext(
+            snapshot: snapshot, model: model, toolsDisabled: toolsDisabled, additionalToolNames: [],
+            frozenAlwaysLoadedNames: nil, frozenToolSpecs: nil, frozenManifest: nil,
+            folderContext: folderContext, offerFolderPrompt: offerFolderPrompt, allowDatabaseOpen: false)
+        return ComposedContext(
+            prompt: built.prompt, toolTokens: built.toolTokens, tools: built.tools,
+            alwaysLoadedNames: built.alwaysLoadedNames,
+            // The agent database state is Intel's per-turn prefix, so it
+            // prices as the memory rail (read only from an already-open DB).
+            memorySection: built.databaseSchemaSection, promptSections: built.sections,
+            initialToolSpecs: built.initialToolSpecs, enabledManifest: built.enabledManifest)
+    }
+
+    /// Everything the system prompt and tool schema need except memory.
+    /// Synchronous and main-actor so the preview path can share it.
+    @MainActor
+    static func buildStaticContext(
+        snapshot s: IntelAgentConfigSnapshot,
+        model: String?,
+        toolsDisabled: Bool,
+        additionalToolNames: [String],
+        frozenAlwaysLoadedNames: Set<String>?,
+        frozenToolSpecs: [Tool]?,
+        frozenManifest: String?,
+        folderContext: FolderContext?,
+        offerFolderPrompt: Bool,
+        allowDatabaseOpen: Bool
+    ) -> IntelStaticCompose {
+        let id = s.agentId
         let basePrompt = IntelOrchestratorPrompt.compose(
             agentID: id,
-            editablePrompt: editablePrompt,
-            delegationTargets: delegationTargets
+            editablePrompt: s.editablePrompt,
+            delegationTargets: s.delegationTargets
         )
         let folder = folderContext
-        let enabledToolNames = await MainActor.run {
-            AgentManager.shared.effectiveEnabledToolNames(for: id)
-        }
-        let agentToolsDisabled = await MainActor.run {
-            AgentManager.shared.effectiveToolsDisabled(for: id)
-        }
-        let selfSchedulingEnabled = await MainActor.run {
-            AgentManager.shared.effectiveSelfSchedulingEnabled(for: id)
-        }
-        let webSearchEnabled = await MainActor.run {
-            AgentManager.shared.agent(for: id)?.settings.webSearchEnabled ?? false
-        }
-        let databaseEnabled = await MainActor.run {
-            AgentManager.shared.effectiveDBEnabled(for: id)
-        }
-        let speakEnabled = await MainActor.run {
-            AgentManager.shared.effectiveSpeakEnabled(for: id)
-        }
-        // `W-media-generation`: the agent's Image / Video switches.
-        let (imageEnabled, videoEnabled) = await MainActor.run {
-            (AgentManager.shared.effectiveImageEnabled(for: id), AgentManager.shared.effectiveVideoEnabled(for: id))
-        }
-        // `W-applescript-agent`: the agent's AppleScript switch.
-        let appleScriptEnabled = await MainActor.run {
-            AgentManager.shared.effectiveAppleScriptEnabled(for: id)
-        }
-        // `W-browser-use`: the agent's Browser Use switch.
-        let browserUseEnabled = await MainActor.run {
-            AgentManager.shared.effectiveBrowserUseEnabled(for: id)
-        }
-        // Upstream per-agent opt-ins for `render_chart` / `search_memory`.
-        let (renderChartEnabled, searchMemoryEnabled) = await MainActor.run {
-            let settings = AgentManager.shared.agent(for: id)?.settings
-            return (settings?.renderChartEnabled ?? false, settings?.searchMemoryEnabled ?? false)
-        }
-        // Upstream #3307: optional built-ins this custom agent switched off.
-        let disabledOptionalTools: Set<String> = await MainActor.run {
-            guard id != Agent.defaultId, let settings = AgentManager.shared.agent(for: id)?.settings
-            else { return [] }
-            return ToolRegistry.disabledOptionalToolNames(settings)
-        }
-        let appleAppToolNames = await MainActor.run {
-            AppleApp.toolNames(for: AgentManager.shared.effectiveAppleApps(for: id))
-        }
-        let folderToolNames = await MainActor.run {
-            Set(FolderToolManager.shared.folderToolNames)
-        }
-        await KnowledgeManager.shared.ensureLoaded()
-        // Upstream `AgentConfigSnapshot.knowledgeCollections`: the agent's own
-        // grants plus the project's, deduplicated, captured once so the
-        // `## Knowledge` section and the tool gate cannot disagree.
-        let knowledgeGrants: [KnowledgeGrantDescriptor] = await MainActor.run {
-            var collections = AgentManager.shared.effectiveKnowledgeCollections(for: id)
-            let known = Set(collections.map(\.id))
-            if let projectId, let project = ProjectManager.shared.project(for: projectId) {
-                collections += KnowledgeManager.shared.enabledCollections(
-                    withIds: project.knowledgeCollectionIds
-                ).filter { !known.contains($0.id) }
-            }
-            return collections.map(\.grantDescriptor)
-        }
+        let enabledToolNames = s.enabledToolNames
+        let agentToolsDisabled = s.agentToolsDisabled
+        let selfSchedulingEnabled = s.selfSchedulingEnabled
+        let webSearchEnabled = s.webSearchEnabled
+        let databaseEnabled = s.databaseEnabled
+        let speakEnabled = s.speakEnabled
+        let imageEnabled = s.imageEnabled
+        let videoEnabled = s.videoEnabled
+        let appleScriptEnabled = s.appleScriptEnabled
+        let browserUseEnabled = s.browserUseEnabled
+        let renderChartEnabled = s.renderChartEnabled
+        let searchMemoryEnabled = s.searchMemoryEnabled
+        let disabledOptionalTools = s.disabledOptionalTools
+        let appleAppToolNames = s.appleAppToolNames
+        let folderToolNames = s.folderToolNames
+        let knowledgeGrants = s.knowledgeGrants
         let knowledgeAllowed = !knowledgeGrants.isEmpty
+
         // M12 Gap 3: when a working folder is mounted, append the real
         // "## Working directory" framing (SystemPromptTemplates.folderContext —
         // NOT excluded). Without it the model just had bare tool specs and no
@@ -2910,12 +3054,10 @@ final class SystemPromptComposer: @unchecked Sendable {
         // cached prompt; the schema snapshot changes as the agent works and
         // rides the per-turn prefix below (upstream's DYNAMIC section).
         let databaseActive = databaseEnabled && folderToolsAvailable
-        var databaseSchemaSection: String? = nil
         if databaseActive {
             let block = "\n\n" + OnboardingPrompt.block
             prompt += block
             sections.append(PromptSection(id: "agentDB", label: "Agent DB", text: block, tint: .orange))
-            databaseSchemaSection = Self.renderSchemaSnapshot(agentId: id)
         }
         // Surface the registered tools, honoring the agent's capability picker
         // (M12 follow-up): in Manual mode, restrict to the agent's enabled
@@ -3032,25 +3174,43 @@ final class SystemPromptComposer: @unchecked Sendable {
                 tools = allSpecs
             }
         }
+        // Per-chat freeze (upstream #2171). `alwaysLoaded` is the baseline
+        // (non-discoverable) tool names of this compose. On turn 2+ the
+        // session's snapshot filters it, so a built-in that registers
+        // mid-session cannot change the schema and break the provider's
+        // prompt-cache prefix; plugin/MCP tools only enter through the
+        // explicit `capabilities` load (`additionalToolNames`) or, in Manual
+        // mode, the user's own picks. Folder tools are carved out because the
+        // folder gate has already decided them.
+        let toolsOff = toolsDisabled || agentToolsDisabled
+        tools.removeAll { $0.function.name == CapabilitiesTool.toolName }
+        let isDynamicTool: (String) -> Bool = { ToolRegistry.shared.isLoadableDynamicTool($0) }
+        let loadedByModel = Set(additionalToolNames)
+        var alwaysLoaded: Set<String>? = nil
+        if !toolsOff {
+            if let frozen = frozenAlwaysLoadedNames {
+                tools.removeAll {
+                    let name = $0.function.name
+                    return !isDynamicTool(name) && !frozen.contains(name)
+                        && !folderToolNames.contains(name) && !loadedByModel.contains(name)
+                }
+                alwaysLoaded = frozen
+            } else {
+                alwaysLoaded = Set(tools.map(\.function.name).filter { !isDynamicTool($0) })
+            }
+        }
         // Automatic tool discovery (upstream "Design C",
         // docs/TOOL_DISCOVERY_INTEL.md). In Auto mode a custom agent's
         // plugin/MCP tools stay out of the schema until `capabilities` loads
         // them (this session's loads arrive as `additionalToolNames`); the
         // prompt lists what can be loaded. Manual mode sends the enabled set.
-        tools.removeAll { $0.function.name == CapabilitiesTool.toolName }
         var manifestBlock: String? = nil
         if !tools.isEmpty, id != Agent.defaultId {
-            let toolMode = await MainActor.run { AgentManager.shared.effectiveToolSelectionMode(for: id) }
-            if toolMode == .auto {
-                let catalog = await MainActor.run { CapabilityCatalog.build(agentId: id) }
+            if s.toolMode == .auto {
+                let catalog = CapabilityCatalog.build(agentId: id)
                 let loadable = Set(catalog.tools.map(\.name))
                 let loaded = Set(additionalToolNames).intersection(loadable)
-                // `isLoadableDynamicTool` reads the folder tool set, which is
-                // main-actor state.
-                let offeredNames = tools.map(\.function.name)
-                let dynamicNames = await MainActor.run {
-                    Set(offeredNames.filter { ToolRegistry.shared.isLoadableDynamicTool($0) })
-                }
+                let dynamicNames = Set(tools.map(\.function.name).filter { isDynamicTool($0) })
                 tools.removeAll { dynamicNames.contains($0.function.name) && !loaded.contains($0.function.name) }
                 let present = Set(tools.map(\.function.name))
                 tools += CapabilityLoadBuffer.validSpecs(
@@ -3062,7 +3222,11 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if !catalog.isEmpty {
                     tools += ToolRegistry.shared.openAISpecs(named: [CapabilitiesTool.toolName])
                 }
-                if let manifest = await MainActor.run(body: { CapabilityManifest.render(catalog) }) {
+                // A frozen manifest is reused verbatim (upstream #2171); nil
+                // means render fresh.
+                if let frozenManifest {
+                    manifestBlock = frozenManifest
+                } else if let manifest = CapabilityManifest.render(catalog) {
                     manifestBlock = "\n\n" + CapabilityManifest.discoveryGuidance + "\n\n" + manifest
                 }
             }
@@ -3089,9 +3253,8 @@ final class SystemPromptComposer: @unchecked Sendable {
         // active this turn, so a plugin can shape how the model wields it.
         if !tools.isEmpty {
             let activeNames = Set(tools.map { $0.function.name })
-            let pluginInstructions = await MainActor.run {
-                PluginManager.shared.instructions(forActiveToolNames: activeNames, agentId: id)
-            }
+            let pluginInstructions = PluginManager.shared.instructions(
+                forActiveToolNames: activeNames, agentId: id)
             if !pluginInstructions.isEmpty {
                 let block = "\n\n## Plugin Instructions\n" + pluginInstructions.joined(separator: "\n\n")
                 prompt += block
@@ -3147,18 +3310,26 @@ final class SystemPromptComposer: @unchecked Sendable {
         // Project instructions (upstream, ChatView): constant per session, so
         // they ride the system prompt rather than the per-turn `[Memory]`
         // prefix.
-        if let projectId {
-            let project: (name: String, instructions: String)? = await MainActor.run {
-                ProjectManager.shared.project(for: projectId).map { ($0.name, $0.instructions) }
+        if let project = s.project {
+            let instructions = project.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !instructions.isEmpty {
+                let block = "\n\n## Project: \(project.name)\n\n\(instructions)"
+                prompt += block
+                sections.append(
+                    PromptSection(id: "projectInstructions", label: L("Project"), text: block, tint: .cyan))
             }
-            if let project {
-                let instructions = project.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !instructions.isEmpty {
-                    let block = "\n\n## Project: \(project.name)\n\n\(instructions)"
-                    prompt += block
-                    sections.append(
-                        PromptSection(id: "projectInstructions", label: L("Project"), text: block, tint: .cyan))
-                }
+        }
+
+        // Frozen payloads (upstream #2171): a tool name can stay while its
+        // schema changes (an MCP server re-registering), which rewrites the
+        // cached prefix. Reuse the first compose's spec for every baseline
+        // tool still visible; tools the model loaded this session stay live
+        // so `capabilities` can upgrade them.
+        if let frozenToolSpecs {
+            let frozenByName = Dictionary(
+                frozenToolSpecs.map { ($0.function.name, $0) }, uniquingKeysWith: { first, _ in first })
+            tools = tools.map { spec in
+                loadedByModel.contains(spec.function.name) ? spec : (frozenByName[spec.function.name] ?? spec)
             }
         }
         // Upstream canonical order, applied once the schema is final.
@@ -3167,45 +3338,35 @@ final class SystemPromptComposer: @unchecked Sendable {
         // "Tools" rail instead of 0.
         let toolTokens = ContextBudgetManager.estimateToolTokens(tools)
 
-        // Recall: assemble the layered memory block (identity → pinned →
-        // episodes → transcript fallback) that `injectMemoryPrefix` will splice
-        // in just before the user's message.
-        var memorySection: String? = nil
-        let memCfg = MemoryConfigurationStore.load()
-        let memoryDisabled = await MainActor.run {
-            AgentManager.shared.effectiveMemoryDisabled(for: id)
-        }
-        if memCfg.enabled,
-            !memoryDisabled,
-            case let q = resolveEffectiveQuery(
-                query: query ?? "", messages: messages.compactMap { $0 as? ChatMessage }),
-            !q.isEmpty
-        {
-            // `projectId` additionally opens the project's own namespace as a
-            // second lane, mirroring upstream: a chat inside a project recalls
-            // what the whole project has learned, floored at a share of the
-            // budget and deduped against what the agent lane already surfaced.
-            // It is additive — passing nil keeps the previous behaviour exactly.
-            let days = memCfg.episodeRetentionDays > 0 ? memCfg.episodeRetentionDays : 3650
-            memorySection = await MemorySearchService.shared.recall(
-                query: q, agentId: id.uuidString, projectId: projectId, days: days,
-                budgetTokens: memCfg.memoryBudgetTokens)
-        }
+        // The agent database state is Intel's per-turn prefix (upstream keeps
+        // it as a dynamic system section). `allowDatabaseOpen: false` (the
+        // preview) reads only an already-open connection.
+        let databaseSchemaSection: String? =
+            databaseActive ? Self.renderSchemaSnapshot(agentId: id, allowOpen: allowDatabaseOpen) : nil
 
-        if let databaseSchemaSection, !databaseSchemaSection.isEmpty {
-            memorySection = [databaseSchemaSection, memorySection].compactMap { $0 }
-                .joined(separator: "\n\n")
-        }
-
-        return ComposedContext(
-            prompt: prompt, toolTokens: toolTokens, tools: tools,
-            memorySection: memorySection, promptSections: sections)
+        return IntelStaticCompose(
+            prompt: prompt, sections: sections, tools: tools, toolTokens: toolTokens,
+            enabledManifest: toolsOff ? nil : manifestBlock,
+            alwaysLoadedNames: alwaysLoaded,
+            // Nothing to freeze while tools are off; leave the session's
+            // snapshot unset so the next compose records the real one.
+            initialToolSpecs: toolsOff ? nil : tools.filter { !loadedByModel.contains($0.function.name) },
+            databaseSchemaSection: databaseSchemaSection)
     }
+
 
     /// Upstream `SystemPromptComposer.renderSchemaSnapshot`: opens the agent
     /// database (creating it on first use) and falls back to the "no tables
     /// yet" block when it cannot be read.
-    static func renderSchemaSnapshot(agentId: UUID) -> String {
+    /// `allowOpen: false` (the preview path, which runs during SwiftUI body
+    /// evaluation) reads only an already-open connection: a first open does
+    /// file I/O plus SQLCipher key derivation (upstream hung the main thread
+    /// for seconds on it).
+    static func renderSchemaSnapshot(agentId: UUID, allowOpen: Bool = true) -> String {
+        guard allowOpen else {
+            return LocalAgentBridge.shared.schemaSnapshotIfOpen(agentId: agentId)
+                ?? SchemaSnapshot.emptyStateBlock
+        }
         do {
             return try LocalAgentBridge.shared.schemaSnapshot(agentId: agentId)
         } catch {
@@ -3246,6 +3407,84 @@ final class SystemPromptComposer: @unchecked Sendable {
             reasoning_content: existing.reasoning_content,
             contentParts: existing.contentParts.map { [.text(prefix)] + $0 }
         )
+    }
+
+    /// Upstream `applyFrozenMemoryPrefixes` (#2171 lineage): session-stable
+    /// memory/time injection for surfaces whose history the CALLER owns (HTTP
+    /// `/agents/{id}/run`, the plugin host). The client resends clean history
+    /// every request, so a prefix injected into the latest user message on
+    /// request N would vanish from request N+1 and the provider's prompt
+    /// cache would diverge at that message. This makes the injected bytes
+    /// sticky: it (1) replays recorded prefixes onto matching history user
+    /// messages (keyed by content hash plus occurrence of the ORIGINAL
+    /// message), and (2) injects this request's block into the latest user
+    /// message unless that message already has a recorded prefix (an
+    /// identical retry, where byte stability beats fresher memory). Returns
+    /// the (key, prefix) newly recorded for the latest message so the caller
+    /// can persist it in the session ledger; nil when nothing new was
+    /// injected. Intel difference: a message with image or audio parts gets
+    /// the block as a leading text part (as `injectMemoryPrefix` does);
+    /// upstream skips such messages.
+    static func applyFrozenMemoryPrefixes(
+        memorySection: String?,
+        frozen: [String: String],
+        timeContext: String? = nil,
+        into messages: inout [ChatMessage]
+    ) -> (key: String, prefix: String)? {
+        guard let lastUserIdx = messages.lastIndex(where: { $0.role == "user" }) else { return nil }
+        let keys = frozenPrefixKeys(for: messages)
+
+        func prepend(_ prefix: String, at idx: Int) {
+            let existing = messages[idx]
+            messages[idx] = ChatMessage(
+                role: existing.role,
+                content: prefix + (existing.content ?? ""),
+                tool_calls: existing.tool_calls,
+                tool_call_id: existing.tool_call_id,
+                reasoning_content: existing.reasoning_content,
+                contentParts: existing.contentParts.map { [.text(prefix)] + $0 }
+            )
+        }
+
+        // History user messages replay the exact bytes they were sent with.
+        for (idx, key) in keys where idx != lastUserIdx {
+            if let prefix = frozen[key] { prepend(prefix, at: idx) }
+        }
+
+        guard let lastKey = keys[lastUserIdx] else { return nil }
+        if let recorded = frozen[lastKey] {
+            prepend(recorded, at: lastUserIdx)
+            return nil
+        }
+        guard let prefix = composeInjectedUserPrefix(memorySection: memorySection, timeContext: timeContext)
+        else { return nil }
+        prepend(prefix, at: lastUserIdx)
+        return (key: lastKey, prefix: prefix)
+    }
+
+    /// Stable ledger keys for every user message: an FNV-1a hash of the
+    /// ORIGINAL content plus an occurrence ordinal, so duplicate texts ("yes",
+    /// "continue") map to distinct entries while staying deterministic for a
+    /// client that resends identical history.
+    static func frozenPrefixKeys(for messages: [ChatMessage]) -> [Int: String] {
+        var occurrence: [String: Int] = [:]
+        var keys: [Int: String] = [:]
+        for (idx, msg) in messages.enumerated() where msg.role == "user" {
+            let hash = fnv1aHex(msg.content ?? "")
+            let ordinal = occurrence[hash, default: 0]
+            occurrence[hash] = ordinal + 1
+            keys[idx] = "\(hash)#\(ordinal)"
+        }
+        return keys
+    }
+
+    private static func fnv1aHex(_ text: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return String(hash, radix: 16)
     }
 
     /// Upstream `composeInjectedUserPrefix` (#1798, #2173): the memory block,
@@ -3314,6 +3553,127 @@ final class SystemPromptComposer: @unchecked Sendable {
     }
 }
 
+/// What `buildStaticContext` produces: everything but memory.
+struct IntelStaticCompose: @unchecked Sendable {
+    var prompt: String
+    var sections: [PromptSection]
+    var tools: [Tool]
+    var toolTokens: Int
+    var enabledManifest: String?
+    var alwaysLoadedNames: Set<String>?
+    var initialToolSpecs: [Tool]?
+    var databaseSchemaSection: String?
+}
+
+/// Intel's counterpart of upstream `AgentConfigSnapshot`: every per-agent
+/// gate the composer reads, captured in ONE main-actor read so the send path
+/// and the preview path (and the Abilities readout's draft overlay) run the
+/// same gates and a settings edit mid-compose cannot mix two states
+/// (stage 5b slices 4-5).
+struct IntelAgentConfigSnapshot: @unchecked Sendable {
+    struct ProjectInstructions: Sendable, Equatable {
+        var name: String
+        var instructions: String
+    }
+
+    var agentId: UUID
+    var editablePrompt: String
+    var delegationTargets: [IntelOrchestratorPrompt.DelegationTarget]
+    var enabledToolNames: [String]?
+    var agentToolsDisabled: Bool
+    var toolMode: ToolSelectionMode
+    var memoryDisabled: Bool
+    var selfSchedulingEnabled: Bool
+    var webSearchEnabled: Bool
+    var databaseEnabled: Bool
+    var speakEnabled: Bool
+    var imageEnabled: Bool
+    var videoEnabled: Bool
+    var appleScriptEnabled: Bool
+    var browserUseEnabled: Bool
+    var renderChartEnabled: Bool
+    var searchMemoryEnabled: Bool
+    var disabledOptionalTools: Set<String>
+    var appleAppToolNames: Set<String>
+    var folderToolNames: Set<String>
+    var knowledgeGrants: [KnowledgeGrantDescriptor]
+    var project: ProjectInstructions?
+
+    @MainActor
+    static func capture(agentId id: UUID, projectId: UUID?) -> IntelAgentConfigSnapshot {
+        let manager = AgentManager.shared
+        let settings = manager.agent(for: id)?.settings
+        var delegationTargets: [IntelOrchestratorPrompt.DelegationTarget] = []
+        if id == Agent.defaultId {
+            let delegation = DefaultAgentConfigurationStore.load().delegation
+            delegationTargets = IntelOrchestratorAdmission.evaluate(
+                configuration: delegation,
+                agents: manager.agents,
+                effectiveModel: { manager.effectiveModel(for: $0) }
+            ).targets
+        }
+        var disabledOptional: Set<String> = []
+        if id != Agent.defaultId, let settings {
+            disabledOptional = ToolRegistry.disabledOptionalToolNames(settings)
+        }
+        // The agent's own knowledge grants plus the project's, deduplicated,
+        // so the `## Knowledge` section and the tool gate cannot disagree.
+        var collections = manager.effectiveKnowledgeCollections(for: id)
+        let known = Set(collections.map(\.id))
+        var project: ProjectInstructions? = nil
+        if let projectId, let found = ProjectManager.shared.project(for: projectId) {
+            collections += KnowledgeManager.shared.enabledCollections(
+                withIds: found.knowledgeCollectionIds
+            ).filter { !known.contains($0.id) }
+            project = ProjectInstructions(name: found.name, instructions: found.instructions)
+        }
+        return IntelAgentConfigSnapshot(
+            agentId: id,
+            editablePrompt: manager.effectiveSystemPrompt(for: id),
+            delegationTargets: delegationTargets,
+            enabledToolNames: manager.effectiveEnabledToolNames(for: id),
+            agentToolsDisabled: manager.effectiveToolsDisabled(for: id),
+            toolMode: manager.effectiveToolSelectionMode(for: id),
+            memoryDisabled: manager.effectiveMemoryDisabled(for: id),
+            selfSchedulingEnabled: manager.effectiveSelfSchedulingEnabled(for: id),
+            webSearchEnabled: settings?.webSearchEnabled ?? false,
+            databaseEnabled: manager.effectiveDBEnabled(for: id),
+            speakEnabled: manager.effectiveSpeakEnabled(for: id),
+            imageEnabled: manager.effectiveImageEnabled(for: id),
+            videoEnabled: manager.effectiveVideoEnabled(for: id),
+            appleScriptEnabled: manager.effectiveAppleScriptEnabled(for: id),
+            browserUseEnabled: manager.effectiveBrowserUseEnabled(for: id),
+            renderChartEnabled: settings?.renderChartEnabled ?? false,
+            searchMemoryEnabled: settings?.searchMemoryEnabled ?? false,
+            disabledOptionalTools: disabledOptional,
+            appleAppToolNames: AppleApp.toolNames(for: manager.effectiveAppleApps(for: id)),
+            folderToolNames: Set(FolderToolManager.shared.folderToolNames),
+            knowledgeGrants: collections.map(\.grantDescriptor),
+            project: project
+        )
+    }
+
+    /// A stable fingerprint of every gate that decides which tools and
+    /// sections a compose yields. A change resets the chat's frozen
+    /// snapshot (`SessionToolStateStore.reconcileToolGrants`), so toggling an
+    /// ability applies on the next send instead of being held back by the
+    /// freeze.
+    var gateSignature: String {
+        let flags: [Bool] = [
+            agentToolsDisabled, selfSchedulingEnabled, webSearchEnabled, databaseEnabled, speakEnabled,
+            imageEnabled, videoEnabled, appleScriptEnabled, browserUseEnabled, renderChartEnabled,
+            searchMemoryEnabled,
+        ]
+        return [
+            flags.map { $0 ? "1" : "0" }.joined(),
+            toolMode.rawValue,
+            disabledOptionalTools.sorted().joined(separator: ","),
+            appleAppToolNames.sorted().joined(separator: ","),
+            knowledgeGrants.map(\.name).sorted().joined(separator: ","),
+        ].joined(separator: "|")
+    }
+}
+
 struct PromptManifest: Sendable { init() {} }
 
 // M12 Gap 3: OpenAI-compatible tool spec carried in `ChatCompletionRequest.tools`.
@@ -3364,7 +3724,15 @@ struct ComposedContext: @unchecked Sendable {
     let toolTokens: Int
     var tools: [IntelTool]
     var preflight: Any?
-    var alwaysLoadedNames: Any?
+    /// The baseline (non-discoverable) tool names of this compose, stored on
+    /// the session and echoed back on turn 2+ (upstream #2171). nil while
+    /// tools are off.
+    var alwaysLoadedNames: Set<String>?
+    /// The exact tool specs of the first compose, frozen per chat (#2171).
+    var initialToolSpecs: [Tool]?
+    /// The rendered enabled-capabilities block of the first compose, frozen
+    /// per chat (#2171).
+    var enabledManifest: String?
     var preflightItems: [Any]
     var memorySection: String?
     var cacheHint: Any?
@@ -3372,13 +3740,15 @@ struct ComposedContext: @unchecked Sendable {
     /// the lightweight restored-session preview (which falls back to a single
     /// "System Prompt" rail).
     var promptSections: [PromptSection]
-    init(prompt: String = "", manifest: PromptManifest = PromptManifest(), toolTokens: Int = 0, tools: [IntelTool] = [], preflight: Any? = nil, alwaysLoadedNames: Any? = nil, preflightItems: [Any] = [], memorySection: String? = nil, cacheHint: Any? = nil, promptSections: [PromptSection] = []) {
+    init(prompt: String = "", manifest: PromptManifest = PromptManifest(), toolTokens: Int = 0, tools: [IntelTool] = [], preflight: Any? = nil, alwaysLoadedNames: Set<String>? = nil, preflightItems: [Any] = [], memorySection: String? = nil, cacheHint: Any? = nil, promptSections: [PromptSection] = [], initialToolSpecs: [Tool]? = nil, enabledManifest: String? = nil) {
         self.prompt = prompt
         self.manifest = manifest
         self.toolTokens = toolTokens
         self.tools = tools
         self.preflight = preflight
         self.alwaysLoadedNames = alwaysLoadedNames
+        self.initialToolSpecs = initialToolSpecs
+        self.enabledManifest = enabledManifest
         self.preflightItems = preflightItems
         self.memorySection = memorySection
         self.cacheHint = cacheHint

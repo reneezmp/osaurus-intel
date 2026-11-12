@@ -127,6 +127,9 @@ extension PluginHostContext {
     struct EnrichedInference {
         var request: ChatCompletionRequest
         var tools: [Tool]?
+        /// The (key, prefix) newly injected into the latest user message, for
+        /// the session ledger (`SessionToolStateStore.recordUserPrefix`).
+        var recordedUserPrefix: (key: String, prefix: String)?
     }
 
     /// Fully prepared inference state ready for the engine run.
@@ -194,7 +197,21 @@ extension PluginHostContext {
             sessionId: request.session_id,
             modelOverride: contextModelOverride
         )
-        var enriched = enrichRequest(request, context: agentCtx, options: options)
+        // Session-stable memory injection (upstream): replay the prefixes
+        // earlier requests of this `session_id` were sent with, and record the
+        // one injected into this request's latest user message, so a plugin
+        // that resends clean history keeps the provider's prompt cache.
+        let frozenPrefixes: [String: String]
+        if let sid = request.session_id, !sid.isEmpty {
+            frozenPrefixes = await SessionToolStateStore.shared.frozenUserPrefixes(sid)
+        } else {
+            frozenPrefixes = [:]
+        }
+        var enriched = enrichRequest(
+            request, context: agentCtx, options: options, frozenUserPrefixes: frozenPrefixes)
+        if let sid = request.session_id, !sid.isEmpty, let recorded = enriched.recordedUserPrefix {
+            await SessionToolStateStore.shared.recordUserPrefix(sid, key: recorded.key, prefix: recorded.prefix)
+        }
         if enriched.request.model?.isEmpty ?? true {
             // Intel: no agent and no model named. Upstream's engine resolves
             // "default" itself; Intel's needs a concrete model.
@@ -317,7 +334,8 @@ extension PluginHostContext {
     static func enrichRequest(
         _ request: ChatCompletionRequest,
         context: AgentContext?,
-        options: InferenceOptions
+        options: InferenceOptions,
+        frozenUserPrefixes: [String: String] = [:]
     ) -> EnrichedInference {
         guard let ctx = context else {
             return EnrichedInference(request: request, tools: request.tools)
@@ -333,9 +351,12 @@ extension PluginHostContext {
 
         var messages = request.messages
         SystemPromptComposer.injectSystemContent(ctx.systemPrompt, into: &messages)
-        // Intel: memory rides the latest user message only (upstream also
-        // replays earlier prefixes for a `session_id`).
-        SystemPromptComposer.injectMemoryPrefix(ctx.memorySection, into: &messages)
+        // Upstream: replay earlier prefixes onto matching history messages,
+        // then inject this request's memory into the latest user message. With
+        // no `session_id` the ledger is empty, so this is plain latest-message
+        // injection.
+        let recordedUserPrefix = SystemPromptComposer.applyFrozenMemoryPrefixes(
+            memorySection: ctx.memorySection, frozen: frozenUserPrefixes, into: &messages)
 
         let effectiveTools: [Tool]?
         if let explicit = request.tools, !explicit.isEmpty {
@@ -362,7 +383,7 @@ extension PluginHostContext {
             session_id: request.session_id
         )
         enriched.samplingParametersAreImplicit = request.temperature == nil
-        return EnrichedInference(request: enriched, tools: effectiveTools)
+        return EnrichedInference(request: enriched, tools: effectiveTools, recordedUserPrefix: recordedUserPrefix)
     }
 
     /// Merge a set of resolved tool specs into an inference request,

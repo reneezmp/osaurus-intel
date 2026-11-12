@@ -107,9 +107,10 @@ extension HTTPHandler {
     /// The agent's composed request (upstream `enrichWithAgentContext`): its
     /// system prompt ahead of any caller system message, memory beside the
     /// last user turn, and the agent's tools plus the caller's own functions.
-    /// Upstream replays earlier memory prefixes for a `session_id`
-    /// (`SessionToolStateStore`, not compiled on Intel); Intel injects memory
-    /// on the latest message only, as upstream does without a session id.
+    /// With a `session_id`, earlier memory/time prefixes are replayed from the
+    /// session ledger (`SessionToolStateStore`, stage 5b slice 4) so the
+    /// client's clean history keeps the bytes the provider already cached;
+    /// without one, memory rides the latest message only (upstream).
     static func enrichWithAgentContext(
         _ request: ChatCompletionRequest,
         agentId: UUID,
@@ -131,11 +132,21 @@ extension HTTPHandler {
         if !composed.prompt.isEmpty {
             SystemPromptComposer.injectSystemContent(composed.prompt, into: &messages)
         }
-        SystemPromptComposer.injectMemoryPrefix(
-            composed.memorySection,
-            // Upstream #2173 (`enrichWithAgentContext`): the date and zone.
-            timeContext: SystemPromptTemplates.timeContext(now: Date(), timeZone: .current),
-            into: &messages)
+        // Upstream #2173 (`enrichWithAgentContext`): the date and zone.
+        let timeContext = SystemPromptTemplates.timeContext(now: Date(), timeZone: .current)
+        if let sid = request.session_id, !sid.isEmpty {
+            let frozen = await SessionToolStateStore.shared.frozenUserPrefixes(sid)
+            if let recorded = SystemPromptComposer.applyFrozenMemoryPrefixes(
+                memorySection: composed.memorySection, frozen: frozen, timeContext: timeContext,
+                into: &messages)
+            {
+                await SessionToolStateStore.shared.recordUserPrefix(
+                    sid, key: recorded.key, prefix: recorded.prefix)
+            }
+        } else {
+            SystemPromptComposer.injectMemoryPrefix(
+                composed.memorySection, timeContext: timeContext, into: &messages)
+        }
         let mergedTools = await mergeAgentContextTools(composed.tools, clientTools: request.tools)
         let toolChoice: ToolChoiceOption? = {
             guard let mergedTools, !mergedTools.isEmpty else { return request.tool_choice }
