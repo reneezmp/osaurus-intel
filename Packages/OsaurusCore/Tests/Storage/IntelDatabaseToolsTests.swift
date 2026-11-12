@@ -162,10 +162,12 @@ struct IntelDatabaseToolsTests {
             let onContext = await SystemPromptComposer.composeChatContext(agentId: on.id, query: "hi")
             let onTools = Set(onContext.tools.map(\.function.name))
             #expect(ToolRegistry.databaseToolNames.isSubset(of: onTools))
-            #expect(onContext.prompt.contains("## Your database"))
+            // Upstream #2250: the lean custom-agent prompt skips the agent DB
+            // onboarding block; the tools and the schema snapshot remain.
+            #expect(!onContext.prompt.contains("## Your database"))
             // The schema snapshot rides the per-turn prefix, not the cached prompt.
             #expect(onContext.memorySection?.isEmpty == false)
-            #expect(onContext.promptSections.contains { $0.id == "agentDB" })
+            #expect(!onContext.promptSections.contains { $0.id == "agentDB" })
 
             _ = await AgentManager.shared.delete(id: off.id)
             _ = await AgentManager.shared.delete(id: on.id)

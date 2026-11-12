@@ -15,6 +15,9 @@
 //  - Risk-aware actions: a tool that edits files or runs commands is offered.
 //  - Agent loop: `todo`, `complete`, `clarify` or `share_artifact` is offered.
 //
+//  Lean path (#2250): none of these render for a custom agent or a folder
+//  chat; see `usesLeanPath`.
+//
 //  Not here: Secret handling, Self-improvement and the sandbox discovery
 //  ladder are sandbox-only (no containers on Intel); Bulk edits names
 //  `redact_file` / `detect_pii` and lands with `W-privacy-filter`. Intel
@@ -49,11 +52,23 @@ enum IntelPromptDiscipline {
         "todo", "complete", "clarify", "share_artifact",
     ]
 
+    /// Upstream #2250 (`appendGatedSections`): any custom agent, and any chat
+    /// with a working folder, takes the lean prompt and skips these sections
+    /// (and the registry guidance, Apple apps, knowledge and agent DB
+    /// onboarding blocks). Only the built-in Default agent without a folder
+    /// keeps the full set. Upstream also takes the lean path for sandbox
+    /// chats; Intel has no sandbox.
+    static func usesLeanPath(agentId: UUID, hasFolder: Bool) -> Bool {
+        agentId != Agent.defaultId || hasFolder
+    }
+
     /// The sections for one request, in upstream's order. `toolsOff` is the
     /// global or per-agent Disable Tools switch; `toolNames` is the final
     /// schema the request offers.
-    static func sections(modelId: String?, toolNames: Set<String>, toolsOff: Bool) -> [Section] {
-        guard !toolsOff else { return [] }
+    static func sections(
+        modelId: String?, toolNames: Set<String>, toolsOff: Bool, lean: Bool = false
+    ) -> [Section] {
+        guard !toolsOff, !lean else { return [] }
         var out: [Section] = []
         if let family = ModelFamilyGuidance.guidance(forModelId: modelId) {
             out.append(Section(id: "modelFamilyGuidance", label: "Model Family Guidance", text: family))

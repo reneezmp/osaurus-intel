@@ -304,10 +304,10 @@ struct IntelComposerFreezeTests {
             agent.settings.dbEnabled = true
             AgentManager.shared.update(agent)
             let preview = SystemPromptComposer.composePreviewContext(agentId: agent.id)
-            // Not open yet: the empty-state block, and the onboarding framing
-            // still prices as the "agentDB" section.
+            // Not open yet: the empty-state block. The onboarding framing is a
+            // full-path section, so a custom agent's lean preview omits it (#2250).
             #expect(preview.memorySection == SchemaSnapshot.emptyStateBlock)
-            #expect(preview.promptSections.contains { $0.id == "agentDB" })
+            #expect(!preview.promptSections.contains { $0.id == "agentDB" })
             #expect(SystemPromptComposer.renderSchemaSnapshot(agentId: agent.id, allowOpen: false)
                 == SchemaSnapshot.emptyStateBlock)
             _ = await AgentManager.shared.delete(id: agent.id)

@@ -218,13 +218,13 @@ struct IntelAppleAppsTests {
             #expect(AppleApp.calendar.toolNames.isSubset(of: onTools))
             #expect(AppleApp.shortcuts.toolNames.isSubset(of: onTools))
             #expect(onTools.isDisjoint(with: AppleApp.reminders.toolNames))
-            #expect(onContext.prompt.contains("## Apple apps"))
-            #expect(onContext.prompt.contains("Calendar, Shortcuts"))
-            #expect(!onContext.prompt.contains("Reminders,"))
+            // Upstream #2250: a custom agent's lean prompt carries no Apple
+            // apps guidance; the tool schemas are the contract.
+            #expect(!onContext.prompt.contains("## Apple apps"))
             // The date rides every turn as upstream's `[Current Time]` block
             // (#2173), not an Apple Apps-only clock.
             #expect(onContext.memorySection?.contains("## Current local time") != true)
-            #expect(onContext.promptSections.contains { $0.id == "appleApps" })
+            #expect(!onContext.promptSections.contains { $0.id == "appleApps" })
 
             let offContext = await SystemPromptComposer.composeChatContext(agentId: off.id, query: "hi")
             #expect(Set(offContext.tools.map(\.function.name)).isDisjoint(with: AppleApp.allToolNames))

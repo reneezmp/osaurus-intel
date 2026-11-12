@@ -2983,10 +2983,13 @@ final class SystemPromptComposer: @unchecked Sendable {
         // path, project type, root contents, git status, the path rule, and
         // the per-tool dispatch guide that primes actual tool calls.
         let folderToolsAvailable = !toolsDisabled && !agentToolsDisabled
-        let folderSection = SystemPromptTemplates.folderContext(
-            from: folder,
-            toolsAvailable: folderToolsAvailable
-        )
+        // Upstream #2250 lean path: a custom agent, or any chat with a working
+        // folder, gets the lean prompt (platform, persona, working directory,
+        // enabled manifest, dynamic state). Only the built-in Default agent
+        // without a folder keeps the full guidance set. The working-directory
+        // section itself is built once the schema is final (it names optional
+        // tools), below.
+        let lean = IntelPromptDiscipline.usesLeanPath(agentId: id, hasFolder: folder != nil)
         // M12 Gap 3: DeepSeek V4 Flash is an inconsistent tool-caller — with
         // only the (descriptive) folder guide it sometimes role-plays tool use
         // in prose and fabricates listings/contents/`ls` output instead of
@@ -3023,7 +3026,7 @@ final class SystemPromptComposer: @unchecked Sendable {
         // built-in agent's prompt is the Orchestrator role, never blank.
         let persona = id == Agent.defaultId ? basePrompt : SystemPromptTemplates.effectivePersona(basePrompt)
         let platform = SystemPromptTemplates.platformIdentity
-        var prompt = platform + "\n\n" + persona + folderSection + toolDirective
+        var prompt = platform + "\n\n" + persona
         if !folderToolsAvailable {
             prompt += """
 
@@ -3039,22 +3042,14 @@ final class SystemPromptComposer: @unchecked Sendable {
         if !persona.isEmpty {
             sections.append(PromptSection(id: "persona", label: "Persona", text: persona, tint: .purple))
         }
-        if !folderSection.isEmpty {
-            // Upstream's id and label for this section ("folderContext",
-            // "Working Directory"); "grounding" is the Grounding discipline
-            // section (3c-2).
-            sections.append(
-                PromptSection(id: "folderContext", label: "Working Directory", text: folderSection, tint: .teal))
-        }
-        if !toolDirective.isEmpty {
-            sections.append(PromptSection(id: "folderToolUse", label: "Folder Tool Use", text: toolDirective, tint: .indigo))
-        }
         // Private agent database (docs/AGENT_DATABASE_INTEL_PLAN.md). The
         // onboarding framing is session-constant, so it joins the stable,
         // cached prompt; the schema snapshot changes as the agent works and
         // rides the per-turn prefix below (upstream's DYNAMIC section).
         let databaseActive = databaseEnabled && folderToolsAvailable
-        if databaseActive {
+        // Lean path (#2250): the onboarding block is skipped; the tools and
+        // the dynamic schema snapshot still ride along.
+        if databaseActive, !lean {
             let block = "\n\n" + OnboardingPrompt.block
             prompt += block
             sections.append(PromptSection(id: "agentDB", label: "Agent DB", text: block, tint: .orange))
@@ -3234,20 +3229,117 @@ final class SystemPromptComposer: @unchecked Sendable {
         // Upstream's static discipline sections (#1317, #1430), gated on the
         // final schema and placed before the manifest as upstream does
         // (`IntelPromptDiscipline`).
+        let resolvedNames = Set(tools.map { $0.function.name })
+        // Lean path (#2250): the working directory (upstream's
+        // `leanFolderContext`) follows persona, with Intel's "Tool Use
+        // (MANDATORY)" directive on top of it (the DeepSeek workaround, not
+        // in upstream). Upstream drops the section when tools are off.
+        if lean {
+            if let folder, folderToolsAvailable {
+                let block = "\n\n" + SystemPromptTemplates.leanFolderContext(from: folder, toolNames: resolvedNames)
+                prompt += block
+                sections.append(PromptSection(id: "folderContext", label: "Working Directory", text: block, tint: .teal))
+                if !toolDirective.isEmpty {
+                    let directive = "\n" + toolDirective
+                    prompt += directive
+                    sections.append(
+                        PromptSection(id: "folderToolUse", label: "Folder Tool Use", text: directive, tint: .indigo))
+                }
+            } else if folder != nil {
+                // Intel adaptation (not upstream): with tools off, keep the
+                // short "Folder tools are disabled" notice so the model does
+                // not fabricate file contents from a cached hint.
+                let block = SystemPromptTemplates.folderContext(from: folder, toolsAvailable: false)
+                prompt += block
+                sections.append(PromptSection(id: "folderContext", label: "Working Directory", text: block, tint: .teal))
+            }
+        }
+        // Upstream's static discipline sections (#1317, #1430): Default agent
+        // without a folder only. Upstream's order puts the agent-loop guide
+        // after the subagent / knowledge / Apple apps blocks, so it is held
+        // back and emitted below.
+        var agentLoopSection: IntelPromptDiscipline.Section?
         for section in IntelPromptDiscipline.sections(
             modelId: model,
-            toolNames: Set(tools.map(\.function.name)),
-            toolsOff: toolsDisabled || agentToolsDisabled
+            toolNames: resolvedNames,
+            toolsOff: toolsDisabled || agentToolsDisabled,
+            lean: lean
         ) {
+            if section.id == "agentLoopGuidance" {
+                agentLoopSection = section
+                continue
+            }
             let block = "\n\n" + section.text
             prompt += block
             sections.append(PromptSection(id: section.id, label: section.label, text: block, tint: .indigo))
+        }
+        // Subagent capability guidance (upstream's registry-driven loop): each
+        // capability's guidance renders only when its PRIMARY tool resolved
+        // into the schema (computer use, browser use, image, video,
+        // AppleScript). Intel adaptations: the `image` tool only generates
+        // (no edit model on Intel), so the generation-only guidance is used;
+        // AppleScript uses Intel's helper wording. Skipped on the lean path,
+        // like upstream.
+        if !lean {
+            for capability in SubagentCapabilityRegistry.all {
+                guard let sectionId = capability.guidanceSectionId,
+                    let labelKey = capability.guidanceLabelKey,
+                    resolvedNames.contains(capability.primaryToolName)
+                else { continue }
+                var guidance = capability.guidance
+                if capability.id == SubagentCapabilityRegistry.image.id {
+                    guidance = SystemPromptTemplates.imageGenerationOnlyGuidance
+                } else if capability.id == SubagentCapabilityRegistry.appleScript.id {
+                    guidance = SystemPromptTemplates.intelAppleScriptGuidance
+                }
+                guard let guidance else { continue }
+                let block = "\n\n" + guidance
+                prompt += block
+                sections.append(
+                    PromptSection(
+                        id: sectionId,
+                        label: String(localized: String.LocalizationValue(labelKey), bundle: .module),
+                        text: block, tint: .green))
+            }
+            // Knowledge grant manifest (upstream): names + summaries of the
+            // granted collections, when a retrieval tool is in the schema.
+            if !resolvedNames.isDisjoint(with: ToolRegistry.knowledgeToolNames), !knowledgeGrants.isEmpty {
+                let block = "\n\n" + SystemPromptTemplates.knowledgeGuidance(collections: knowledgeGrants)
+                prompt += block
+                sections.append(PromptSection(id: "knowledge", label: L("Knowledge"), text: block, tint: .teal))
+            }
+            // Built-in Apple apps (docs/APPLE_APPS_INTEL_PLAN.md): guidance for
+            // the apps that resolved into this turn's schema; they resolve
+            // dates against the `[Current Time]` block every turn carries
+            // (#2173).
+            let activeAppleApps = IntelAppleAppsGuidance.activeApps(in: resolvedNames)
+            if !activeAppleApps.isEmpty {
+                let block = "\n\n" + IntelAppleAppsGuidance.guidance(apps: activeAppleApps)
+                prompt += block
+                sections.append(PromptSection(id: "appleApps", label: "Apple Apps", text: block, tint: .green))
+            }
+            if let agentLoopSection {
+                let block = "\n\n" + agentLoopSection.text
+                prompt += block
+                sections.append(
+                    PromptSection(id: agentLoopSection.id, label: agentLoopSection.label, text: block, tint: .indigo))
+            }
         }
         if let manifestBlock {
             prompt += manifestBlock
             sections.append(
                 PromptSection(
                     id: "enabledManifest", label: "Enabled Capabilities", text: manifestBlock, tint: .blue))
+            // Upstream: the skills-govern block follows the manifest when one
+            // plugin group holds both a skill and tools. Derived from the
+            // (possibly frozen) manifest text, so it is stable per session.
+            if SystemPromptTemplates.enabledManifestNeedsSkillGovernance(manifestBlock, compact: false) {
+                let block = "\n\n" + SystemPromptTemplates.skillsGovernToolGroups()
+                prompt += block
+                sections.append(
+                    PromptSection(
+                        id: "skillsGovern", label: L("Skills that govern tool groups"), text: block, tint: .blue))
+            }
         }
         // Append plugin-declared `instructions` for any plugin whose tools are
         // active this turn, so a plugin can shape how the model wields it.
@@ -3263,49 +3355,6 @@ final class SystemPromptComposer: @unchecked Sendable {
                         id: "pluginInstructions", label: "Plugin Instructions", text: block, tint: .cyan)
                 )
             }
-        }
-        // Subagent capability guidance (upstream's registry-driven loop): each
-        // capability's guidance renders only when its PRIMARY tool resolved
-        // into the schema (computer use, browser use, image, video,
-        // AppleScript). Intel adaptations: the `image` tool only generates
-        // (no edit model on Intel), so the generation-only guidance is used;
-        // AppleScript uses Intel's helper wording.
-        let resolvedNames = Set(tools.map { $0.function.name })
-        for capability in SubagentCapabilityRegistry.all {
-            guard let sectionId = capability.guidanceSectionId,
-                let labelKey = capability.guidanceLabelKey,
-                resolvedNames.contains(capability.primaryToolName)
-            else { continue }
-            var guidance = capability.guidance
-            if capability.id == SubagentCapabilityRegistry.image.id {
-                guidance = SystemPromptTemplates.imageGenerationOnlyGuidance
-            } else if capability.id == SubagentCapabilityRegistry.appleScript.id {
-                guidance = SystemPromptTemplates.intelAppleScriptGuidance
-            }
-            guard let guidance else { continue }
-            let block = "\n\n" + guidance
-            prompt += block
-            sections.append(
-                PromptSection(
-                    id: sectionId,
-                    label: String(localized: String.LocalizationValue(labelKey), bundle: .module),
-                    text: block, tint: .green))
-        }
-        // Knowledge grant manifest (upstream): names + summaries of the
-        // granted collections, when a retrieval tool is in the schema.
-        if !resolvedNames.isDisjoint(with: ToolRegistry.knowledgeToolNames), !knowledgeGrants.isEmpty {
-            let block = "\n\n" + SystemPromptTemplates.knowledgeGuidance(collections: knowledgeGrants)
-            prompt += block
-            sections.append(PromptSection(id: "knowledge", label: L("Knowledge"), text: block, tint: .teal))
-        }
-        // Built-in Apple apps (docs/APPLE_APPS_INTEL_PLAN.md): guidance for the
-        // apps that resolved into this turn's schema; they resolve dates
-        // against the `[Current Time]` block every turn carries (#2173).
-        let activeAppleApps = IntelAppleAppsGuidance.activeApps(in: resolvedNames)
-        if !activeAppleApps.isEmpty {
-            let block = "\n\n" + IntelAppleAppsGuidance.guidance(apps: activeAppleApps)
-            prompt += block
-            sections.append(PromptSection(id: "appleApps", label: "Apple Apps", text: block, tint: .green))
         }
         // Project instructions (upstream, ChatView): constant per session, so
         // they ride the system prompt rather than the per-turn `[Memory]`

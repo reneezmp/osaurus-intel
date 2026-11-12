@@ -91,8 +91,8 @@ struct IntelComposerParityTests {
     }
 
     @MainActor
-    @Test("The registry loop renders image guidance (generation only) once the image tool resolves")
-    func imageGuidanceFollowsTheSchema() async throws {
+    @Test("A custom agent's lean prompt (#2250) carries no registry guidance even when the image tool resolves")
+    func imageGuidanceSkippedOnLeanPath() async throws {
         try await ChatHistoryTestStorage.run {
             var agent = Self.addAgent(prompt: "x")
             let before = await SystemPromptComposer.composeChatContext(agentId: agent.id, query: "hi")
@@ -101,10 +101,9 @@ struct IntelComposerParityTests {
             agent.settings.imageEnabled = true
             AgentManager.shared.update(agent)
             let after = await SystemPromptComposer.composeChatContext(agentId: agent.id, query: "hi")
-            if after.tools.contains(where: { $0.function.name == ToolRegistry.imageToolName }) {
-                #expect(after.promptSections.contains { $0.id == "imageGeneration" })
-                #expect(after.prompt.contains("Editing existing images is not available"))
-            }
+            // Slice 1 rendered the generation-only block for every agent; the
+            // lean path (slice 6) skips the registry loop like upstream.
+            #expect(!after.promptSections.contains { $0.id == "imageGeneration" })
             _ = await AgentManager.shared.delete(id: agent.id)
         }
     }

@@ -984,6 +984,60 @@ public enum SystemPromptTemplates {
         return section
     }
 
+    /// Minimum trusted-workspace contract (upstream #2250). Tool schemas carry
+    /// operation detail; this section only establishes cwd, confinement, and
+    /// user-authored project instructions. `toolNames` is the resolved
+    /// schema: lines that name an optional tool appear only when that tool is
+    /// callable. Intel difference: `FolderContext` has no tree-truncation
+    /// metadata, so upstream's `treeTruncationLine` is not ported.
+    public static func leanFolderContext(
+        from folder: FolderContext,
+        toolNames: Set<String> = []
+    ) -> String {
+        var lines = [
+            "## Working directory",
+            "**Path:** \(folder.rootPath.path)",
+            "Native execution is trusted for this workspace. Writes are confined to this folder and temporary directories. Use relative paths.",
+            "Use the workspace tools to complete requested work now; do not only describe or promise it.",
+            batchReadLine,
+        ]
+        if folder.projectType != .unknown { lines.append(runnableCodeCheckLine) }
+        lines.append(folderDocumentFormatsLine)
+        if toolNames.contains("share_artifact") { lines.append(folderShareArtifactLine) }
+        if toolNames.contains("redact_file") { lines.append(folderRedactionLine) }
+        var section = lines.joined(separator: "\n")
+        if let contextFiles = folder.contextFiles, !contextFiles.isEmpty {
+            section += """
+
+
+                ## Project instructions
+                \(contextFiles)
+                """
+        }
+        return section
+    }
+
+    static let batchReadLine =
+        "To read several files, use one `file_read` call (the first in `path`, the rest in `paths`) instead of one file per turn."
+
+    static let runnableCodeCheckLine =
+        "After creating or changing runnable code, run an available syntax/build/test/behavior check before saying it works; a successful file mutation proves only that bytes were saved."
+
+    static let folderShareArtifactLine =
+        "Files you write stay in the working folder; call `share_artifact` when the user should see a finished deliverable in the chat."
+
+    static let folderRedactionLine =
+        "To mask names, emails, phone numbers, or other personal data across a file, use `redact_file` (preview matches with `detect_pii`) instead of editing occurrences one by one."
+
+    /// One-line format contract for the file tools (see upstream). Lives in
+    /// the prompt, not only in tool descriptions, because models otherwise
+    /// fall back to shell converters before reading the `file_write` schema.
+    static let folderDocumentFormatsLine =
+        "The file tools handle documents natively: `file_read` opens PDF, Word, PowerPoint, Excel, and images "
+        + "(and lists directories); `file_write` renders `.xlsx` from CSV/JSON rows and `.docx`/`.pdf` from "
+        + "Markdown or HTML (passed as `content`, or read from a workspace text file via `source_path`) — "
+        + "no converter, library check, or generator script is needed."
+
     // MARK: - Folder Building Blocks
 
     /// One-line restatement of the path-arg rule. Each `file_*` tool's
