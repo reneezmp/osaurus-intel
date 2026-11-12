@@ -3389,3 +3389,15 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] Agents › a custom agent › Generation Overrides: set Temperature Custom 0.3, Top P Custom 0.9, a stop sequence `END`, save; reopen the agent: the values stay. Typing `abc` shows a red error and isn't saved.
 - [ ] Chat with that agent on DeepSeek or OpenRouter: it works, and Insights' request body shows temperature, top_p and stop. Set Min P Custom 0.05 and switch to an Anthropic model: the send stops with a message naming `min_p`.
 - [ ] Set reasoning effort Custom, then pick a model without effort levels: the composer chip says "Choose reasoning"; set it back to Inherit and sending works.
+
+## Shared skills library and prompt basics (2026-11-12)
+
+`W-tools-tab-sync`; `W-cov-reaudit` 5b slices 1–3 (`COV_REAUDIT_STAGE5B_COMPOSER.md`). Not in candidate 67.
+
+- [ ] Skills: no on/off switches; the list shows the eight new built-ins (no Research Analyst); All / Custom tabs work; searching "calendar" finds Personal Organizer.
+- [ ] Create a skill with a Keywords value, reopen it with Edit: Save Changes stays disabled until you change something; shrink the window and the sheet's Save button stays on screen.
+- [ ] A custom agent's Tools tab lists only tools (chips All / Assigned) and says skills come from the shared library; tool toggles persist after reopening. In a chat, ask for something a skill covers ("research X on the web"): it loads the skill (or type `/web-researcher`).
+- [ ] With old data: a skill you had switched off is available again, and old agents open without errors.
+- [ ] A custom agent with an empty system prompt answers "what is your role?" as a Mac chat agent, not a blank assistant. In a project with instructions ("Always answer in French"), replies follow them on the first and a later turn.
+- [ ] Give the agent a knowledge collection and ask something it answers: it searches knowledge first. With a cloud image model on, ask for a picture: it calls `image` instead of saying it's text-only.
+- [ ] With AppleScript on, open a document in TextEdit, switch to Osaurus and say "summarize the document": it uses AppleScript on that app instead of asking for a path.
