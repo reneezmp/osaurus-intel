@@ -92,7 +92,12 @@ struct SkillLibraryTests {
             let ids = Set(SlashCommandRegistry.shared.filtered(query: "").filter { $0.kind == .skill }.map(\.id))
             for skill in skills { #expect(ids.contains(skill.id), "\(skill.name) missing") }
 
-            let catalog = CapabilityCatalog.build(agentId: Agent.defaultId)
+            // A custom agent with its own tool list and NO skill list still
+            // sees every skill (the built-in agent has a fixed surface).
+            let agent = Agent(name: "SkillLib-\(UUID().uuidString.prefix(6))", manualToolNames: [])
+            AgentManager.shared.add(agent)
+            defer { Task { _ = await AgentManager.shared.delete(id: agent.id) } }
+            let catalog = CapabilityCatalog.build(agentId: agent.id)
             let names = Set(catalog.skills.map(\.name))
             for skill in skills { #expect(names.contains(skill.name), "\(skill.name) not in catalog") }
         }
