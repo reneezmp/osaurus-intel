@@ -229,9 +229,9 @@ struct CapabilityCatalog: Sendable {
             }
         }
 
-        let skillAllowlist = manager.effectiveEnabledSkillNames(for: agentId).map(Set.init)
+        // Upstream #2050: every installed skill is universally available to
+        // custom agents (no per-skill enabled flag, no per-agent allow-list).
         let skills = SkillManager.shared.skills
-            .filter { $0.enabled && (skillAllowlist?.contains($0.name) ?? true) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             .map {
                 SkillItem(

@@ -13,6 +13,13 @@
 //  editing / import-from-JSON-data / delete all work on Intel; zip
 //  import / export surface throws "unavailable" errors.
 //
+//  Upstream #2050 (Universal skills library): skills are a toggle-free
+//  library that every custom agent can use, so the per-skill enable switch
+//  and enabled count are gone; the All / Custom tabs slice by source and the
+//  search covers name, description, category and keywords. Upstream's Claude
+//  Plugins tab is `W-skills-plugins-import`; Intel keeps its installed-plugins
+//  section and Import menu.
+//
 
 import AppKit
 import SwiftUI
@@ -32,17 +39,47 @@ struct SkillsView: View {
     @State private var toastMessage: (text: String, isError: Bool)?
     @State private var showImportPicker = false
     @State private var showGitHubImport = false
+    @State private var searchText = ""
+    @State private var selectedTab: SkillsTab = .all
     @State private var exportingSkill: Skill?
     @State private var isProcessing = false
     @State private var showProgress = false
+
+    /// Base skill set for a tab, sliced by source: shipped with Osaurus,
+    /// created/imported by the user, or installed as part of a plugin.
+    private func skills(in tab: SkillsTab) -> [Skill] {
+        switch tab {
+        case .all: return skillManager.skills
+        case .custom: return skillManager.skills.filter { !$0.isBuiltIn && !$0.isFromPlugin }
+        }
+    }
+
+    private var tabCounts: [SkillsTab: Int] {
+        [
+            .all: skillManager.skills.count,
+            .custom: skillManager.skills.filter { !$0.isBuiltIn && !$0.isFromPlugin }.count,
+        ]
+    }
+
+    /// Skills for the selected tab, further narrowed by the search query
+    /// (name, description, category, or keywords).
+    private var filteredSkills: [Skill] {
+        let base = skills(in: selectedTab)
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return base }
+        return base.filter { skill in
+            skill.name.lowercased().contains(query)
+                || skill.description.lowercased().contains(query)
+                || (skill.category?.lowercased().contains(query) ?? false)
+                || skill.keywords.contains { $0.lowercased().contains(query) }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
             headerView
-                .opacity(hasAppeared ? 1 : 0)
-                .offset(y: hasAppeared ? 0 : -10)
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasAppeared)
+                .managerHeaderEntrance(hasAppeared: hasAppeared)
 
             // Progress bar
             if showProgress {
@@ -60,22 +97,22 @@ struct SkillsView: View {
                     SettingsEmptyState(
                         icon: "sparkles",
                         title: L("Create Your First Skill"),
-                        subtitle: L("Skills provide specialized knowledge and guidance to the AI."),
+                        subtitle: L("Skills are reusable workflows that every custom agent can use automatically."),
                         examples: [
                             .init(
                                 icon: "magnifyingglass",
-                                title: L("Research Analyst"),
-                                description: "Fact-checking and balanced analysis"
+                                title: L("Web Researcher"),
+                                description: "Live web research with cited sources"
                             ),
                             .init(
-                                icon: "lightbulb.fill",
-                                title: L("Creative Brainstormer"),
-                                description: "Generate ideas and explore possibilities"
+                                icon: "gearshape.2.fill",
+                                title: L("Mac Automator"),
+                                description: "Control Mac apps with AppleScript"
                             ),
                             .init(
-                                icon: "checklist",
-                                title: L("Productivity Coach"),
-                                description: "Task management and goal setting"
+                                icon: "calendar",
+                                title: L("Personal Organizer"),
+                                description: "Manage calendar, reminders, and mail"
                             ),
                         ],
                         primaryAction: .init(title: "Create Skill", icon: "plus", handler: { isCreating = true }),
@@ -84,22 +121,22 @@ struct SkillsView: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 12) {
+                            availabilityHint
+
                             InstalledPluginsSection(onMessage: { message, isError in
                                 showToast(message, isError: isError)
                             })
 
-                            ForEach(Array(skillManager.skills.enumerated()), id: \.element.id) { index, skill in
+                            let shown = filteredSkills
+                            if shown.isEmpty {
+                                emptyState
+                            }
+
+                            ForEach(Array(shown.enumerated()), id: \.element.id) { index, skill in
                                 SkillRow(
                                     skill: skill,
                                     animationDelay: Double(index) * 0.03,
                                     hasAppeared: hasAppeared,
-                                    onToggle: { enabled in
-                                        Task { @MainActor in
-                                            isProcessing = true
-                                            defer { isProcessing = false }
-                                            await skillManager.setEnabled(enabled, for: skill.id)
-                                        }
-                                    },
                                     onEdit: {
                                         editingSkill = skill
                                     },
@@ -359,10 +396,9 @@ struct SkillsView: View {
     // MARK: - Header
 
     private var headerView: some View {
-        ManagerHeaderWithActions(
+        ManagerHeaderWithTabs(
             title: L("Skills"),
-            subtitle: L("Specialized knowledge and guidance for the AI"),
-            count: skillManager.skills.isEmpty ? nil : skillManager.enabledCount
+            subtitle: L("Reusable workflows, automatically available to every custom agent")
         ) {
             HeaderIconButton("arrow.clockwise", isLoading: skillManager.isRefreshing, help: "Refresh skills") {
                 Task { @MainActor in
@@ -379,7 +415,70 @@ struct SkillsView: View {
                 isCreating = true
             }
             .disabled(isProcessing || skillManager.isRefreshing)
+        } tabsRow: {
+            HeaderTabsRow(
+                selection: $selectedTab,
+                counts: tabCounts,
+                searchText: $searchText,
+                searchPlaceholder: "Search skills"
+            )
         }
+    }
+
+    // MARK: - Availability Hint
+
+    /// One-line explanation of the library contract: no toggles, no per-agent
+    /// assignment — everything installed is available to custom agents.
+    private var availabilityHint: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "info.circle")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(theme.accentColor)
+            Text(
+                "Skills are automatically available to every custom agent and load only when relevant. Type /skill-name in chat to use one explicitly.",
+                bundle: .module
+            )
+            .font(.system(size: 11))
+            .foregroundColor(theme.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(theme.accentColor.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(theme.accentColor.opacity(0.15), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Empty State
+
+    @ViewBuilder
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: searchText.isEmpty ? "sparkles" : "magnifyingglass")
+                .font(.system(size: 28, weight: .light))
+                .foregroundColor(theme.tertiaryText)
+            if !searchText.isEmpty {
+                Text("No skills match \"\(searchText)\"", bundle: .module)
+                    .font(.system(size: 13))
+                    .foregroundColor(theme.secondaryText)
+            } else if selectedTab == .custom {
+                Text("No skills of your own yet — create or import one", bundle: .module)
+                    .font(.system(size: 13))
+                    .foregroundColor(theme.secondaryText)
+            } else {
+                Text("No skills here", bundle: .module)
+                    .font(.system(size: 13))
+                    .foregroundColor(theme.secondaryText)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
     }
 
     // MARK: - Toast Helper
@@ -476,7 +575,6 @@ private struct SkillRow: View {
     let skill: Skill
     let animationDelay: Double
     let hasAppeared: Bool
-    let onToggle: (Bool) -> Void
     let onEdit: () -> Void
     let onExport: () -> Void
     let onDelete: () -> Void
@@ -598,17 +696,6 @@ private struct SkillRow: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(PlainButtonStyle())
-
-                // Enable toggle - separate from expand area
-                Toggle(
-                    "",
-                    isOn: Binding(
-                        get: { skill.enabled },
-                        set: { onToggle($0) }
-                    )
-                )
-                .toggleStyle(SwitchToggleStyle())
-                .labelsHidden()
             }
 
             // Expanded content
@@ -682,7 +769,7 @@ private struct SkillRow: View {
                                 HStack(spacing: 4) {
                                     Image(systemName: skill.isBuiltIn ? "eye" : "pencil")
                                         .font(.system(size: 10))
-                                    Text(skill.isBuiltIn ? "View" : "Edit")
+                                    Text(LocalizedStringKey(skill.isBuiltIn ? "View" : "Edit"), bundle: .module)
                                         .font(.system(size: 11, weight: .medium))
                                 }
                                 .foregroundColor(theme.accentColor)
@@ -736,11 +823,11 @@ private struct SkillRow: View {
                         Spacer()
 
                         if skill.isFromPlugin {
-                            // Info badge for plugin skills
+                            // Plugin skills are removed by uninstalling their plugin
                             HStack(spacing: 4) {
                                 Image(systemName: "info.circle")
                                     .font(.system(size: 10))
-                                Text("Managed by plugin", bundle: .module)
+                                Text("Managed by its plugin — uninstall in Plugins to remove", bundle: .module)
                                     .font(.system(size: 10, weight: .medium))
                             }
                             .foregroundColor(theme.tertiaryText)
@@ -780,11 +867,11 @@ private struct SkillRow: View {
         .offset(y: hasAppeared ? 0 : 10)
         .animation(.easeOut(duration: 0.25).delay(animationDelay), value: hasAppeared)
         .themedAlert(
-            "Delete Skill",
+            L("Delete Skill"),
             isPresented: $showDeleteConfirm,
-            message: "Are you sure you want to delete \"\(skill.name)\"? This action cannot be undone.",
-            primaryButton: .destructive("Delete", action: onDelete),
-            secondaryButton: .cancel("Cancel")
+            message: L("Are you sure you want to delete \"\(skill.name)\"? This action cannot be undone."),
+            primaryButton: .destructive(L("Delete"), action: onDelete),
+            secondaryButton: .cancel(L("Cancel"))
         )
     }
 

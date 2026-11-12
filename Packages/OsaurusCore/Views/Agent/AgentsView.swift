@@ -5455,7 +5455,7 @@ struct AgentDetailView: View {
         }()
 
         let current = currentAgent
-        // The capability picker writes `manualToolNames`, `manualSkillNames`, and
+        // The capability picker writes `manualToolNames` and
         // `toolSelectionMode` directly via `AgentManager.update*` calls (so they
         // save instantly without going through this debounced path). We therefore
         // pass through `current.*` values rather than this view's local mirrors,
@@ -5496,7 +5496,6 @@ struct AgentDetailView: View {
             bonjourEnabled: current.bonjourEnabled,
             toolSelectionMode: current.toolSelectionMode,
             manualToolNames: current.manualToolNames,
-            manualSkillNames: current.manualSkillNames,
             disableTools: disableTools ? true : nil,
             disableMemory: disableMemory ? true : nil,
             avatar: avatar,
@@ -6189,11 +6188,10 @@ private struct AgentEditorSheet: View {
     /// Draft capability state. Seeded on first appear from the live registries
     /// (matching what `AgentManager.seedEnabledCapabilitiesIfNeeded` would have
     /// written on first picker open) and then mutated in place by the embedded
-    /// picker. Baked into the saved Agent's `manualToolNames` /
-    /// `manualSkillNames` so the seed step is a no-op for newly created agents.
+    /// picker. Baked into the saved Agent's `manualToolNames` so the seed step
+    /// is a no-op for newly created agents.
     @State private var draftMode: ToolSelectionMode = .auto
     @State private var draftToolNames: Set<String> = []
-    @State private var draftSkillNames: Set<String> = []
     @State private var draftSeeded: Bool = false
 
     @FocusState private var nameFocused: Bool
@@ -6310,7 +6308,6 @@ private struct AgentEditorSheet: View {
         AgentCapabilityManagerView(
             draftMode: $draftMode,
             draftTools: $draftToolNames,
-            draftSkills: $draftSkillNames,
             onDismiss: {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
                     inlineCustomize = false
@@ -6328,7 +6325,6 @@ private struct AgentEditorSheet: View {
         guard !draftSeeded else { return }
         draftSeeded = true
         draftToolNames = Set(ToolRegistry.shared.listDynamicTools().map(\.name))
-        draftSkillNames = Set(SkillManager.shared.skills.map(\.name))
     }
 
     // MARK: Form column
@@ -6529,7 +6525,7 @@ private struct AgentEditorSheet: View {
     private var capabilitiesField: some View {
         let isAuto = draftMode == .auto
         return VStack(alignment: .leading, spacing: 6) {
-            AgentSheetSectionLabel("Capabilities")
+            AgentSheetSectionLabel("Tools")
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
                     Image(systemName: isAuto ? "sparkles" : "list.bullet.rectangle")
@@ -6545,7 +6541,7 @@ private struct AgentEditorSheet: View {
                         )
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Auto-discover relevant capabilities", bundle: .module)
+                        Text("Auto-discover relevant tools", bundle: .module)
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(theme.primaryText)
                         Text(capabilitiesSubtitle)
@@ -6599,7 +6595,7 @@ private struct AgentEditorSheet: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .localizedHelp("Pick which tools and skills this agent can use")
+                .localizedHelp("Pick which tools this agent can use")
             }
             .padding(12)
             .background(
@@ -6617,12 +6613,12 @@ private struct AgentEditorSheet: View {
     /// the user returns to the form.
     private var capabilitiesSubtitle: String {
         let toolCount = draftToolNames.count
-        let skillCount = draftSkillNames.count
         let modeBlurb =
             draftMode == .auto
-            ? L("Loaded on demand from your enabled set.")
-            : L("All enabled items are sent every turn.")
-        return "\(toolCount) tools and \(skillCount) skills enabled · \(modeBlurb)"
+            ? L("Loaded on demand from your assigned set.")
+            : L("All assigned tools are sent every turn.")
+        let countLabel = toolCount == 1 ? L("1 tool assigned") : L("\(toolCount) tools assigned")
+        return "\(countLabel) · \(modeBlurb)"
     }
 
     private var promptField: some View {
@@ -6816,7 +6812,6 @@ private struct AgentEditorSheet: View {
             updatedAt: Date(),
             toolSelectionMode: draftMode,
             manualToolNames: Array(draftToolNames),
-            manualSkillNames: Array(draftSkillNames),
             avatar: selectedAvatar
         )
 

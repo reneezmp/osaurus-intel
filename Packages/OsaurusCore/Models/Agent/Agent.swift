@@ -110,8 +110,6 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     public var toolSelectionMode: ToolSelectionMode?
     /// Tool names explicitly selected by the user when toolSelectionMode is .manual
     public var manualToolNames: [String]?
-    /// Skill names explicitly selected by the user when toolSelectionMode is .manual
-    public var manualSkillNames: [String]?
     /// When true, no tools or preflight context are sent for this agent
     public var disableTools: Bool?
     /// When true, memory is neither injected into prompts nor recorded for this agent
@@ -180,7 +178,6 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         bonjourEnabled: Bool = false,
         toolSelectionMode: ToolSelectionMode? = nil,
         manualToolNames: [String]? = nil,
-        manualSkillNames: [String]? = nil,
         disableTools: Bool? = nil,
         disableMemory: Bool? = nil,
         avatar: String? = nil,
@@ -218,7 +215,6 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         self.bonjourEnabled = bonjourEnabled
         self.toolSelectionMode = toolSelectionMode
         self.manualToolNames = manualToolNames
-        self.manualSkillNames = manualSkillNames
         self.disableTools = disableTools
         self.disableMemory = disableMemory
         self.avatar = avatar
@@ -395,7 +391,8 @@ extension Agent {
         bonjourEnabled = try c.decodeIfPresent(Bool.self, forKey: .bonjourEnabled) ?? false
         toolSelectionMode = try c.decodeIfPresent(ToolSelectionMode.self, forKey: .toolSelectionMode)
         manualToolNames = try c.decodeIfPresent([String].self, forKey: .manualToolNames)
-        manualSkillNames = try c.decodeIfPresent([String].self, forKey: .manualSkillNames)
+        // Upstream #2050: legacy `manualSkillNames` keys are intentionally ignored;
+        // skills are universally available to custom agents.
         let upstreamAbilities = try decoder.container(keyedBy: UpstreamAbilityCodingKeys.self)
         if let toolsEnabled = try upstreamAbilities.decodeIfPresent(Bool.self, forKey: .toolsEnabled) {
             disableTools = toolsEnabled ? nil : true

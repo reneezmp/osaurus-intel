@@ -395,7 +395,6 @@ struct CapabilitiesLoadToolTests {
                     description: "Governs the AutoGroup tool group",
                     version: "1.0.0",
                     keywords: [],
-                    enabled: true,
                     instructions: "Use the AutoGroup tools.",
                     isBuiltIn: false,
                     pluginId: plugin.id

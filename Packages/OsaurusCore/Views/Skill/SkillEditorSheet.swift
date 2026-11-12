@@ -29,7 +29,6 @@ struct SkillEditorSheet: View {
     @State private var category: String = ""
     @State private var keywords: String = ""
     @State private var instructions: String = ""
-    @State private var enabled: Bool = true
 
     @State private var hasAppeared = false
 
@@ -58,6 +57,53 @@ struct SkillEditorSheet: View {
             && !instructions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var editingSkill: Skill? {
+        if case .edit(let skill) = mode { return skill }
+        return nil
+    }
+
+    /// True when an edited skill still differs from what's stored. Create
+    /// mode is always "changed"; the Save button there is gated on
+    /// `canSave` alone.
+    private var hasChanges: Bool {
+        guard let original = editingSkill else { return true }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines) != original.name
+            || description.trimmingCharacters(in: .whitespacesAndNewlines) != original.description
+            || version.trimmingCharacters(in: .whitespacesAndNewlines) != original.version
+            || (author.isEmpty ? nil : author.trimmingCharacters(in: .whitespacesAndNewlines))
+                != original.author
+            || (category.isEmpty ? nil : category.trimmingCharacters(in: .whitespacesAndNewlines))
+                != original.category
+            || Self.parseKeywords(keywords) != original.keywords
+            || instructions.trimmingCharacters(in: .whitespacesAndNewlines) != original.instructions
+    }
+
+    /// Comma-separated keywords field → keyword list, dropping empties.
+    /// Nonisolated: pure string work, callable (and testable) off the main actor.
+    nonisolated static func parseKeywords(_ raw: String) -> [String] {
+        raw.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Upper bounds for the sheet so it never grows past the visible screen
+    /// (menu bar / Dock excluded). Keeps the pinned footer — and its "Save
+    /// Changes" button — reachable, and keeps the instructions pane on screen,
+    /// when accessibility text scaling shrinks the available space (issue #2374).
+    private var maxSheetHeight: CGFloat {
+        if let visibleHeight = NSScreen.main?.visibleFrame.height {
+            return max(400, visibleHeight - 40)
+        }
+        return 700
+    }
+
+    private var maxSheetWidth: CGFloat {
+        if let visibleWidth = NSScreen.main?.visibleFrame.width {
+            return max(560, visibleWidth - 40)
+        }
+        return 900
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -77,7 +123,14 @@ struct SkillEditorSheet: View {
             // Footer
             footerView
         }
-        .frame(minWidth: 900, minHeight: 700)
+        .frame(
+            minWidth: 780,
+            idealWidth: 900,
+            maxWidth: maxSheetWidth,
+            minHeight: 400,
+            idealHeight: 700,
+            maxHeight: maxSheetHeight
+        )
         .background(themeManager.currentTheme.primaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
@@ -130,14 +183,14 @@ struct SkillEditorSheet: View {
             .frame(width: 40, height: 40)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(isEditing ? (isBuiltIn ? "View Skill" : "Edit Skill") : "Create Skill")
+                Text(isEditing ? (isBuiltIn ? L("View Skill") : L("Edit Skill")) : (L("Create Skill")))
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(themeManager.currentTheme.primaryText)
 
                 Text(
                     isEditing
-                        ? (isBuiltIn ? "Preview built-in skill instructions" : "Modify your skill's instructions")
-                        : "Define specialized guidance for the AI"
+                        ? (isBuiltIn ? L("Preview built-in skill instructions") : L("Modify your skill's instructions"))
+                        : L("Define specialized guidance for the AI")
                 )
                 .font(.system(size: 12))
                 .foregroundColor(themeManager.currentTheme.secondaryText)
@@ -181,7 +234,7 @@ struct SkillEditorSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 // Identity Section
-                SkillEditorSection(title: "Identity", icon: "sparkles") {
+                SkillEditorSection(title: L("editor.section.identity"), icon: "sparkles") {
                     VStack(alignment: .leading, spacing: 16) {
                         // Name
                         VStack(alignment: .leading, spacing: 6) {
@@ -190,7 +243,7 @@ struct SkillEditorSheet: View {
                                 .foregroundColor(themeManager.currentTheme.secondaryText)
 
                             SkillStyledTextField(
-                                placeholder: "e.g., Research Analyst",
+                                placeholder: L("e.g., Web Researcher"),
                                 text: $name,
                                 icon: nil
                             )
@@ -204,7 +257,7 @@ struct SkillEditorSheet: View {
                                 .foregroundColor(themeManager.currentTheme.secondaryText)
 
                             SkillStyledTextField(
-                                placeholder: "Brief description (optional)",
+                                placeholder: L("Brief description (optional)"),
                                 text: $description,
                                 icon: nil
                             )
@@ -214,7 +267,7 @@ struct SkillEditorSheet: View {
                 }
 
                 // Metadata Section
-                SkillEditorSection(title: "Metadata", icon: "tag.fill") {
+                SkillEditorSection(title: L("Metadata"), icon: "tag.fill") {
                     VStack(alignment: .leading, spacing: 16) {
                         HStack(spacing: 12) {
                             // Category
@@ -224,7 +277,7 @@ struct SkillEditorSheet: View {
                                     .foregroundColor(themeManager.currentTheme.secondaryText)
 
                                 SkillStyledTextField(
-                                    placeholder: "e.g., productivity",
+                                    placeholder: L("e.g., productivity"),
                                     text: $category,
                                     icon: nil
                                 )
@@ -254,7 +307,7 @@ struct SkillEditorSheet: View {
                                 .foregroundColor(themeManager.currentTheme.secondaryText)
 
                             SkillStyledTextField(
-                                placeholder: "Your name (optional)",
+                                placeholder: L("Your name (optional)"),
                                 text: $author,
                                 icon: nil
                             )
@@ -264,7 +317,7 @@ struct SkillEditorSheet: View {
                         // Keywords — the discovery signal capabilities_discover
                         // searches. Built-in skills ship rich keyword lists;
                         // custom skills without them are only found by name +
-                        // description (upstream #2089).
+                        // description.
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Keywords", bundle: .module)
                                 .font(.system(size: 11, weight: .medium))
@@ -287,50 +340,6 @@ struct SkillEditorSheet: View {
                     }
                 }
 
-                // Status Section
-                SkillEditorSection(title: "Status", icon: "checkmark.circle.fill") {
-                    HStack {
-                        HStack(spacing: 8) {
-                            Image(systemName: enabled ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(
-                                    enabled
-                                        ? themeManager.currentTheme.successColor
-                                        : themeManager.currentTheme.tertiaryText
-                                )
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Enabled", bundle: .module)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(themeManager.currentTheme.primaryText)
-                                Text(enabled ? "Skill is available for use" : "Skill is hidden")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(themeManager.currentTheme.tertiaryText)
-                            }
-                        }
-
-                        Spacer()
-
-                        Toggle("", isOn: $enabled)
-                            .toggleStyle(.switch)
-                            .controlSize(.small)
-                            .labelsHidden()
-                    }
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(themeManager.currentTheme.inputBackground)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(
-                                        enabled
-                                            ? themeManager.currentTheme.successColor.opacity(0.3)
-                                            : themeManager.currentTheme.inputBorder,
-                                        lineWidth: 1
-                                    )
-                            )
-                    )
-                }
             }
             .padding(20)
         }
@@ -441,15 +450,15 @@ struct SkillEditorSheet: View {
 
             Spacer()
 
-            Button(isBuiltIn ? "Close" : "Cancel", action: onCancel)
+            Button(isBuiltIn ? L("Close") : L("Cancel"), action: onCancel)
                 .buttonStyle(SkillSecondaryButtonStyle())
 
             if !isBuiltIn {
-                Button(isEditing ? "Save Changes" : "Create Skill") {
+                Button(isEditing ? L("Save Changes") : L("Create Skill")) {
                     saveSkill()
                 }
                 .buttonStyle(SkillPrimaryButtonStyle())
-                .disabled(!canSave)
+                .disabled(!canSave || !hasChanges)
                 .keyboardShortcut(.return, modifiers: .command)
             }
         }
@@ -476,20 +485,6 @@ struct SkillEditorSheet: View {
         category = skill.category ?? ""
         keywords = skill.keywords.joined(separator: ", ")
         instructions = skill.instructions
-        enabled = skill.enabled
-    }
-
-    /// Comma-separated keywords field → keyword list, dropping empties
-    /// (upstream #2089).
-    nonisolated static func parseKeywords(_ raw: String) -> [String] {
-        raw.split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
-    private var editingSkill: Skill? {
-        if case .edit(let skill) = mode { return skill }
-        return nil
     }
 
     private func saveSkill() {
@@ -497,6 +492,10 @@ struct SkillEditorSheet: View {
         let trimmedInstructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty, !trimmedInstructions.isEmpty else { return }
 
+        // Fields the editor does not expose (references, assets, directory,
+        // plugin association) pass through from the edited skill unchanged.
+        // Rebuilding with defaults here erased imported keywords from
+        // SKILL.md on every edit — a permanent discovery regression.
         let skill = Skill(
             id: existingId ?? UUID(),
             name: trimmedName,
@@ -505,14 +504,10 @@ struct SkillEditorSheet: View {
             author: author.isEmpty ? nil : author.trimmingCharacters(in: .whitespacesAndNewlines),
             category: category.isEmpty ? nil : category.trimmingCharacters(in: .whitespacesAndNewlines),
             keywords: Self.parseKeywords(keywords),
-            enabled: enabled,
             instructions: trimmedInstructions,
             isBuiltIn: false,
             createdAt: existingCreatedAt ?? Date(),
             updatedAt: Date(),
-            // Fields the editor does not expose pass through unchanged
-            // (upstream #2089: rebuilding with defaults erased imported
-            // keywords and references on every edit).
             references: editingSkill?.references ?? [],
             assets: editingSkill?.assets ?? [],
             directoryName: editingSkill?.directoryName,
@@ -618,16 +613,21 @@ private struct SkillStyledTextField: View {
 
 private struct SkillPrimaryButtonStyle: ButtonStyle {
     @ObservedObject private var themeManager = ThemeManager.shared
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundColor(.white)
+            .foregroundColor(isEnabled ? .white : themeManager.currentTheme.tertiaryText)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(themeManager.currentTheme.accentColor)
+                    .fill(
+                        isEnabled
+                            ? themeManager.currentTheme.accentColor
+                            : themeManager.currentTheme.tertiaryBackground
+                    )
             )
             .opacity(configuration.isPressed ? 0.8 : 1.0)
     }

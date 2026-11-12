@@ -33,7 +33,6 @@ public struct Skill: Codable, Identifiable, Sendable, Equatable {
     public var author: String?
     public var category: String?
     public var keywords: [String]
-    public var enabled: Bool
     public var instructions: String
     public let isBuiltIn: Bool
     public let createdAt: Date
@@ -64,7 +63,6 @@ public struct Skill: Codable, Identifiable, Sendable, Equatable {
         author: String? = nil,
         category: String? = nil,
         keywords: [String] = [],
-        enabled: Bool = true,
         instructions: String = "",
         isBuiltIn: Bool = false,
         createdAt: Date = Date(),
@@ -81,7 +79,6 @@ public struct Skill: Codable, Identifiable, Sendable, Equatable {
         self.author = author
         self.category = category
         self.keywords = keywords
-        self.enabled = enabled
         self.instructions = instructions
         self.isBuiltIn = isBuiltIn
         self.createdAt = createdAt
@@ -105,306 +102,381 @@ public struct Skill: Codable, Identifiable, Sendable, Equatable {
     // MARK: - Built-in Skills
 
     /// All built-in skills
+    ///
+    /// Every preset is grounded in real Osaurus tools (like `render_chart`,
+    /// `web_search`, `applescript`) rather than generic persona advice, so
+    /// enabling a skill teaches the agent a concrete workflow it could not
+    /// otherwise know.
+    ///
+    /// Names are localized; `directoryName` is the stable English slug so an
+    /// agent's skill allow-list (`agents[].skills`) names a built-in the same
+    /// way in every language.
     public static var builtInSkills: [Skill] {
         [
-            // Research & Analysis
+            // Web Researcher
             Skill(
-                id: UUID(uuidString: "00000001-0000-0000-0000-000000000001")!,
-                name: "Research Analyst",
-                description: "In-depth research with fact-checking and balanced analysis",
+                id: UUID(uuidString: "00000001-0000-0000-0000-000000000008")!,
+                name: L("Web Researcher"),
+                description: L("Live web research with source retrieval, cross-checking, and cited reports"),
                 version: "1.0.0",
                 author: "Osaurus",
-                category: "research",
-                keywords: ["research", "fact-check", "sources", "analysis", "citations", "evidence"],
-                enabled: false,
+                category: L("research"),
+                keywords: [
+                    "research", "web", "search", "sources", "fact-check", "citations",
+                    "investigate", "news", "compare", "verify", "report",
+                ],
                 instructions: """
-                    When conducting research and analysis:
+                    When researching a topic that needs live web data:
 
-                    ## Information Gathering
-                    - Identify multiple reliable sources
-                    - Cross-reference facts across sources
-                    - Note the date and credibility of sources
-                    - Distinguish between facts, opinions, and speculation
-                    - Look for primary sources when possible
+                    ## Workflow
+                    1. Use `web_search` with focused queries to find candidate sources
+                    2. Loading this skill does not load the extraction schema. Before retrieval, if `search_and_extract` is not already in the current tool schema, call `capabilities_load` with the exact id `tool/search_and_extract`; after that succeeds, call `search_and_extract` in this same run.
+                    3. Pick the most authoritative results and call `search_and_extract` with each result's direct `url` to retrieve the actual page content — never pass a known URL back into `web_search` as another query
+                    4. Cross-reference key facts across at least two independent sources
+                    5. Note publication dates; prefer recent sources for fast-moving topics
 
-                    ## Analysis Approach
-                    - Present multiple perspectives on controversial topics
-                    - Identify potential biases in sources
-                    - Use data and evidence to support conclusions
-                    - Acknowledge limitations and uncertainties
-                    - Separate correlation from causation
+                    ## Query strategy
+                    - Start specific; broaden only if results are thin
+                    - Run separate searches per sub-question instead of one broad query
+                    - Re-search with alternate terms when sources disagree or look stale
 
-                    ## Output Format
-                    - Start with a clear executive summary
-                    - Use comparison tables for complex data
-                    - Include citations and references
-                    - Highlight key findings and insights
-                    - Provide actionable recommendations
+                    ## Synthesis
+                    - Distinguish facts from opinion and speculation
+                    - Attribute every non-obvious claim to its source (title + URL)
+                    - Call out disagreements between sources instead of averaging them away
+                    - State plainly what could not be verified
 
-                    ## Quality Checks
-                    - Verify statistics and numerical claims
-                    - Check for logical fallacies
-                    - Ensure balanced coverage of viewpoints
-                    - Update outdated information when possible
+                    ## Delivering results
+                    - Short findings: answer inline with a source list at the end
+                    - Long reports: write the full report to a file and surface it with `share_artifact` so it appears in chat
+                    - Lead any long report with an executive summary
                     """,
                 isBuiltIn: true,
                 createdAt: Date.distantPast,
-                updatedAt: Date.distantPast
-            ),
-
-            // Creative
-            Skill(
-                id: UUID(uuidString: "00000001-0000-0000-0000-000000000002")!,
-                name: "Creative Brainstormer",
-                description: "Generate ideas, overcome creative blocks, and explore possibilities",
-                version: "1.0.0",
-                author: "Osaurus",
-                category: "creative",
-                keywords: ["brainstorm", "ideation", "creative", "ideas", "innovation", "imagination"],
-                enabled: false,
-                instructions: """
-                    When helping with creative thinking and ideation:
-
-                    ## Idea Generation
-                    - Start with quantity over quality (divergent thinking)
-                    - Build on ideas with "Yes, and..." mentality
-                    - Combine unrelated concepts for novel ideas
-                    - Challenge assumptions and constraints
-                    - Explore opposite or extreme versions
-
-                    ## Brainstorming Techniques
-                    - Mind mapping: branch out from central concept
-                    - SCAMPER: Substitute, Combine, Adapt, Modify, Put to other uses, Eliminate, Reverse
-                    - Random word association
-                    - "What if" scenarios
-                    - Role-play different perspectives
-
-                    ## Overcoming Creative Blocks
-                    - Take a step back and reframe the problem
-                    - Look at analogous solutions in other fields
-                    - Break the problem into smaller parts
-                    - Set constraints to spark creativity
-                    - Use prompts and creative exercises
-
-                    ## Refining Ideas
-                    - Evaluate ideas against original goals
-                    - Identify the most promising concepts
-                    - Combine the best elements from multiple ideas
-                    - Consider feasibility and implementation
-                    - Iterate and improve selected ideas
-                    """,
-                isBuiltIn: true,
-                createdAt: Date.distantPast,
-                updatedAt: Date.distantPast
-            ),
-
-            // Learning & Education
-            Skill(
-                id: UUID(uuidString: "00000001-0000-0000-0000-000000000003")!,
-                name: "Study Tutor",
-                description: "Patient explanations, practice problems, and learning strategies",
-                version: "1.0.0",
-                author: "Osaurus",
-                category: "learning",
-                keywords: ["tutor", "teach", "learn", "study", "explain", "practice", "education"],
-                enabled: false,
-                instructions: """
-                    When helping someone learn:
-
-                    ## Teaching Approach
-                    - Assess current understanding before explaining
-                    - Use the Socratic method - guide with questions
-                    - Break complex topics into digestible parts
-                    - Connect new concepts to familiar ones
-                    - Adapt explanations to the learner's level
-
-                    ## Explanation Techniques
-                    - Start with the "why" before the "how"
-                    - Use concrete examples and analogies
-                    - Provide visual descriptions when helpful
-                    - Summarize key points regularly
-                    - Check understanding before moving on
-
-                    ## Practice & Reinforcement
-                    - Offer practice problems of increasing difficulty
-                    - Provide hints before full solutions
-                    - Explain common mistakes and misconceptions
-                    - Use spaced repetition for retention
-                    - Celebrate progress and effort
-
-                    ## Learning Strategies
-                    - Suggest active recall techniques
-                    - Recommend study schedules and breaks
-                    - Teach note-taking methods
-                    - Encourage teaching concepts to others
-                    - Help create study plans and goals
-                    """,
-                isBuiltIn: true,
-                createdAt: Date.distantPast,
-                updatedAt: Date.distantPast
-            ),
-
-            // Productivity
-            Skill(
-                id: UUID(uuidString: "00000001-0000-0000-0000-000000000004")!,
-                name: "Productivity Coach",
-                description: "Task management, prioritization, and goal achievement",
-                version: "1.0.0",
-                author: "Osaurus",
-                category: "productivity",
-                keywords: ["productivity", "tasks", "prioritize", "goals", "time-management", "planning"],
-                enabled: false,
-                instructions: """
-                    When helping with productivity and task management:
-
-                    ## Task Breakdown
-                    - Break large projects into actionable tasks
-                    - Define clear, specific next actions
-                    - Estimate time requirements realistically
-                    - Identify dependencies between tasks
-                    - Set milestones for progress tracking
-
-                    ## Prioritization
-                    - Use Eisenhower Matrix (urgent/important)
-                    - Apply the 80/20 rule (Pareto principle)
-                    - Consider deadlines and dependencies
-                    - Balance quick wins with important work
-                    - Re-prioritize when circumstances change
-
-                    ## Time Management
-                    - Suggest time-blocking techniques
-                    - Recommend focused work sessions (Pomodoro, etc.)
-                    - Help identify and minimize distractions
-                    - Plan buffer time for unexpected tasks
-                    - Encourage regular breaks for sustainability
-
-                    ## Goal Setting
-                    - Make goals SMART (Specific, Measurable, Achievable, Relevant, Time-bound)
-                    - Break annual goals into quarterly/monthly targets
-                    - Track progress with metrics when possible
-                    - Celebrate achievements along the way
-                    - Adjust goals based on learning and feedback
-                    """,
-                isBuiltIn: true,
-                createdAt: Date.distantPast,
-                updatedAt: Date.distantPast
+                updatedAt: Date.distantPast,
+                directoryName: "web-researcher"
             ),
 
             // Content Summarizer
             Skill(
                 id: UUID(uuidString: "00000001-0000-0000-0000-000000000005")!,
-                name: "Content Summarizer",
-                description: "Extract key points and create structured summaries",
-                version: "1.0.0",
+                name: L("Content Summarizer"),
+                description: L("Extract key points and create structured summaries"),
+                version: "1.1.0",
                 author: "Osaurus",
-                category: "productivity",
-                keywords: ["summarize", "summary", "tldr", "key-points", "digest", "condense"],
-                enabled: false,
+                category: L("productivity"),
+                keywords: [
+                    "summarize", "summary", "tldr", "key-points", "digest", "condense",
+                    "gist", "overview", "recap", "synopsis", "brief", "abstract",
+                    "main-points", "takeaways", "highlights", "skim", "the-gist",
+                ],
                 instructions: """
-                    When summarizing content:
+                    When asked to summarize content:
 
-                    ## Summary Types
+                    ## Get the content first
+                    - URL mentioned: call `search_and_extract` with the direct `url` to retrieve the page text — never summarize from the title or from memory
+                    - File in the working folder: read it with `file_read`
+                    - Attached or pasted content: use it as-is
+                    - If the content cannot be retrieved, say so; never fabricate a summary
+
+                    ## Summary types
                     - TL;DR: 1-2 sentence essence
-                    - Executive Summary: Key points for decision makers
-                    - Detailed Summary: Comprehensive overview
-                    - Bullet Points: Scannable key takeaways
-
-                    ## Extraction Techniques
-                    - Identify the main thesis or argument
-                    - Extract key facts, figures, and data
-                    - Note important names, dates, and events
-                    - Capture action items and recommendations
-                    - Preserve essential context
+                    - Executive Summary: key points for decision makers
+                    - Detailed Summary: comprehensive overview
+                    - Bullet Points: scannable key takeaways
 
                     ## Structure
                     - Lead with the most important information
-                    - Group related points together
-                    - Use hierarchical organization
-                    - Include section headers for long summaries
+                    - Group related points; use section headers for long summaries
+                    - Capture key facts, figures, names, dates, and action items
                     - End with conclusions or next steps
 
-                    ## Quality Guidelines
-                    - Maintain accuracy - do not add interpretation
+                    ## Quality guidelines
+                    - Maintain accuracy — do not add interpretation
                     - Keep the original tone and intent
-                    - Adjust length to the requested format
-                    - Highlight what's new or surprising
+                    - Match length to the requested format
                     - Note any gaps or missing information
                     """,
                 isBuiltIn: true,
                 createdAt: Date.distantPast,
-                updatedAt: Date.distantPast
+                updatedAt: Date.distantPast,
+                directoryName: "content-summarizer"
             ),
 
-            // Debug Assistant (keeping one coding skill)
+            // Mac Automator
             Skill(
-                id: UUID(uuidString: "00000001-0000-0000-0000-000000000006")!,
-                name: "Debug Assistant",
-                description: "Systematic debugging and problem-solving approach",
+                id: UUID(uuidString: "00000001-0000-0000-0000-000000000009")!,
+                name: L("Mac Automator"),
+                description: L("Control and query Mac apps with AppleScript automation"),
                 version: "1.0.0",
                 author: "Osaurus",
-                category: "development",
-                keywords: ["debug", "bug", "error", "crash", "fix", "troubleshoot", "diagnose"],
-                enabled: false,
+                category: L("automation"),
+                keywords: [
+                    "mac", "automate", "applescript", "automation", "app", "safari",
+                    "finder", "notes", "control", "script", "macos",
+                ],
                 instructions: """
-                    When helping debug issues:
+                    When asked to control or query Mac applications:
 
-                    ## Initial Assessment
-                    - What is the expected behavior?
-                    - What is the actual behavior?
-                    - When did it start happening?
-                    - What changed recently?
-                    - Is it reproducible?
+                    ## Choosing the right tool
+                    - **Read-only lookups** (current Safari tab, what's playing, unread counts, file listings): use `mac_query` — it cannot change anything
+                    - **Actions** (create a note, send an email, move files, change settings): use `applescript` with a clear natural-language goal
 
-                    ## Systematic Approach
-                    1. Reproduce the issue consistently
-                    2. Isolate the problem area
-                    3. Form hypotheses about the cause
-                    4. Test each hypothesis methodically
-                    5. Document findings as you go
+                    ## Well-supported apps
+                    Safari, Notes, Mail, Finder, Calendar, Reminders, Music, Shortcuts, Terminal, and System Events have curated automation recipes — prefer these when the user has a choice of app.
 
-                    ## Common Debugging Techniques
-                    - Add logging at key points
-                    - Use debugger breakpoints
-                    - Check input/output at boundaries
-                    - Compare working vs non-working cases
-                    - Binary search through changes
+                    ## Safety
+                    - Confirm with the user before destructive or irreversible actions (deleting files, sending emails or messages, emptying trash)
+                    - Prefer the narrowest action that satisfies the request
+                    - Report exactly what was done, including anything skipped or failed
 
-                    ## Questions to Ask
-                    - Are all dependencies correct versions?
-                    - Is the environment configured properly?
-                    - Are there any error messages in logs?
-                    - Does it work in a different environment?
-                    - Have you tried clearing caches?
-
-                    ## Resolution
-                    - Fix the root cause, not just symptoms
-                    - Add tests to prevent regression
-                    - Document the fix for future reference
+                    ## When automation fails
+                    - Check whether the target app is running and whether Osaurus has Automation permission (System Settings → Privacy & Security → Automation)
+                    - Retry once with a simpler, more explicit goal before giving up
+                    - Fall back to step-by-step instructions the user can follow manually
                     """,
                 isBuiltIn: true,
                 createdAt: Date.distantPast,
-                updatedAt: Date.distantPast
+                updatedAt: Date.distantPast,
+                directoryName: "mac-automator"
+            ),
+
+            // Personal Organizer
+            Skill(
+                id: UUID(uuidString: "00000001-0000-0000-0000-00000000000A")!,
+                name: L("Personal Organizer"),
+                description: L("Manage calendar events, reminders, email, and messages"),
+                version: "1.0.0",
+                author: "Osaurus",
+                category: L("productivity"),
+                keywords: [
+                    "calendar", "events", "reminders", "schedule", "email", "mail",
+                    "messages", "appointments", "meetings", "organize", "todo",
+                ],
+                instructions: """
+                    When helping manage calendar, reminders, email, or messages:
+
+                    ## Available tools (built into Osaurus, per-agent opt-in)
+                    - **Calendar**: `calendar_events`, `calendar_create_event`, `calendar_update_event`, `calendar_delete_event`, `calendar_open_event`
+                    - **Reminders**: `reminders_lists`, `reminders_fetch`, `reminders_create`, `reminders_update`, `reminders_complete`
+                    - **Mail**: `mail_list`, `mail_read`, `mail_search`, `mail_compose`, `mail_reply`
+                    - **Messages**: `messages_conversations`, `messages_read`, `messages_unread`, `messages_send`
+
+                    These are built into Osaurus but OFF until the app is enabled for this agent. Apple app tools are never found by `capabilities_discover` and cannot be loaded with `capabilities_load` — if one you need is not in your tool list, do not search for it: tell the user to turn the app on for this agent under Settings… (⌘,) → Agents → this agent → Abilities → Tools (each Apple app is a group there; or ask the Orchestrator to enable it), then continue once it appears. Calendar and Reminders ask macOS for Full Access on first use; Mail and Messages ask to allow automation (reading Messages also needs Full Disk Access). Contacts is a separate Apple app (`contacts_*`) — it is not part of this skill's tool list and needs its own group turned on.
+
+                    ## Working with dates
+                    - Call `get_current_time` before computing any relative date ("tomorrow", "next Tuesday") — never guess today's date
+                    - Confirm ambiguous times ("Friday" — this week or next?) before creating events
+
+                    ## Good defaults
+                    - Read before you write: check for conflicts before creating events, and for existing entries before creating reminders
+                    - Confirm before sending email or messages on the user's behalf
+                    - After creating something, report back the exact title, date, and time so mistakes are easy to spot
+                    """,
+                isBuiltIn: true,
+                createdAt: Date.distantPast,
+                updatedAt: Date.distantPast,
+                directoryName: "personal-organizer"
+            ),
+
+            // Document Builder
+            Skill(
+                id: UUID(uuidString: "00000001-0000-0000-0000-00000000000B")!,
+                name: L("Document Builder"),
+                description: L("Create spreadsheets and presentations, delivered as downloadable files"),
+                version: "1.0.0",
+                author: "Osaurus",
+                category: L("productivity"),
+                keywords: [
+                    "spreadsheet", "excel", "xlsx", "csv", "presentation", "powerpoint",
+                    "pptx", "slides", "document", "export", "deck",
+                ],
+                instructions: """
+                    When asked to produce a spreadsheet or presentation:
+
+                    ## Spreadsheets (osaurus.xlsx plugin)
+                    - `create_xlsx` to start a workbook, `write_cells` to fill in data
+                    - `csv_to_xlsx` when the data already exists as CSV
+                    - To change an EXISTING workbook, use `file_edit` with `operations` (`set_cells`, `insert_rows`, …;
+                      `file_read` with `mode: "structure"` lists sheets and cells). It edits the file in place and keeps
+                      its formatting, column widths, filters, validation and formulas. The plugin's `save_xlsx` writes a
+                      minimal workbook, so never save over an existing workbook with it; `read_xlsx` is for reading only.
+                    - Put headers in the first row; keep one dataset per sheet
+
+                    ## Presentations (osaurus.pptx plugin)
+                    - `create_presentation`, then `add_slide` / `add_text` per slide, then `save_presentation`
+                    - One idea per slide; start with a title slide; keep bullets short
+
+                    ## Missing tools
+                    These tools come from plugins. If they are unavailable, use `capabilities_discover` to check, and tell the user to install osaurus.xlsx or osaurus.pptx from Settings… (⌘,) → Tools & MCP → Plugins.
+
+                    ## Delivering files
+                    Always surface the finished file with `share_artifact` — it is the only way a file appears in chat as a downloadable card. A file written to disk without `share_artifact` is invisible to the user.
+
+                    ## Quality
+                    - Confirm the desired structure (columns, slide outline) before building anything large
+                    - After delivery, summarize what the file contains
+                    """,
+                isBuiltIn: true,
+                createdAt: Date.distantPast,
+                updatedAt: Date.distantPast,
+                directoryName: "document-builder"
+            ),
+
+            // Workspace Assistant
+            Skill(
+                id: UUID(uuidString: "00000001-0000-0000-0000-00000000000C")!,
+                name: L("Workspace Assistant"),
+                description: L("Work on files in the mounted folder: read, edit, search, run commands, commit"),
+                version: "1.0.0",
+                author: "Osaurus",
+                category: L("development"),
+                keywords: [
+                    "files", "folder", "workspace", "code", "edit", "shell",
+                    "git", "commit", "search", "project", "refactor",
+                ],
+                instructions: """
+                    When a working folder is mounted, use the folder tools:
+
+                    ## Orientation first
+                    - `file_tree` to see the project layout before anything else
+                    - `file_search` to locate relevant files by name or content
+                    - `file_read` before editing — never edit a file you have not read
+
+                    ## Editing
+                    - Prefer `file_edit` (targeted replacements) over `file_write` whole-file rewrites; rewrites risk destroying content you did not read
+                    - Make the smallest change that satisfies the request
+                    - `file_undo` and `file_operation_history` can recover from mistakes
+
+                    ## Commands
+                    - `shell_run` executes in the folder context — use it for builds, tests, and scripts
+                    - Show the user relevant command output, especially failures
+
+                    ## Git
+                    - `git_status` and `git_diff` to review state before and after changes
+                    - `git_commit` only when the user asks for a commit
+                    - Never write commit messages that overstate what changed
+
+                    ## Boundaries
+                    - Only use the tools above that are actually in your tool list. In sandbox mode the folder may be read-only and shell/git run in the sandbox instead — the `## Files` rules in your system prompt win over this skill
+                    - If none of these tools are present, call `prompt_working_folder` so the user can pick a working folder (if that tool is missing too, ask them to attach one via the Folder chip)
+                    - Stay inside the mounted folder; do not attempt paths outside it
+                    """,
+                isBuiltIn: true,
+                createdAt: Date.distantPast,
+                updatedAt: Date.distantPast,
+                directoryName: "workspace-assistant"
+            ),
+
+            // Data Keeper
+            Skill(
+                id: UUID(uuidString: "00000001-0000-0000-0000-00000000000D")!,
+                name: L("Data Keeper"),
+                description: L("Keep structured records across chats in the agent's private database"),
+                version: "1.0.0",
+                author: "Osaurus",
+                category: L("productivity"),
+                keywords: [
+                    "track", "log", "record", "database", "expenses", "habits",
+                    "inventory", "history", "persist", "table", "sqlite",
+                ],
+                instructions: """
+                    When the user wants to track structured information over time (expenses, habits, workouts, inventories, reading lists):
+
+                    ## The agent database
+                    Each agent has a private SQLite database that persists across chats. Use it — not chat memory — for anything the user will ask about later. These tools are gated by the agent's database setting; if `db_query` is missing, ask the user to enable the database for this agent.
+
+                    ## Workflow
+                    1. `db_schema` first — check what tables already exist before creating or writing
+                    2. `db_create_table` with explicit column types when a new table is needed
+                    3. `db_upsert` for records with a natural key (idempotent); `db_insert` for append-only logs
+                    4. `db_query` to answer questions; aggregate in SQL (SUM, COUNT, GROUP BY) rather than in prose
+
+                    ## Schema tips
+                    - Include a date or timestamp column on anything tracked over time
+                    - Store amounts as numbers, not formatted strings
+                    - Keep one concept per table; add columns via `db_alter_table` rather than overloading text fields
+
+                    ## Reporting
+                    - Totals and summaries: answer inline from `db_query` results
+                    - Trends: pass query results to `render_chart` for a visual
+                    - Exports: `db_export`, then surface the file with `share_artifact`
+
+                    ## Care with data
+                    - Confirm before `db_delete` or destructive `db_execute`; `db_restore` exists but do not rely on it
+                    - Echo back inserted values so entry errors are caught early
+                    """,
+                isBuiltIn: true,
+                createdAt: Date.distantPast,
+                updatedAt: Date.distantPast,
+                directoryName: "data-keeper"
+            ),
+
+            // Autonomous Scheduler
+            Skill(
+                id: UUID(uuidString: "00000001-0000-0000-0000-00000000000E")!,
+                name: L("Autonomous Scheduler"),
+                description: L("Set up recurring or delayed self-running tasks with notifications"),
+                version: "1.0.0",
+                author: "Osaurus",
+                category: L("automation"),
+                keywords: [
+                    "schedule", "recurring", "automate", "later", "daily", "weekly",
+                    "notify", "notification", "routine", "briefing", "remind",
+                ],
+                instructions: """
+                    When the user wants something done later or on a recurring basis (daily briefing, weekly report, periodic check):
+
+                    ## Scheduling tools
+                    - `get_current_time` first — compute the target time from the real current time, never a guessed one
+                    - `schedule_next_run` with the computed time and a precise instruction describing exactly what the future run should do
+                    - `cancel_next_run` when the user wants to stop a scheduled task
+                    - `notify` to post a local notification when a run produces something the user should see
+
+                    ## Writing the future-run instruction
+                    The scheduled run starts fresh — it will not remember this conversation. Include everything it needs: what to do, which tools to use, what to deliver, and that it should call `schedule_next_run` again if the task recurs.
+
+                    ## Confirming
+                    - Repeat back the exact scheduled time and what will happen, so the user can catch mistakes
+                    - For recurring tasks, state the cadence explicitly ("every weekday at 8:00")
+
+                    ## Boundaries
+                    - One next run is scheduled at a time; a recurring task keeps itself alive by rescheduling at the end of each run
+                    - Do not schedule actions the user has not explicitly approved (sending messages, spending money)
+                    """,
+                isBuiltIn: true,
+                createdAt: Date.distantPast,
+                updatedAt: Date.distantPast,
+                directoryName: "autonomous-scheduler"
             ),
 
             // Data Visualization
             Skill(
                 id: UUID(uuidString: "00000001-0000-0000-0000-000000000007")!,
-                name: "Data Visualizer",
-                description: "Render charts and graphs from data inline or from file attachments",
+                name: L("Data Visualizer"),
+                description: L("Render charts and graphs from attached, retrieved, or computed data"),
                 version: "1.0.0",
                 author: "Osaurus",
-                category: "productivity",
+                category: L("productivity"),
                 keywords: ["chart", "graph", "plot", "visualize", "bar", "line", "pie", "data", "table", "csv"],
-                enabled: false,
                 instructions: """
                     When the user's message contains data suitable for visualization:
 
                     ## Choosing the right path
 
-                    **If the data is in a file attachment:** call the `render_chart` tool.
-                    Pass the full raw file content in the `data` field and use `xColumn` /
-                    `series` to specify which columns to plot. The tool handles all parsing
-                    and downsampling — you never need to format individual data points. Example:
+                    **If raw tabular data is available from an attachment, web extraction,
+                    sandbox/file read, download, or computation:** call the `render_chart` tool.
+                    Retrieve or compute the data first, then pass its full raw content in the
+                    `data` field without removing or rewriting its header row, and use
+                    `xColumn` / `series` to specify which columns to plot.
+                    When `search_and_extract` returns a `data_ref` and an exact
+                    `next_action`, call `render_chart` with those arguments instead of
+                    copying the raw payload through your context.
+                    The tool does not fetch URLs itself; it handles parsing and downsampling once
+                    data is available. After `web_search` selects a source, call
+                    `search_and_extract` with that result's direct `url` to retrieve its actual
+                    contents; never pass a known URL back as another search query, and do not keep
+                    rephrasing discovery searches when retrieval is the required next step. Example:
                     ```
                     render_chart(
                       data: "<full raw CSV/TSV/JSON content>",
@@ -446,7 +518,8 @@ public struct Skill: Codable, Identifiable, Sendable, Equatable {
                     """,
                 isBuiltIn: true,
                 createdAt: Date.distantPast,
-                updatedAt: Date.distantPast
+                updatedAt: Date.distantPast,
+                directoryName: "data-visualizer"
             ),
         ]
     }
@@ -506,7 +579,6 @@ extension Skill {
             author: frontmatter["author"] as? String,
             category: frontmatter["category"] as? String,
             keywords: keywords,
-            enabled: frontmatter["enabled"] as? Bool ?? true,
             instructions: body.trimmingCharacters(in: .whitespacesAndNewlines),
             isBuiltIn: false,
             createdAt: createdAt,
@@ -534,7 +606,6 @@ extension Skill {
         if !keywords.isEmpty {
             yaml += "keywords: \"\(keywords.joined(separator: ", "))\"\n"
         }
-        yaml += "enabled: \(enabled)\n"
         if let pluginId = pluginId {
             yaml += "pluginId: \"\(escapeYamlString(pluginId))\"\n"
         }
@@ -783,7 +854,6 @@ extension Skill {
                 author: skill.author,
                 category: skill.category,
                 keywords: skill.keywords,
-                enabled: skill.enabled,
                 instructions: skill.instructions,
                 isBuiltIn: false,
                 createdAt: Date(),
@@ -858,7 +928,6 @@ extension Skill {
         yaml += "metadata:\n"
         if includeId {
             yaml += "  osaurus-id: \"\(id.uuidString)\"\n"
-            yaml += "  osaurus-enabled: \(enabled)\n"
         }
         if let pluginId = pluginId {
             yaml += "  osaurus-plugin-id: \"\(pluginId)\"\n"
@@ -899,7 +968,6 @@ extension Skill {
         var category: String?
         var keywords: [String] = []
         var osaurusId: UUID?
-        var enabled = true
         var pluginId: String?
 
         if let metadata = frontmatter["metadata"] as? [String: Any] {
@@ -914,9 +982,8 @@ extension Skill {
             if let idString = metadata["osaurus-id"] as? String {
                 osaurusId = UUID(uuidString: idString)
             }
-            if let enabledValue = metadata["osaurus-enabled"] as? Bool {
-                enabled = enabledValue
-            }
+            // Legacy `osaurus-enabled` metadata is intentionally ignored:
+            // installed skills are always available.
             pluginId = metadata["osaurus-plugin-id"] as? String
         }
 
@@ -944,7 +1011,6 @@ extension Skill {
             author: author,
             category: category,
             keywords: keywords,
-            enabled: enabled,
             instructions: body.trimmingCharacters(in: .whitespacesAndNewlines),
             isBuiltIn: false,
             createdAt: Date(),

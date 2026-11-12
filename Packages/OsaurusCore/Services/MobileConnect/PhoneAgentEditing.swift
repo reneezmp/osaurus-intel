@@ -19,8 +19,7 @@
 //  file, used by the agent routes. Intel edits are marked `Intel:` —
 //  Apple apps from the agent's settings, no sandbox wait (Intel has no
 //  sandbox, so the switch is refused before that call), no workspace
-//  sharing check (workspaces are deferred), and skills still seeded per
-//  agent (upstream #2050 not ported, `W-tools-tab-sync`).
+//  sharing check (workspaces are deferred).
 //
 
 import Foundation
@@ -317,9 +316,6 @@ enum PhoneAgentEditing {
     private static func seedToolListIfNeeded(for agentId: UUID) {
         let names = ToolRegistry.shared.listDynamicTools().map(\.name)
         guard !names.isEmpty else { return }
-        // Intel: skills are still assigned per agent; seed them as the Tools
-        // picker does.
-        AgentManager.shared.seedEnabledCapabilitiesIfNeeded(
-            for: agentId, defaultToolNames: names, defaultSkillNames: SkillManager.shared.skills.map(\.name))
+        AgentManager.shared.seedEnabledCapabilitiesIfNeeded(for: agentId, defaultToolNames: names)
     }
 }

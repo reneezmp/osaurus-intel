@@ -52,48 +52,10 @@ public enum SkillStore {
             }
         }
 
-        // Load built-in skill states (hidden directories starting with .)
-        var builtInStates: [UUID: Skill] = [:]
-        if let contents = try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: []  // Include hidden files
-        ) {
-            for item in contents {
-                let name = item.lastPathComponent
-                // Only process hidden directories that look like UUIDs
-                guard name.hasPrefix("."),
-                    name.count > 1,
-                    let skill = loadFromDirectory(item)
-                else {
-                    continue
-                }
-                builtInStates[skill.id] = skill
-            }
-        }
-
-        // Merge built-in skills with saved state
-        var skills: [Skill] = Skill.builtInSkills.map { builtIn in
-            if let saved = builtInStates[builtIn.id] {
-                return Skill(
-                    id: builtIn.id,
-                    name: builtIn.name,
-                    description: builtIn.description,
-                    version: builtIn.version,
-                    author: builtIn.author,
-                    category: builtIn.category,
-                    enabled: saved.enabled,
-                    instructions: builtIn.instructions,
-                    isBuiltIn: true,
-                    createdAt: builtIn.createdAt,
-                    updatedAt: saved.updatedAt,
-                    references: builtIn.references,
-                    assets: builtIn.assets,
-                    directoryName: builtIn.directoryName
-                )
-            }
-            return builtIn
-        }
+        // Built-in skills are immutable and always available. Legacy hidden
+        // state directories (used to persist the removed enabled flag) are
+        // intentionally no longer read.
+        var skills: [Skill] = Skill.builtInSkills
 
         // Add custom skills
         let builtInIds = Set(Skill.builtInSkills.map { $0.id })
@@ -138,18 +100,25 @@ public enum SkillStore {
         return nil
     }
 
-    /// Save a skill to disk
+    /// Save a skill to disk. Built-in skills are immutable and never persisted.
     public static func save(_ skill: Skill) async {
         if skill.isBuiltIn {
-            saveBuiltInState(skill)
             return
         }
 
-        var dirName = skill.directoryName ?? skill.xplaceholder_agentSkillsNamex
-        if dirName.isEmpty {
-            dirName = "skill-\(skill.id.uuidString.prefix(8).lowercased())"
+        let slug = skill.xplaceholder_agentSkillsNamex
+        var skillDir = skillsDirectory().appendingPathComponent(slug)
+
+        if let oldName = skill.directoryName, oldName != slug {
+            let oldDir = skillsDirectory().appendingPathComponent(oldName)
+            let oldExists = FileManager.default.fileExists(atPath: oldDir.path)
+            let targetExists = FileManager.default.fileExists(atPath: skillDir.path)
+            if oldExists && !targetExists {
+                try? FileManager.default.moveItem(at: oldDir, to: skillDir)
+            } else if oldExists {
+                skillDir = oldDir
+            }
         }
-        let skillDir = skillsDirectory().appendingPathComponent(dirName)
 
         do {
             try FileManager.default.createDirectory(at: skillDir, withIntermediateDirectories: true)
@@ -264,8 +233,6 @@ public enum SkillStore {
         OsaurusPaths.skills()
     }
 
-    // MARK: - Path containment (upstream #1275)
-
     private static func writeSkillFile(_ content: Data, named name: String, in baseDirectory: URL) throws {
         let fileURL = try containedFileURL(for: name, in: baseDirectory)
         try createContainedParentDirectories(for: fileURL, in: baseDirectory)
@@ -374,7 +341,7 @@ public enum SkillStore {
                 version: parsed.version,
                 author: parsed.author,
                 category: parsed.category,
-                enabled: parsed.enabled,
+                keywords: parsed.keywords,
                 instructions: parsed.instructions,
                 isBuiltIn: parsed.isBuiltIn,
                 createdAt: parsed.createdAt,
@@ -390,8 +357,6 @@ public enum SkillStore {
         }
     }
 
-    // Upstream #1275: nested files are listed (relative to the skill
-    // folder) and symlinks are skipped.
     private static func loadFilesFromSubdirectory(_ skillDir: URL, subdirectory: String) -> [SkillFile] {
         let subDir = skillDir.appendingPathComponent(subdirectory)
         return loadFiles(in: subDir, relativeTo: skillDir)
@@ -450,19 +415,6 @@ public enum SkillStore {
             return nil
         }
         return fileComponents.dropFirst(baseComponents.count).joined(separator: "/")
-    }
-
-    private static func saveBuiltInState(_ skill: Skill) {
-        let dirName = ".\(skill.id.uuidString)"
-        let skillDir = skillsDirectory().appendingPathComponent(dirName)
-
-        do {
-            try FileManager.default.createDirectory(at: skillDir, withIntermediateDirectories: true)
-            let skillMdPath = skillDir.appendingPathComponent("SKILL.md")
-            try skill.toAgentSkillsFormatWithId().write(to: skillMdPath, atomically: true, encoding: .utf8)
-        } catch {
-            print("[Osaurus] Failed to save built-in skill state: \(error)")
-        }
     }
 
     private static func migrateOldFormat() {

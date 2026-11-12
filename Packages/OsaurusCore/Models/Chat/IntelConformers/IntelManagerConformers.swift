@@ -1045,7 +1045,7 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
     // M12 follow-up (Renée 2026-06-03): real per-agent capability management,
     // backing the un-body-swapped AgentCapabilityManagerView. Mirrors the real
     // AgentManager (Managers/AgentManager.swift): custom agents persist to their
-    // own `manualToolNames`/`manualSkillNames`/`toolSelectionMode`; the Default
+    // own `manualToolNames`/`toolSelectionMode`; the Default
     // (built-in) agent routes through the global ChatConfiguration. The chat
     // send path (composeChatContext) honors these so Manual mode actually
     // restricts the agent to its enabled tools.
@@ -1065,50 +1065,29 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         return agent.manualToolNames
     }
 
-    func effectiveEnabledSkillNames(for agentId: UUID) -> [String]? {
-        guard let agent = agent(for: agentId) else { return nil }
-        if agent.id == Agent.defaultId {
-            return ChatConfigurationStore.load().defaultManualSkillNames
-        }
-        return agent.manualSkillNames
-    }
-
-    /// Seed an agent's enabled set from the live registries the first time the
-    /// capability picker opens (idempotent — only writes when nil).
+    /// Seed an agent's enabled tool set from the live registry the first time
+    /// the capability picker opens (idempotent — only writes when nil).
+    /// Upstream #2050: skills are no longer seeded or allow-listed per agent;
+    /// every installed skill is universally available to custom agents.
     func seedEnabledCapabilitiesIfNeeded(
         for agentId: UUID,
-        defaultToolNames: [String],
-        defaultSkillNames: [String]
+        defaultToolNames: [String]
     ) {
         guard let agent = agent(for: agentId) else { return }
         if agent.id == Agent.defaultId {
             let config = ChatConfigurationStore.load()
-            var changed = false
             if config.defaultManualToolNames == nil {
                 config.defaultManualToolNames = defaultToolNames
-                changed = true
-            }
-            if config.defaultManualSkillNames == nil {
-                config.defaultManualSkillNames = defaultSkillNames
-                changed = true
-            }
-            if changed {
                 ChatConfigurationStore.save(config)
                 NotificationCenter.default.post(name: .agentUpdated, object: Agent.defaultId)
             }
             return
         }
-        var updated = agent
-        var changed = false
-        if updated.manualToolNames == nil {
+        if agent.manualToolNames == nil {
+            var updated = agent
             updated.manualToolNames = defaultToolNames
-            changed = true
+            update(updated)
         }
-        if updated.manualSkillNames == nil {
-            updated.manualSkillNames = defaultSkillNames
-            changed = true
-        }
-        if changed { update(updated) }
     }
 
     func updateEnabledToolNames(_ names: [String], for agentId: UUID) {
@@ -1121,19 +1100,6 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         }
         guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
         agent.manualToolNames = names
-        update(agent)
-    }
-
-    func updateEnabledSkillNames(_ names: [String], for agentId: UUID) {
-        if agentId == Agent.defaultId {
-            let config = ChatConfigurationStore.load()
-            config.defaultManualSkillNames = names
-            ChatConfigurationStore.save(config)
-            NotificationCenter.default.post(name: .agentUpdated, object: agentId)
-            return
-        }
-        guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
-        agent.manualSkillNames = names
         update(agent)
     }
 
@@ -1940,7 +1906,6 @@ final class ChatConfiguration: @unchecked Sendable {
     var fileHistoryRetention: FileHistoryRetention = .keepUntilChatDeleted
     var defaultToolSelectionMode: Any? = nil
     var defaultManualToolNames: [String]? = nil
-    var defaultManualSkillNames: [String]? = nil
 
     // Core (local) model picker — amputated on Intel.
     var coreModelProvider: String? = nil
@@ -1992,7 +1957,6 @@ final class ChatConfiguration: @unchecked Sendable {
         disableTools: Bool = false,
         defaultToolSelectionMode: Any? = nil,
         defaultManualToolNames: [String]? = nil,
-        defaultManualSkillNames: [String]? = nil,
         enableClipboardMonitoring: Bool = true,
         autoGenerateChatTitles: Bool = true,
         generateFollowUpSuggestions: Bool = true,
@@ -2017,7 +1981,6 @@ final class ChatConfiguration: @unchecked Sendable {
         self.disableTools = disableTools
         self.defaultToolSelectionMode = defaultToolSelectionMode
         self.defaultManualToolNames = defaultManualToolNames
-        self.defaultManualSkillNames = defaultManualSkillNames
         self.enableClipboardMonitoring = enableClipboardMonitoring
         self.autoGenerateChatTitles = autoGenerateChatTitles
         self.generateFollowUpSuggestions = generateFollowUpSuggestions
@@ -2046,7 +2009,6 @@ final class ChatConfiguration: @unchecked Sendable {
         self.disableTools = other.disableTools
         self.defaultToolSelectionMode = other.defaultToolSelectionMode
         self.defaultManualToolNames = other.defaultManualToolNames
-        self.defaultManualSkillNames = other.defaultManualSkillNames
         self.enableClipboardMonitoring = other.enableClipboardMonitoring
         self.autoGenerateChatTitles = other.autoGenerateChatTitles
         self.generateFollowUpSuggestions = other.generateFollowUpSuggestions
@@ -2089,7 +2051,6 @@ final class ChatConfiguration: @unchecked Sendable {
         var backfillAgentDescriptions: Bool? = nil
         var fileHistoryRetention: FileHistoryRetention? = nil
         var defaultManualToolNames: [String]? = nil
-        var defaultManualSkillNames: [String]? = nil
         var coreModelProvider: String? = nil
         var coreModelName: String? = nil
         var workTemperature: Float? = nil
@@ -2127,7 +2088,6 @@ final class ChatConfiguration: @unchecked Sendable {
         if let v = s.backfillAgentDescriptions { backfillAgentDescriptions = v }
         if let v = s.fileHistoryRetention { fileHistoryRetention = v }
         if let v = s.defaultManualToolNames { defaultManualToolNames = v }
-        if let v = s.defaultManualSkillNames { defaultManualSkillNames = v }
         if let v = s.coreModelProvider { coreModelProvider = v }
         if let v = s.coreModelName { coreModelName = v }
         if let v = s.workTemperature { workTemperature = v }
@@ -2157,7 +2117,6 @@ final class ChatConfiguration: @unchecked Sendable {
         s.backfillAgentDescriptions = backfillAgentDescriptions
         s.fileHistoryRetention = fileHistoryRetention
         s.defaultManualToolNames = defaultManualToolNames
-        s.defaultManualSkillNames = defaultManualSkillNames
         s.coreModelProvider = coreModelProvider
         s.coreModelName = coreModelName
         s.workTemperature = workTemperature

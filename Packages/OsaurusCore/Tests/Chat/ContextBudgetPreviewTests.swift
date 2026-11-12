@@ -345,18 +345,11 @@ struct ContextBudgetPreviewTests {
     /// discovered via `capabilities_discover` and pulled in via
     /// `capabilities_load`, never auto-injected into the system prompt
     /// at compose time. Both compose paths must omit the `skills`
-    /// section regardless of the agent's enabled-skills allowlist.
-    @Test("compose: no `skills` section, even when the agent has skills enabled")
+    /// section even though every installed skill is universally available
+    /// to custom agents (upstream #2050).
+    @Test("compose: no `skills` section, even though every skill is available")
     func bagOfSkills_neverInjected() async {
         await withAgent(toolSelectionMode: .auto) { agentId in
-            // Simulate the "all skills enabled" allowlist that the
-            // capability seeder used to write — exactly the state that
-            // produced the 55k Skills row in the original screenshot.
-            AgentManager.shared.updateEnabledSkillNames(
-                SkillManager.shared.skills.map(\.name),
-                for: agentId
-            )
-
             let preview = SystemPromptComposer.composePreviewContext(
                 agentId: agentId,
                 executionMode: .none

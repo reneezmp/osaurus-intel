@@ -1253,8 +1253,8 @@ struct SessionToolState: @unchecked Sendable {
 
 // `SkillsView` (un-body-swapped in M11 Phase 11.A.2) reads
 // `skillManager.skills`, `skillManager.isRefreshing`,
-// `skillManager.enabledCount`, and mutates via the full CRUD
-// surface — `create`, `update`, `delete`, `setEnabled`, `refresh`,
+// and mutates via the full CRUD
+// surface — `create`, `update`, `delete`, `refresh`,
 // `importSkill(from:)`, `importSkillFromMarkdown(_:)`,
 // `importSkillsFromMarkdown(_:)`, `importSkillFromZip(_:)`,
 // `exportSkillAsZip(_:)`. Extended in M11 Phase 11.A.2.0 to mirror
@@ -1271,8 +1271,6 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
 
     @Published private(set) var skills: [Skill] = []
     @Published private(set) var isRefreshing: Bool = false
-
-    var enabledCount: Int { skills.filter { $0.enabled }.count }
 
     private init() {
         Task { @MainActor in await refresh() }
@@ -1334,14 +1332,6 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
         return result
     }
 
-    func setEnabled(_ enabled: Bool, for id: UUID) async {
-        guard var skill = await SkillStore.load(id: id) else { return }
-        skill.enabled = enabled
-        skill.updatedAt = Date()
-        await SkillStore.save(skill)
-        await refresh()
-    }
-
     // MARK: - Plugin Skills (upstream, `W-plugin-reliability` stage 2e)
     //
     // Upstream's bodies minus `SkillSearchService` indexing, which Intel
@@ -1349,15 +1339,9 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
 
     /// Register a skill from a plugin. If a skill with the same pluginId and name already exists, update it.
     func registerPluginSkill(_ skill: Skill) async {
-        // Check if we already have a skill from this plugin with the same name
-        if let existing = skills.first(where: { $0.pluginId == skill.pluginId && $0.name == skill.name }) {
-            // Update existing skill but preserve enabled state
-            var updated = skill
-            updated.enabled = existing.enabled
-            await SkillStore.save(updated)
-        } else {
-            await SkillStore.save(skill)
-        }
+        // Upstream #2050: skills are a toggle-free library, so there is no
+        // enabled state to preserve across a plugin update.
+        await SkillStore.save(skill)
         await refresh()
     }
 
@@ -1395,7 +1379,6 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
             author: skill.author,
             category: skill.category,
             keywords: skill.keywords,
-            enabled: skill.enabled,
             instructions: skill.instructions
         )
         await SkillStore.save(skill)
@@ -1490,8 +1473,24 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
     /// skill loading never reached the model). Reads the refreshed list.
     func skill(for id: UUID) -> Skill? { skills.first { $0.id == id } }
 
+    /// Upstream #2050: case-insensitive name lookup with deterministic
+    /// collision resolution. Order: exact-case match, user-authored, built-in,
+    /// plugin-provided, then a stable id tiebreak — so `/name` and
+    /// `capabilities_load skill/<name>` always resolve the same skill.
     func skill(named name: String) -> Skill? {
-        skills(named: name).first
+        let matches = skills(named: name)
+        guard matches.count > 1 else { return matches.first }
+        func tier(_ s: Skill) -> Int {
+            if s.isFromPlugin { return 2 }
+            return s.isBuiltIn ? 1 : 0
+        }
+        return matches.min { a, b in
+            let aExact = a.name == name
+            let bExact = b.name == name
+            if aExact != bExact { return aExact }
+            if tier(a) != tier(b) { return tier(a) < tier(b) }
+            return a.id.uuidString < b.id.uuidString
+        }
     }
 
     /// Upstream `skills(named:)` (#2089): case-insensitive display name
