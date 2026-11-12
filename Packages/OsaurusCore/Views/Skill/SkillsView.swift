@@ -38,6 +38,9 @@ struct SkillsView: View {
     @State private var hasAppeared = false
     @State private var toastMessage: (text: String, isError: Bool)?
     @State private var showImportPicker = false
+    @State private var pendingOverwriteImportURL: URL?
+    @State private var pendingOverwriteSkillName = ""
+    @State private var showOverwriteConfirmation = false
     @State private var showGitHubImport = false
     @State private var searchText = ""
     @State private var selectedTab: SkillsTab = .all
@@ -248,6 +251,30 @@ struct SkillsView: View {
                 }
             )
         }
+        .alert(L("Replace Existing Skill?"), isPresented: $showOverwriteConfirmation) {
+            Button(L("Cancel"), role: .cancel) {
+                pendingOverwriteImportURL = nil
+                pendingOverwriteSkillName = ""
+            }
+            Button(L("Replace"), role: .destructive) {
+                guard let url = pendingOverwriteImportURL else { return }
+                pendingOverwriteImportURL = nil
+                pendingOverwriteSkillName = ""
+                Task { @MainActor in
+                    // The security scope from the picker ended with the first
+                    // attempt; reopen it for the retry.
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    await performSkillImport(from: url, overwriteExisting: true)
+                }
+            }
+        } message: {
+            Text(
+                L(
+                    "A skill named \"\(pendingOverwriteSkillName)\" already exists. Replacing it overwrites its SKILL.md, references, and assets."
+                )
+            )
+        }
         .onChange(of: isProcessing || skillManager.isRefreshing) { newValue in
             if newValue {
                 // Delay showing the progress bar to avoid flickering for fast operations
@@ -300,53 +327,61 @@ struct SkillsView: View {
 
     @MainActor
     private func handleImport(_ result: Result<[URL], Error>) async {
-        isProcessing = true
-        defer { isProcessing = false }
         switch result {
         case .success(let urls):
             guard let url = urls.first else { return }
-
-            do {
-                // Start accessing the security-scoped resource
-                guard url.startAccessingSecurityScopedResource() else {
-                    showToast(L("Cannot access file"), isError: true)
-                    return
-                }
-                defer { url.stopAccessingSecurityScopedResource() }
-
-                let ext = url.pathExtension.lowercased()
-
-                if ext == "zip" {
-                    // Import from ZIP archive (Agent Skills compatible)
-                    let skill = try await skillManager.importSkillFromZip(url)
-                    let fileCount = skill.totalFileCount
-                    if fileCount > 0 {
-                        showToast(L("Imported \"\(skill.name)\" with \(fileCount) files"))
-                    } else {
-                        showToast(L("Imported \"\(skill.name)\""))
-                    }
-                } else if ext == "json" {
-                    // Import from JSON
-                    let content = try String(contentsOf: url, encoding: .utf8)
-                    guard let data = content.data(using: .utf8) else {
-                        showToast(L("Invalid file content"), isError: true)
-                        return
-                    }
-                    let skill = try await skillManager.importSkill(from: data)
-                    showToast(L("Imported \"\(skill.name)\""))
-                } else {
-                    // Import from Markdown (SKILL.md or .md)
-                    let content = try String(contentsOf: url, encoding: .utf8)
-                    let skill = try await skillManager.importSkillFromMarkdown(content)
-                    showToast(L("Imported \"\(skill.name)\""))
-                }
-            } catch {
-                showToast(L("Import failed: \(error.localizedDescription)"), isError: true)
+            // Security-scoped access must last for the whole read / unzip.
+            guard url.startAccessingSecurityScopedResource() else {
+                showToast(L("Cannot access file"), isError: true)
+                return
             }
-
+            defer { url.stopAccessingSecurityScopedResource() }
+            await performSkillImport(from: url, overwriteExisting: false)
         case .failure(let error):
             showToast(L("Import failed: \(error.localizedDescription)"), isError: true)
         }
+    }
+
+    /// Upstream Classic's import flow: .zip bundles go through
+    /// `SkillImportPolicy`, a name collision asks before replacing, and the
+    /// import may hand back notes (ignored extra SKILL.md files).
+    @MainActor
+    private func performSkillImport(from url: URL, overwriteExisting: Bool) async {
+        isProcessing = true
+        defer { isProcessing = false }
+        do {
+            switch url.pathExtension.lowercased() {
+            case "zip":
+                let result = try await skillManager.importSkillFromZip(url, overwriteExisting: overwriteExisting)
+                showImportSuccess(for: result.skill, notes: result.notes)
+            case "json":
+                let data = try Data(contentsOf: url)
+                let skill = try await skillManager.importSkill(from: data)
+                showImportSuccess(for: skill, notes: [])
+            default:
+                // Read off the main thread so a large file can't hang the UI.
+                let content = try await Task.detached(priority: .userInitiated) {
+                    try String(contentsOf: url, encoding: .utf8)
+                }.value
+                let skill = try await skillManager.importSkillFromMarkdown(
+                    content,
+                    overwriteExisting: overwriteExisting
+                )
+                showImportSuccess(for: skill, notes: [])
+            }
+        } catch SkillFileError.skillAlreadyExists(let name) {
+            pendingOverwriteImportURL = url
+            pendingOverwriteSkillName = name
+            showOverwriteConfirmation = true
+        } catch {
+            showToast(L("Import failed: \(error.localizedDescription)"), isError: true)
+        }
+    }
+
+    @MainActor
+    private func showImportSuccess(for skill: Skill, notes: [String]) {
+        let note = notes.first.map { " \($0)" } ?? ""
+        showToast(L("Imported \"\(skill.name)\"") + note)
     }
 
     @MainActor

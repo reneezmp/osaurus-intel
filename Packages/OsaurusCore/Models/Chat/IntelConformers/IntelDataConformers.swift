@@ -1325,6 +1325,13 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
     /// started after every earlier one — has been published.
     private var lastRefresh: Task<Void, Never>?
 
+    // Upstream's bulk-mutation batching (`batchUpdates`): the Claude plugin
+    // installer saves many skills in a row, so per-save refreshes are
+    // suppressed and `skills` is reloaded once. State lives here because
+    // extensions can't hold stored properties.
+    var batchDepth = 0
+    var batchStagedSkills: [UUID: Skill] = [:]
+
     func refresh() async {
         let previous = lastRefresh
         let task = Task { @MainActor in
@@ -1385,7 +1392,7 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
         // Upstream #2050: skills are a toggle-free library, so there is no
         // enabled state to preserve across a plugin update.
         await SkillStore.save(skill)
-        await refresh()
+        await refreshUnlessBatching()
     }
 
     /// Remove all skills associated with a plugin
@@ -1395,126 +1402,22 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
             _ = await SkillStore.delete(id: id)
         }
         if !pluginSkillIds.isEmpty {
-            await refresh()
+            await refreshUnlessBatching()
         }
     }
 
-    // Import / export paths.
-    //
-    // The JSON / markdown / zip importers can be implemented on Intel
-    // because `SkillStore` + `Skill`'s Codable surface are both
-    // present. Only the GitHub-installer path lives in
-    // `Services/GitHubSkillService.swift` (excluded), so
-    // `importSkillsFromMarkdown(_:)` — which takes pre-fetched skill
-    // payloads from the GitHub sheet — is a no-op pass-through here
-    // because the sheet is `AppleSiliconOnlyTab` on Intel.
-
-    func importSkill(from data: Data) async throws -> Skill {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        var skill = try decoder.decode(Skill.self, from: data)
-        // New ID so an import doesn't collide with an existing skill.
-        skill = Skill(
-            id: UUID(),
-            name: skill.name,
-            description: skill.description,
-            version: skill.version,
-            author: skill.author,
-            category: skill.category,
-            keywords: skill.keywords,
-            instructions: skill.instructions
-        )
-        await SkillStore.save(skill)
-        await refresh()
-        return skill
-    }
-
-    func importSkillFromMarkdown(_ content: String) async throws -> Skill {
-        // Minimal Intel implementation — treats the whole markdown blob
-        // as the instructions body and derives a default name from the
-        // first H1 (or "Imported Skill" if absent). Upstream parses
-        // YAML frontmatter for richer metadata; Intel is intentionally
-        // simpler since the GitHub-importer (which produces the
-        // richest markdown) is amputated.
-        let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
-        let h1 = lines.first(where: { $0.hasPrefix("# ") }).map { String($0.dropFirst(2)) }
-        let skill = Skill(
-            name: h1 ?? "Imported Skill",
-            description: "",
-            instructions: content
-        )
-        await SkillStore.save(skill)
-        await refresh()
-        return skill
-    }
-
-    func importSkillsFromMarkdown(_ skills: [Skill]) async -> [Skill] {
-        // Used by `GitHubImportSheet.onImport` — on Intel the sheet
-        // is `AppleSiliconOnlyTab`, so this path is unreachable from
-        // the UI. Kept as a real implementation in case some other
-        // code path feeds skills in directly.
-        var imported: [Skill] = []
-        for skill in skills {
-            await SkillStore.save(skill)
-            imported.append(skill)
-        }
-        await refresh()
-        return imported
-    }
-
-    func importSkillFromZip(_ zipURL: URL) async throws -> Skill {
-        // Zip import depends on excluded archiver utilities; surface
-        // a clear runtime error rather than silently no-op so the
-        // caller's toast shows useful text.
-        throw NSError(
-            domain: "SkillManager",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "Skill .zip import is unavailable on Intel."]
-        )
-    }
-
-    func exportSkillAsZip(_ skill: Skill) async throws -> URL {
-        // Same constraint as import — zip path requires the excluded
-        // archive utilities.
-        throw NSError(
-            domain: "SkillManager",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "Skill .zip export is unavailable on Intel."]
-        )
-    }
-
-    /// Export a skill as a SKILL.md document following the Agent Skills
-    /// spec (https://agentskills.io/specification). Used by
-    /// SkillsView's "Export" → "as SKILL.md" affordance. The format
-    /// is a YAML frontmatter block followed by the instructions body.
-    func exportSkillAsAgentSkills(_ skill: Skill) -> String {
-        var lines: [String] = []
-        lines.append("---")
-        lines.append("name: \(skill.name)")
-        if !skill.description.isEmpty {
-            lines.append("description: \(skill.description)")
-        }
-        lines.append("version: \(skill.version)")
-        if let author = skill.author, !author.isEmpty {
-            lines.append("author: \(author)")
-        }
-        if let category = skill.category, !category.isEmpty {
-            lines.append("category: \(category)")
-        }
-        if !skill.keywords.isEmpty {
-            lines.append("keywords: [\(skill.keywords.joined(separator: ", "))]")
-        }
-        lines.append("---")
-        lines.append("")
-        lines.append(skill.instructions)
-        return lines.joined(separator: "\n")
-    }
+    // Import / export (JSON, markdown, .zip, directory install, file
+    // attachments) live in `Managers/SkillManager+Import.swift`, ported from
+    // upstream Classic's `SkillManager` (`W-skills-plugins-import`).
 
     // Legacy chat-side overloads (unchanged surface for
     // FloatingInputCard's slash popup).
     /// Intel: real lookups (these returned nil, so a slash-selected skill and
     /// skill loading never reached the model). Reads the refreshed list.
-    func skill(for id: UUID) -> Skill? { skills.first { $0.id == id } }
+    func skill(for id: UUID) -> Skill? {
+        if isBatching, let staged = batchStagedSkills[id] { return staged }
+        return skills.first { $0.id == id }
+    }
 
     /// Upstream #2050: case-insensitive name lookup with deterministic
     /// collision resolution. Order: exact-case match, user-authored, built-in,
