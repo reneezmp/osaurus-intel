@@ -17,7 +17,12 @@
 //    `cache_control` (1 h after a human turn, 5 m after a tool result).
 //  - `IntelAnthropicSSETranslator` turns Messages stream events into OpenAI
 //    `data:` chunk lines (text, `reasoning_content` from thinking, streamed
-//    `tool_calls`, a final usage frame, `[DONE]`).
+//    `tool_calls`, a final usage frame, `[DONE]`). It also keeps each
+//    `thinking` / `redacted_thinking` block whole, with its signature, and
+//    hands it on as an `anthropic_thinking_block` delta field; `makeRequest`
+//    replays those blocks ahead of the assistant's text and tool calls
+//    (upstream `RemoteAnthropicNativeStream` / `anthropic_thinking_blocks`,
+//    #3203; `W-anthropic-thinking-replay`).
 //
 
 import Foundation
@@ -88,7 +93,9 @@ enum IntelAnthropicMessagesAdapter {
                 }
             case "assistant":
                 flush()
-                var blocks: [[String: Any]] = []
+                // Signed thinking goes back first, as upstream's
+                // `toAnthropicRequest` does.
+                var blocks: [[String: Any]] = replayableThinkingBlocks(of: message["anthropic_thinking_blocks"])
                 if let text = text(of: message["content"]), hasMeaningfulText(text) {
                     blocks.append(["type": "text", "text": text])
                 }
@@ -192,6 +199,56 @@ enum IntelAnthropicMessagesAdapter {
         return request
     }
 
+    // MARK: - Thinking blocks
+
+    /// The `thinking` / `redacted_thinking` blocks of a wire message, in the
+    /// shape the Messages API takes back. Upstream decodes each stored block
+    /// as an `AnthropicContentBlock` and keeps only those two cases. Intel
+    /// also drops a `thinking` block that has no signature: the API refuses
+    /// an unsigned one, which would fail the whole request.
+    static func replayableThinkingBlocks(of raw: Any?) -> [[String: Any]] {
+        guard let blocks = raw as? [[String: Any]] else { return [] }
+        return blocks.filter { block in
+            switch block["type"] as? String {
+            case "thinking":
+                return (block["signature"] as? String)?.isEmpty == false
+                    && block["thinking"] is String
+            case "redacted_thinking":
+                return block["data"] is String
+            default:
+                return false
+            }
+        }
+    }
+
+    /// `JSONValue` blocks (as stored on a turn or a `ChatMessage`) as wire
+    /// dictionaries.
+    static func wireThinkingBlocks(_ blocks: [JSONValue]?) -> [[String: Any]] {
+        (blocks ?? []).compactMap { block in
+            guard case .object = block, let data = try? JSONEncoder().encode(block) else { return nil }
+            return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        }
+    }
+
+    /// A wire thinking block as a `JSONValue`.
+    static func jsonValue(ofThinkingBlock block: [String: Any]) -> JSONValue? {
+        guard JSONSerialization.isValidJSONObject(block),
+            let data = try? JSONSerialization.data(withJSONObject: block)
+        else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: data)
+    }
+
+    /// `messages` with the Anthropic-only `anthropic_thinking_blocks` field
+    /// removed, for wires that would reject an unknown key.
+    static func strippingThinkingBlocks(_ messages: [[String: Any]]) -> [[String: Any]] {
+        messages.map { message in
+            guard message["anthropic_thinking_blocks"] != nil else { return message }
+            var copy = message
+            copy.removeValue(forKey: "anthropic_thinking_blocks")
+            return copy
+        }
+    }
+
     // MARK: - Content helpers
 
     /// Text of a chat `content` value: the string, or its text parts joined.
@@ -239,6 +296,10 @@ struct IntelAnthropicSSETranslator {
     private var toolIndexByBlock: [Int: Int] = [:]
     private var inputTokens = 0
     private var outputTokens = 0
+    /// Content-block index → the `thinking` / `redacted_thinking` block being
+    /// assembled (text and `signature_delta` accumulate on it).
+    private var thinkingByBlock: [Int: [String: Any]] = [:]
+    private var emittedThinking: Set<Int> = []
 
     /// Feed one raw SSE line; returns the OpenAI lines it produces.
     mutating func translate(_ line: String) throws -> [String] {
@@ -264,6 +325,15 @@ struct IntelAnthropicSSETranslator {
             }
             return []
         case "content_block_start":
+            if let index = event["index"] as? Int, let block = event["content_block"] as? [String: Any],
+                ["thinking", "redacted_thinking"].contains(block["type"] as? String)
+            {
+                thinkingByBlock[index] = block
+                if let thinking = block["thinking"] as? String, !thinking.isEmpty {
+                    return [Self.chunk(delta: ["reasoning_content": thinking])]
+                }
+                return []
+            }
             guard let index = event["index"] as? Int, let block = event["content_block"] as? [String: Any],
                 block["type"] as? String == "tool_use"
             else { return [] }
@@ -287,7 +357,19 @@ struct IntelAnthropicSSETranslator {
                 return [Self.chunk(delta: ["content": text])]
             case "thinking_delta":
                 guard let thinking = delta["thinking"] as? String, !thinking.isEmpty else { return [] }
+                if let index = event["index"] as? Int {
+                    var block = thinkingByBlock[index] ?? ["type": "thinking"]
+                    block["thinking"] = (block["thinking"] as? String ?? "") + thinking
+                    thinkingByBlock[index] = block
+                }
                 return [Self.chunk(delta: ["reasoning_content": thinking])]
+            case "signature_delta":
+                guard let index = event["index"] as? Int, let signature = delta["signature"] as? String
+                else { return [] }
+                var block = thinkingByBlock[index] ?? ["type": "thinking"]
+                block["signature"] = (block["signature"] as? String ?? "") + signature
+                thinkingByBlock[index] = block
+                return []
             case "input_json_delta":
                 guard let index = event["index"] as? Int, let toolIndex = toolIndexByBlock[index],
                     let partial = delta["partial_json"] as? String, !partial.isEmpty
@@ -296,6 +378,9 @@ struct IntelAnthropicSSETranslator {
             default:
                 return []
             }
+        case "content_block_stop":
+            guard let index = event["index"] as? Int else { return [] }
+            return emitThinking(index)
         case "message_delta":
             if let usage = event["usage"] as? [String: Any], let output = usage["output_tokens"] as? Int {
                 outputTokens = output
@@ -307,7 +392,10 @@ struct IntelAnthropicSSETranslator {
             }
             return []
         case "message_stop":
-            return [
+            // Any block whose stop event never came (upstream flushes the
+            // rest here).
+            let leftovers = thinkingByBlock.keys.sorted().flatMap { emitThinking($0) }
+            return leftovers + [
                 Self.line([
                     "usage": ["prompt_tokens": inputTokens, "completion_tokens": outputTokens]
                 ]),
@@ -322,6 +410,13 @@ struct IntelAnthropicSSETranslator {
         }
     }
 
+    /// The finished thinking block at `index`, once, as an
+    /// `anthropic_thinking_block` delta field.
+    private mutating func emitThinking(_ index: Int) -> [String] {
+        guard let block = thinkingByBlock[index], emittedThinking.insert(index).inserted else { return [] }
+        return [Self.chunk(delta: ["anthropic_thinking_block": block])]
+    }
+
     private static func chunk(delta: [String: Any]) -> String {
         line(["choices": [["index": 0, "delta": delta]]])
     }
@@ -329,5 +424,24 @@ struct IntelAnthropicSSETranslator {
     private static func line(_ object: [String: Any]) -> String {
         let data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data("{}".utf8)
         return "data: " + String(decoding: data, as: UTF8.self)
+    }
+}
+
+/// In-band hand-off of a captured Anthropic thinking block from the cloud
+/// engine to the chat, on the same `\u{FFFE}` sentinel as the other hints so
+/// generic filters drop it from visible text. The chat stores the block on
+/// the assistant turn (`ChatTurn.anthropicThinkingBlocks`) and sends it back
+/// with the turn on the next request.
+enum StreamingAnthropicThinkingHint: Sendable {
+    private static let prefix = "\u{FFFE}anthropic-thinking:"
+
+    static func encode(_ block: JSONValue) -> String {
+        let data = (try? JSONEncoder().encode(block)) ?? Data("{}".utf8)
+        return prefix + String(decoding: data, as: UTF8.self)
+    }
+
+    static func decode(_ delta: String) -> JSONValue? {
+        guard delta.hasPrefix(prefix) else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: Data(delta.dropFirst(prefix.count).utf8))
     }
 }

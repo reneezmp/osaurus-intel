@@ -63,12 +63,13 @@ enum RemoteSessionContinuation {
         case .assistant:
             let blank = turn.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let hasCalls = !(turn.toolCalls?.isEmpty ?? true)
-            guard !blank || !turn.thinking.isEmpty || hasCalls else { return nil }
+            guard !blank || !turn.thinking.isEmpty || hasCalls || !turn.anthropicThinkingBlocks.isEmpty else { return nil }
             return ChatMessage(
                 role: "assistant",
                 content: blank ? nil : turn.content,
                 tool_calls: hasCalls ? turn.toolCalls : nil,
-                reasoning_content: turn.thinking.isEmpty ? nil : turn.thinking
+                reasoning_content: turn.thinking.isEmpty ? nil : turn.thinking,
+                anthropic_thinking_blocks: turn.anthropicThinkingBlocks.isEmpty ? nil : turn.anthropicThinkingBlocks
             )
         case .tool:
             return ChatMessage(role: "tool", content: turn.content, tool_call_id: turn.toolCallId)

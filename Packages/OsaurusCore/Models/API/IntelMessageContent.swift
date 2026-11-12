@@ -131,7 +131,8 @@ extension ChatMessage {
             tool_calls: tool_calls,
             tool_call_id: tool_call_id,
             reasoning_content: reasoning_content,
-            contentParts: parts
+            contentParts: parts,
+            anthropic_thinking_blocks: anthropic_thinking_blocks
         )
     }
 }

@@ -23,16 +23,23 @@ struct ChatMessage: Codable, Sendable {
     /// Multimodal parts (upstream): set when the message carries images,
     /// audio or video. `content` keeps the joined text.
     var contentParts: [MessageContentPart]? = nil
+    /// Anthropic `thinking` / `redacted_thinking` blocks (with their
+    /// signatures) from this assistant turn, replayed on the next request so
+    /// extended thinking survives a tool loop (upstream #3203,
+    /// `W-anthropic-thinking-replay`).
+    var anthropic_thinking_blocks: [JSONValue]? = nil
 
     init(role: String, content: String? = nil, tool_calls: [ToolCall]? = nil,
          tool_call_id: String? = nil, reasoning_content: String? = nil,
-         contentParts: [MessageContentPart]? = nil) {
+         contentParts: [MessageContentPart]? = nil,
+         anthropic_thinking_blocks: [JSONValue]? = nil) {
         self.role = role
         self.content = content
         self.tool_calls = tool_calls
         self.tool_call_id = tool_call_id
         self.reasoning_content = reasoning_content
         self.contentParts = contentParts
+        self.anthropic_thinking_blocks = anthropic_thinking_blocks
     }
 
     /// Image URLs carried by the parts (data: or http(s):), upstream.
@@ -54,7 +61,7 @@ struct ChatMessage: Codable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case role, content, tool_calls, tool_call_id, reasoning_content
+        case role, content, tool_calls, tool_call_id, reasoning_content, anthropic_thinking_blocks
     }
 
     /// Upstream: `content` may be a string or an OpenAI array of parts.
@@ -64,6 +71,7 @@ struct ChatMessage: Codable, Sendable {
         self.tool_calls = try? container.decode([ToolCall].self, forKey: .tool_calls)
         self.tool_call_id = try? container.decode(String.self, forKey: .tool_call_id)
         self.reasoning_content = try? container.decode(String.self, forKey: .reasoning_content)
+        self.anthropic_thinking_blocks = try? container.decode([JSONValue].self, forKey: .anthropic_thinking_blocks)
         if let stringContent = try? container.decode(String.self, forKey: .content) {
             self.content = stringContent
             self.contentParts = nil
@@ -92,6 +100,7 @@ struct ChatMessage: Codable, Sendable {
         try container.encodeIfPresent(tool_calls, forKey: .tool_calls)
         try container.encodeIfPresent(tool_call_id, forKey: .tool_call_id)
         try container.encodeIfPresent(reasoning_content, forKey: .reasoning_content)
+        try container.encodeIfPresent(anthropic_thinking_blocks, forKey: .anthropic_thinking_blocks)
     }
 }
 

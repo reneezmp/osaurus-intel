@@ -120,7 +120,9 @@ struct IntelAnthropicMessagesAdapterTests {
             ((delta($0)?["tool_calls"] as? [[String: Any]])?.first?["function"] as? [String: Any])?["arguments"] as? String
         }
         #expect(args.joined() == #"{"city":"Paris"}"#)
-        let usage = try #require(frames[5]["usage"] as? [String: Any])
+        // frames[5]: the thinking block, flushed at message_stop
+        // (W-anthropic-thinking-replay); usage follows it.
+        let usage = try #require(frames[6]["usage"] as? [String: Any])
         #expect(usage["prompt_tokens"] as? Int == 100)
         #expect(usage["completion_tokens"] as? Int == 42)
         #expect(lines.last == "data: [DONE]")

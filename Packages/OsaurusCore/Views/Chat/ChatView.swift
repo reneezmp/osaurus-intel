@@ -3254,6 +3254,10 @@ final class ChatSession: ObservableObject {
                     // the run can't silently drop a billed-but-empty turn and
                     // so the bubble can explain the charge; never shown as text.
                     recordRouterBilling(billing, on: currentTurn)
+                } else if let block = StreamingAnthropicThinkingHint.decode(delta) {
+                    // A signed thinking block: not visible text. Keep it on
+                    // the turn so the next request replays it.
+                    currentTurn.anthropicThinkingBlocks.append(block)
                 } else if let reasoning = StreamingReasoningHint.decode(delta) {
                     let now = Date()
                     if firstDeltaTime == nil {
@@ -3647,11 +3651,15 @@ final class ChatSession: ObservableObject {
                         // visible but never re-enters model history.
                         if t.modelContextExcluded { return nil }
                         // Skip the last assistant turn if it's empty (it's the streaming placeholder)
-                        if isLastTurn && t.contentIsBlank && t.thinkingIsBlank && t.toolCalls == nil {
+                        if isLastTurn && t.contentIsBlank && t.thinkingIsBlank && t.toolCalls == nil
+                            && t.anthropicThinkingBlocks.isEmpty
+                        {
                             return nil
                         }
 
-                        if t.contentIsBlank && t.thinkingIsBlank && (t.toolCalls == nil || t.toolCalls!.isEmpty) {
+                        if t.contentIsBlank && t.thinkingIsBlank && t.anthropicThinkingBlocks.isEmpty
+                            && (t.toolCalls == nil || t.toolCalls!.isEmpty)
+                        {
                             return nil
                         }
 
@@ -3667,7 +3675,9 @@ final class ChatSession: ObservableObject {
                             content: content,
                             tool_calls: t.toolCalls,
                             tool_call_id: nil,
-                            reasoning_content: reasoning
+                            reasoning_content: reasoning,
+                            anthropic_thinking_blocks: t.anthropicThinkingBlocks.isEmpty
+                                ? nil : t.anthropicThinkingBlocks
                         )
                     case .tool:
                         return ChatMessage(

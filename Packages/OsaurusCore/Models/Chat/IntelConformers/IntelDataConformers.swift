@@ -121,6 +121,10 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     /// token to the first content/tool that follows. Drives "Thought for
     /// 30s"; persisted.
     @Published var thinkingDuration: TimeInterval?
+    /// Anthropic `thinking` / `redacted_thinking` blocks with their
+    /// signatures, kept whole so the next request can replay them (upstream
+    /// #3203; persisted with the turn).
+    var anthropicThinkingBlocks: [JSONValue] = []
     private var thinkingStartedAt: Date?
     private var accumulatedThinkingDuration: TimeInterval = 0
     private var pendingToolStartedAt: Date?
@@ -222,6 +226,8 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
             (turn as? ChatTurnData)?.toolCallDurations ?? (turn as? ChatTurn)?.toolCallDurations ?? [:]
         self.thinkingDuration =
             (turn as? ChatTurnData)?.thinkingDuration ?? (turn as? ChatTurn)?.thinkingDuration
+        self.anthropicThinkingBlocks =
+            (turn as? ChatTurnData)?.anthropicThinkingBlocks ?? (turn as? ChatTurn)?.anthropicThinkingBlocks ?? []
     }
 
     func appendContent(_ s: String) {
@@ -763,6 +769,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
     var injectedContextPrefix: String?
     var toolCallDurations: [String: TimeInterval] = [:]
     var thinkingDuration: TimeInterval?
+    var anthropicThinkingBlocks: [JSONValue] = []
 
     var turnId: UUID? { id }
     var imageData: Data? { nil }
@@ -801,6 +808,8 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
             (turn as? ChatTurn)?.toolCallDurations ?? (turn as? ChatTurnData)?.toolCallDurations ?? [:]
         self.thinkingDuration =
             (turn as? ChatTurn)?.thinkingDuration ?? (turn as? ChatTurnData)?.thinkingDuration
+        self.anthropicThinkingBlocks =
+            (turn as? ChatTurn)?.anthropicThinkingBlocks ?? (turn as? ChatTurnData)?.anthropicThinkingBlocks ?? []
     }
 
     static func == (lhs: ChatTurnData, rhs: ChatTurnData) -> Bool {
@@ -865,6 +874,7 @@ extension ChatTurnData: Codable {
         case terminalStopReason
         case injectedContextPrefix
         case toolCallDurations, thinkingDuration
+        case anthropicThinkingBlocks
     }
 
     init(from decoder: Decoder) throws {
@@ -893,6 +903,8 @@ extension ChatTurnData: Codable {
         self.toolCallDurations =
             (try? c.decodeIfPresent([String: TimeInterval].self, forKey: .toolCallDurations)) ?? [:]
         self.thinkingDuration = try? c.decodeIfPresent(TimeInterval.self, forKey: .thinkingDuration)
+        self.anthropicThinkingBlocks =
+            (try? c.decodeIfPresent([JSONValue].self, forKey: .anthropicThinkingBlocks)) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -917,6 +929,7 @@ extension ChatTurnData: Codable {
         try c.encodeIfPresent(injectedContextPrefix, forKey: .injectedContextPrefix)
         if !toolCallDurations.isEmpty { try c.encode(toolCallDurations, forKey: .toolCallDurations) }
         try c.encodeIfPresent(thinkingDuration, forKey: .thinkingDuration)
+        if !anthropicThinkingBlocks.isEmpty { try c.encode(anthropicThinkingBlocks, forKey: .anthropicThinkingBlocks) }
     }
 }
 

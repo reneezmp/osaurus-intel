@@ -515,6 +515,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             }
         }
         if let tcid = msg.tool_call_id { m["tool_call_id"] = tcid }
+        // Signed Anthropic thinking from an earlier turn; the Anthropic
+        // adapter replays it, other wires drop it (see `streamChat`).
+        let thinking = IntelAnthropicMessagesAdapter.wireThinkingBlocks(msg.anthropic_thinking_blocks)
+        if !thinking.isEmpty { m["anthropic_thinking_blocks"] = thinking }
         return m
     }
 
@@ -1459,6 +1463,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         : request.modelOptions?["reasoningEffort"]?.stringValue)
                             } else if endpoint.usesGeminiWire {
                                 body = try IntelGeminiAdapter.makeRequest(chatCompletions: body)
+                            } else if let wireMessages = body["messages"] as? [[String: Any]] {
+                                // Anthropic-only field; other chat wires may reject it.
+                                body["messages"] = IntelAnthropicMessagesAdapter.strippingThinkingBlocks(wireMessages)
                             }
                         }
 
@@ -1549,6 +1556,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         }
 
                         var assistantContent = ""
+                        // Anthropic thinking blocks this round, replayed on the
+                        // echoed assistant message (`W-anthropic-thinking-replay`).
+                        var roundThinkingBlocks: [[String: Any]] = []
                         var partials: [Int: PartialToolCall] = [:]
                         // The round's finish reason (upstream #2108): `length`
                         // with tool calls pending means the arguments were cut.
@@ -1948,6 +1958,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     continue
                                 }
 
+                                if let block = delta["anthropic_thinking_block"] as? [String: Any] {
+                                    roundThinkingBlocks.append(block)
+                                    if let value = IntelAnthropicMessagesAdapter.jsonValue(ofThinkingBlock: block) {
+                                        continuation.yield(StreamingAnthropicThinkingHint.encode(value))
+                                    }
+                                }
                                 if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
                                     totalChunks += 1
                                     noteReasoning(reasoning)
@@ -2075,7 +2091,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         }
                         toolWorkThisRun = true
                         terminalRecovery.noteToolRound()
-                        wireMessages.append([
+                        var echoedAssistant: [String: Any] = [
                             "role": "assistant",
                             "content": assistantContent,
                             "tool_calls": orderedCalls.map { call -> [String: Any] in
@@ -2089,7 +2105,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 }
                                 return echoed
                             },
-                        ])
+                        ]
+                        if !roundThinkingBlocks.isEmpty {
+                            echoedAssistant["anthropic_thinking_blocks"] = roundThinkingBlocks
+                        }
+                        wireMessages.append(echoedAssistant)
 
                         // Execute each tool, surface the result card, and feed
                         // the result back as a tool message.
