@@ -173,6 +173,10 @@ struct CapabilityCatalog: Sendable {
         var keywords: [String] = []
         /// The skill's folder name, for slug lookups.
         var directoryName: String? = nil
+        /// The plugin that ships this skill (`Skill.pluginId`), for the
+        /// manifest's per-plugin grouping and `skillsGovern` (upstream's
+        /// `deriveEnabledManifest`).
+        var pluginId: String? = nil
     }
 
     struct Group: Sendable, Equatable {
@@ -232,7 +236,8 @@ struct CapabilityCatalog: Sendable {
             .map {
                 SkillItem(
                     name: $0.name, description: oneLine($0.description),
-                    keywords: $0.keywords, directoryName: $0.directoryName)
+                    keywords: $0.keywords, directoryName: $0.directoryName,
+                    pluginId: $0.pluginId)
             }
 
         let groups = groupOrder.compactMap { groupsById[$0] }
@@ -431,69 +436,71 @@ final class NSLockedValue<Value>: @unchecked Sendable {
 
 // MARK: - Manifest
 
-/// The "Enabled capabilities" prompt section (upstream
-/// `SystemPromptTemplates.enabledCapabilitiesManifest`, verbose form, with
-/// the `capabilities` gateway names) and the discovery guidance.
+/// The "Enabled capabilities" prompt section: upstream's
+/// `deriveEnabledManifest` grouping rendered by upstream's
+/// `SystemPromptTemplates.enabledCapabilitiesManifest` (verbose form, the
+/// `capabilities` gateway names), plus the discovery guidance.
 enum CapabilityManifest {
-    static let toolCap = 70
-    static let skillCap = 30
+    static let toolCap = SystemPromptTemplates.enabledManifestToolCap
+    static let skillCap = SystemPromptTemplates.enabledManifestSkillCap
 
-    static func render(_ catalog: CapabilityCatalog) -> String? {
-        guard !catalog.isEmpty else { return nil }
-        var blocks: [String] = []
-        var toolLines = 0
-
-        func toolLine(_ tool: CapabilityCatalog.ToolItem) -> String {
-            "  tool/\(tool.name) — \(tool.description.isEmpty ? "(no description)" : tool.description)"
-        }
-
+    /// Upstream `deriveEnabledManifest`: plugin groups sorted by group id,
+    /// skills before tools inside a group (a plugin's skill lands in its
+    /// plugin's group), tools and skills alphabetical, then "Other enabled
+    /// tools" and a trailing "Skills (no plugin)" group.
+    @MainActor
+    static func groups(_ catalog: CapabilityCatalog) -> [SystemPromptTemplates.ManifestPluginGroup] {
+        typealias Cap = SystemPromptTemplates.ManifestCapability
+        var toolsByGroup: [String: [Cap]] = [:]
+        var display: [String: String] = [:]
         for group in catalog.groups {
-            let remaining = max(toolCap - toolLines, 0)
-            var lines = ["<plugin: \(group.display)> (load all: plugin/\(group.id))"]
-            let shown = Array(group.tools.prefix(remaining))
-            toolLines += shown.count
-            lines.append(contentsOf: shown.map(toolLine))
-            if group.tools.count > shown.count {
-                lines.append("  +\(group.tools.count - shown.count) more tool(s) — search with `capabilities` to list them.")
+            display[group.id] = group.display
+            toolsByGroup[group.id] = group.tools.map { Cap(name: $0.name, description: $0.description) }
+        }
+        var skillsByGroup: [String: [Cap]] = [:]
+        var standalone: [Cap] = []
+        for skill in catalog.skills {
+            let cap = Cap(name: skill.name, description: skill.description)
+            if let pluginId = skill.pluginId, !pluginId.isEmpty {
+                // Intel groups tools by plugin display name; map the skill's
+                // plugin id onto that group (display name, slug, or id).
+                let name = PluginManager.shared.loadedPlugin(for: pluginId)?.plugin.manifest.name
+                let candidates = [name, pluginId].compactMap { $0 }.map(CapabilityCatalog.slug)
+                let groupId = candidates.first(where: { display[$0] != nil }) ?? CapabilityCatalog.slug(name ?? pluginId)
+                if display[groupId] == nil { display[groupId] = name ?? pluginId }
+                skillsByGroup[groupId, default: []].append(cap)
+            } else {
+                standalone.append(cap)
             }
-            blocks.append(lines.joined(separator: "\n"))
+        }
+        var result = Set(toolsByGroup.keys).union(skillsByGroup.keys).sorted().map { id in
+            SystemPromptTemplates.ManifestPluginGroup(
+                groupId: id,
+                pluginDisplay: display[id] ?? id,
+                skills: (skillsByGroup[id] ?? []).sorted { $0.name < $1.name },
+                tools: (toolsByGroup[id] ?? []).sorted { $0.name < $1.name }
+            )
         }
         let ungrouped = catalog.tools.filter { $0.groupId == nil }
+            .map { Cap(name: $0.name, description: $0.description) }
         if !ungrouped.isEmpty {
-            let remaining = max(toolCap - toolLines, 0)
-            let shown = Array(ungrouped.prefix(remaining))
-            var lines = ["<other tools>"]
-            lines.append(contentsOf: shown.map(toolLine))
-            if ungrouped.count > shown.count {
-                lines.append("  +\(ungrouped.count - shown.count) more tool(s) — search with `capabilities` to list them.")
-            }
-            blocks.append(lines.joined(separator: "\n"))
+            result.append(
+                .init(pluginDisplay: "Other enabled tools", skills: [], tools: ungrouped.sorted { $0.name < $1.name }))
         }
-        if !catalog.skills.isEmpty {
-            let shown = Array(catalog.skills.prefix(skillCap))
-            var lines = ["<skills>"]
-            lines.append(
-                contentsOf: shown.map { "  skill/\($0.name) — \($0.description.isEmpty ? "Skill." : $0.description)" })
-            if catalog.skills.count > shown.count {
-                lines.append("  +\(catalog.skills.count - shown.count) more skill(s) — search with `capabilities` to list them.")
-            }
-            blocks.append(lines.joined(separator: "\n"))
+        if !standalone.isEmpty {
+            result.append(
+                .init(pluginDisplay: "Skills (no plugin)", skills: standalone.sorted { $0.name < $1.name }, tools: []))
         }
+        return result
+    }
 
-        let intro = """
-            ## Enabled capabilities
-
-            These capabilities are enabled for this session. Each line begins \
-            with a capability id, not a callable function name; they must be \
-            loaded before use. To load one, call `capabilities` with its id \
-            exactly as shown (e.g. `capabilities({"ids": ["tool/<name>"]})`); \
-            `plugin/<id>` loads that whole group. Loaded tools are callable from \
-            your next step on. Capabilities installed after this list was written \
-            are still found by searching with `capabilities` — use search only \
-            when no exact listed id fits, and check it before declaring something \
-            unavailable.
-            """
-        return intro + "\n\n" + blocks.joined(separator: "\n")
+    /// The rendered section, or nil. Upstream emits it only when at least
+    /// one assigned dynamic tool exists (skills alone never produce it).
+    @MainActor
+    static func render(_ catalog: CapabilityCatalog) -> String? {
+        let groups = groups(catalog)
+        guard groups.contains(where: { !$0.tools.isEmpty }) else { return nil }
+        return SystemPromptTemplates.enabledCapabilitiesManifest(groups: groups)
     }
 
     /// Upstream's discovery nudge and capability-claim grounding, for the

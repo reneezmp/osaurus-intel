@@ -1370,12 +1370,15 @@ final class ChatSession: ObservableObject {
     /// earlier exchange (the block used to move to whichever user message
     /// was newest and vanish from the one before). A regenerated turn keeps
     /// its original bytes.
-    func freezeInjectedContextOntoLatestUserTurn(memorySection: String?, now: Date = Date()) {
+    func freezeInjectedContextOntoLatestUserTurn(
+        memorySection: String?, automationContext: String? = nil, now: Date = Date()
+    ) {
         guard let turn = turns.last(where: { $0.role == .user }) else { return }
         guard turn.injectedContextPrefix == nil else { return }
         guard
             let prefix = SystemPromptComposer.composeInjectedUserPrefix(
                 memorySection: memorySection,
+                automationContext: automationContext,
                 timeContext: SystemPromptTemplates.timeContext(now: now, timeZone: .current)
             )
         else { return }
@@ -3554,10 +3557,21 @@ final class ChatSession: ObservableObject {
                         key,
                         liveFingerprint: liveFingerprint
                     )
+                    // Upstream: a grant or catalog edit keeps the tools this
+                    // chat already loaded (the composer re-filters them
+                    // against the live grant).
+                    await SessionToolStateStore.shared.reconcileToolGrants(
+                        key,
+                        current: SessionToolStateStore.ToolGrantSnapshot.current(agentId: effectiveAgentId)
+                    )
                     cachedSession = await SessionToolStateStore.shared.get(key)
                 } else {
                     cachedSession = nil
                 }
+                // Upstream: wait for the first plugin catalog scan so the
+                // first manifest sees the installed plugins.
+                await PluginManager.shared.ensurePromptCatalogReady()
+                guard isRunActive(runId) else { return }
                 // A restored session may still be rebuilding its folder tree.
                 // Wait before composing so the first turn cannot silently run
                 // without its project/chat working folder.
@@ -3589,7 +3603,15 @@ final class ChatSession: ObservableObject {
 
                 // Upstream #1798: memory and time ride the user turn they
                 // were first sent with, frozen, before any message is built.
-                freezeInjectedContextOntoLatestUserTurn(memorySection: context.memorySection)
+                // Upstream: the working app rides along only when `applescript`
+                // is in the schema.
+                let automationContext =
+                    context.tools.contains(where: { $0.function.name == "applescript" })
+                    ? SystemPromptComposer.appleScriptWorkingAppContext(
+                        appName: FrontmostAppTracker.shared.lastNonSelfAppName)
+                    : nil
+                freezeInjectedContextOntoLatestUserTurn(
+                    memorySection: context.memorySection, automationContext: automationContext)
 
                 var sys = context.prompt
 
@@ -3609,7 +3631,11 @@ final class ChatSession: ObservableObject {
                         agentId: agentId
                     )
                 {
-                    sys = sys.isEmpty ? pluginInstructions : sys + "\n\n" + pluginInstructions
+                    // The composer already lists the instructions of every
+                    // plugin whose tool is active; don't append them twice.
+                    if !sys.contains(pluginInstructions) {
+                        sys = sys.isEmpty ? pluginInstructions : sys + "\n\n" + pluginInstructions
+                    }
                 }
 
                 // Inject one-off skill if the user selected one via slash command

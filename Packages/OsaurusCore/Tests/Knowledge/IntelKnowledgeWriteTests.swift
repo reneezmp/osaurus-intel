@@ -81,6 +81,11 @@ struct IntelKnowledgeWriteTests {
             #expect(Self.writeTools.isSubset(of: Set(offered.tools.map(\.function.name))))
             let hidden = await SystemPromptComposer.composeChatContext(agentId: ungranted.id, query: "hi")
             #expect(Set(hidden.tools.map(\.function.name)).isDisjoint(with: Self.writeTools))
+            // Upstream's grant manifest: names the granted collection, only for the granted agent.
+            #expect(offered.prompt.contains("## Knowledge"))
+            #expect(offered.prompt.contains("**\(collection.name)**"))
+            #expect(offered.promptSections.contains { $0.id == "knowledge" })
+            #expect(!hidden.prompt.contains("## Knowledge"))
 
             let args = ##"{"documents":[{"path":"pantry.md","content":"# Pantry\n\nRice and lentils.\n"}],"rationale":"add lentils"}"##
             let preview = await ChatExecutionContext.$currentAgentId.withValue(granted.id) {

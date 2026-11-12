@@ -1241,14 +1241,13 @@ struct SessionToolState: @unchecked Sendable {
     }
 
     static func fingerprint(executionMode: Any?, toolMode: Any?) -> String {
-        // Intel does not compile the upstream ExecutionMode implementation,
-        // so keep the same stable shape while adding a process-wide capability
-        // generation. Agent/configuration/tool changes then invalidate an
-        // already-open session on its next send.
+        // Upstream's shape: execution mode + tool mode. The process-wide
+        // capability revision is NOT part of it any more: a grant or catalog
+        // edit goes through `SessionToolStateStore.reconcileToolGrants`, which
+        // keeps the tools the chat already loaded (upstream `SessionToolState`).
         let mode = String(describing: executionMode)
         let tools = String(describing: toolMode)
-        let revision = AgentManager.shared.currentCapabilityRevision()
-        return "intel/\(mode)/\(tools)/r\(revision)"
+        return "intel/\(mode)/\(tools)"
     }
 }
 
@@ -2018,6 +2017,39 @@ final class LiveExecSink: @unchecked Sendable {
 final actor SessionToolStateStore {
     static let shared = SessionToolStateStore()
 
+    /// What a session's tool grants looked like when it last composed
+    /// (upstream `ToolGrantSnapshot`). Intel's grants live in the agent
+    /// record, so the process-wide capability revision plus the agent's
+    /// allowlist stand in for upstream's per-tool schema hashes.
+    struct ToolGrantSnapshot: Equatable, Sendable {
+        let capabilityRevision: UInt64
+        let allowedNames: Set<String>?
+
+        @MainActor
+        static func current(agentId: UUID) -> ToolGrantSnapshot {
+            ToolGrantSnapshot(
+                capabilityRevision: AgentManager.shared.currentCapabilityRevision(),
+                allowedNames: AgentManager.shared.effectiveEnabledToolNames(for: agentId).map(Set.init))
+        }
+    }
+
+    private var toolGrants: [String: ToolGrantSnapshot] = [:]
+
+    /// Upstream `reconcileToolGrants`: explicit grant edits apply on the next
+    /// request. The frozen catalog prefix is refreshed, but the tools the
+    /// chat already loaded stay (the composer re-filters them against the
+    /// live grant, so revoked ones drop out of the schema); unchanged grants
+    /// are a no-op.
+    func reconcileToolGrants(_ key: Any, current: ToolGrantSnapshot) {
+        let key = stateKey(key)
+        let previous = toolGrants.updateValue(current, forKey: key)
+        guard previous != current, var entry = states[key] else { return }
+        entry.initialPreflight = nil
+        entry.initialAlwaysLoadedNames = nil
+        states[key] = entry
+        lastSendCacheHints.removeValue(forKey: key)
+    }
+
     private var states: [String: SessionToolState] = [:]
     private var lastSendCacheHints: [String: String] = [:]
 
@@ -2029,11 +2061,13 @@ final actor SessionToolStateStore {
     func invalidate(_ key: Any) {
         let key = stateKey(key)
         states.removeValue(forKey: key)
+        toolGrants.removeValue(forKey: key)
         lastSendCacheHints.removeValue(forKey: key)
     }
 
     func invalidateAll() {
         states.removeAll(keepingCapacity: true)
+        toolGrants.removeAll(keepingCapacity: true)
         lastSendCacheHints.removeAll(keepingCapacity: true)
     }
 
@@ -2048,6 +2082,7 @@ final actor SessionToolStateStore {
         }
         guard recorded != live else { return }
         states.removeValue(forKey: key)
+        toolGrants.removeValue(forKey: key)
         lastSendCacheHints.removeValue(forKey: key)
     }
 
@@ -2097,6 +2132,7 @@ final actor SessionToolStateStore {
 
     func reset() {
         states.removeAll(keepingCapacity: true)
+        toolGrants.removeAll(keepingCapacity: true)
         lastSendCacheHints.removeAll(keepingCapacity: true)
     }
 }
@@ -2654,6 +2690,42 @@ final class SystemPromptComposer: @unchecked Sendable {
             enabled || !["web_search", "search_and_extract"].contains($0.function.name)
         }
     }
+    /// Upstream `resolveEffectiveQuery`: the explicit `query`, else the most
+    /// recent user message. Feeds memory recall only.
+    static func resolveEffectiveQuery(query: String, messages: [ChatMessage]) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        for message in messages.reversed() where message.role == "user" {
+            if let content = message.content?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !content.isEmpty
+            {
+                return content
+            }
+        }
+        return ""
+    }
+
+    /// Upstream `canonicalToolOrder` (#3266 lineage): loop tools pinned first
+    /// in fixed order, then the `capabilities` gateway, then everything else
+    /// alphabetical, so the tools block is byte-stable across turns and
+    /// across the HTTP merge (provider prompt-cache prefix). Intel has no
+    /// built-in sandbox bucket.
+    static func canonicalToolOrder(_ tools: [Tool]) -> [Tool] {
+        let loopIndex = Dictionary(
+            uniqueKeysWithValues: ["todo", "complete", "clarify", "share_artifact"]
+                .enumerated().map { ($1, $0) })
+        let capabilityIndex = Dictionary(
+            uniqueKeysWithValues: ["capabilities", "capabilities_discover", "capabilities_load"]
+                .enumerated().map { ($1, $0) })
+        func sortKey(_ tool: Tool) -> (Int, Int, String) {
+            let name = tool.function.name
+            if let order = loopIndex[name] { return (0, order, name) }
+            if let order = capabilityIndex[name] { return (2, order, name) }
+            return (3, .max, name)
+        }
+        return tools.sorted { sortKey($0) < sortKey($1) }
+    }
+
     static func composePreviewContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil) -> ComposedContext { ComposedContext() }
 
     static func folderToolIsVisible(
@@ -2746,15 +2818,20 @@ final class SystemPromptComposer: @unchecked Sendable {
             Set(FolderToolManager.shared.folderToolNames)
         }
         await KnowledgeManager.shared.ensureLoaded()
-        let knowledgeAllowed = await MainActor.run {
-            let ownKnowledge = AgentManager.shared.effectiveKnowledgeCollections(for: id)
-            let projectKnowledge = projectId.flatMap { projectId in
-                ProjectManager.shared.project(for: projectId)
-            }.map { project in
-                KnowledgeManager.shared.enabledCollections(withIds: project.knowledgeCollectionIds)
-            } ?? []
-            return !ownKnowledge.isEmpty || !projectKnowledge.isEmpty
+        // Upstream `AgentConfigSnapshot.knowledgeCollections`: the agent's own
+        // grants plus the project's, deduplicated, captured once so the
+        // `## Knowledge` section and the tool gate cannot disagree.
+        let knowledgeGrants: [KnowledgeGrantDescriptor] = await MainActor.run {
+            var collections = AgentManager.shared.effectiveKnowledgeCollections(for: id)
+            let known = Set(collections.map(\.id))
+            if let projectId, let project = ProjectManager.shared.project(for: projectId) {
+                collections += KnowledgeManager.shared.enabledCollections(
+                    withIds: project.knowledgeCollectionIds
+                ).filter { !known.contains($0.id) }
+            }
+            return collections.map(\.grantDescriptor)
         }
+        let knowledgeAllowed = !knowledgeGrants.isEmpty
         // M12 Gap 3: when a working folder is mounted, append the real
         // "## Working directory" framing (SystemPromptTemplates.folderContext —
         // NOT excluded). Without it the model just had bare tool specs and no
@@ -2798,7 +2875,12 @@ final class SystemPromptComposer: @unchecked Sendable {
         } else {
             toolDirective = ""
         }
-        var prompt = basePrompt + folderSection + toolDirective
+        // Upstream `appendBasePrompt`: the platform line is always first, and
+        // a blank custom-agent persona falls back to `defaultPersona`. The
+        // built-in agent's prompt is the Orchestrator role, never blank.
+        let persona = id == Agent.defaultId ? basePrompt : SystemPromptTemplates.effectivePersona(basePrompt)
+        let platform = SystemPromptTemplates.platformIdentity
+        var prompt = platform + "\n\n" + persona + folderSection + toolDirective
         if !folderToolsAvailable {
             prompt += """
 
@@ -2810,8 +2892,9 @@ final class SystemPromptComposer: @unchecked Sendable {
         // Track each slice of the prompt so the budget popover can show them as
         // distinct rails (Persona / Working Directory / Grounding / …).
         var sections: [PromptSection] = []
-        if !basePrompt.isEmpty {
-            sections.append(PromptSection(id: "persona", label: "Persona", text: basePrompt, tint: .purple))
+        sections.append(PromptSection(id: "platform", label: L("Platform"), text: platform, tint: .gray))
+        if !persona.isEmpty {
+            sections.append(PromptSection(id: "persona", label: "Persona", text: persona, tint: .purple))
         }
         if !folderSection.isEmpty {
             // Upstream's id and label for this section ("folderContext",
@@ -2973,8 +3056,14 @@ final class SystemPromptComposer: @unchecked Sendable {
                 let present = Set(tools.map(\.function.name))
                 tools += CapabilityLoadBuffer.validSpecs(
                     ToolRegistry.shared.openAISpecs(named: loaded.sorted().filter { !present.contains($0) }))
-                if let manifest = CapabilityManifest.render(catalog) {
+                // Upstream: `capabilities` is in a custom agent's schema whenever
+                // something is loadable; the manifest itself renders only when
+                // at least one assigned dynamic tool exists (skills alone
+                // reach the model through `capabilities` search).
+                if !catalog.isEmpty {
                     tools += ToolRegistry.shared.openAISpecs(named: [CapabilitiesTool.toolName])
+                }
+                if let manifest = await MainActor.run(body: { CapabilityManifest.render(catalog) }) {
                     manifestBlock = "\n\n" + CapabilityManifest.discoveryGuidance + "\n\n" + manifest
                 }
             }
@@ -3013,29 +3102,68 @@ final class SystemPromptComposer: @unchecked Sendable {
                 )
             }
         }
+        // Subagent capability guidance (upstream's registry-driven loop): each
+        // capability's guidance renders only when its PRIMARY tool resolved
+        // into the schema (computer use, browser use, image, video,
+        // AppleScript). Intel adaptations: the `image` tool only generates
+        // (no edit model on Intel), so the generation-only guidance is used;
+        // AppleScript uses Intel's helper wording.
+        let resolvedNames = Set(tools.map { $0.function.name })
+        for capability in SubagentCapabilityRegistry.all {
+            guard let sectionId = capability.guidanceSectionId,
+                let labelKey = capability.guidanceLabelKey,
+                resolvedNames.contains(capability.primaryToolName)
+            else { continue }
+            var guidance = capability.guidance
+            if capability.id == SubagentCapabilityRegistry.image.id {
+                guidance = SystemPromptTemplates.imageGenerationOnlyGuidance
+            } else if capability.id == SubagentCapabilityRegistry.appleScript.id {
+                guidance = SystemPromptTemplates.intelAppleScriptGuidance
+            }
+            guard let guidance else { continue }
+            let block = "\n\n" + guidance
+            prompt += block
+            sections.append(
+                PromptSection(
+                    id: sectionId,
+                    label: String(localized: String.LocalizationValue(labelKey), bundle: .module),
+                    text: block, tint: .green))
+        }
+        // Knowledge grant manifest (upstream): names + summaries of the
+        // granted collections, when a retrieval tool is in the schema.
+        if !resolvedNames.isDisjoint(with: ToolRegistry.knowledgeToolNames), !knowledgeGrants.isEmpty {
+            let block = "\n\n" + SystemPromptTemplates.knowledgeGuidance(collections: knowledgeGrants)
+            prompt += block
+            sections.append(PromptSection(id: "knowledge", label: L("Knowledge"), text: block, tint: .teal))
+        }
         // Built-in Apple apps (docs/APPLE_APPS_INTEL_PLAN.md): guidance for the
         // apps that resolved into this turn's schema; they resolve dates
         // against the `[Current Time]` block every turn carries (#2173).
-        let activeAppleApps = IntelAppleAppsGuidance.activeApps(in: Set(tools.map { $0.function.name }))
+        let activeAppleApps = IntelAppleAppsGuidance.activeApps(in: resolvedNames)
         if !activeAppleApps.isEmpty {
             let block = "\n\n" + IntelAppleAppsGuidance.guidance(apps: activeAppleApps)
             prompt += block
             sections.append(PromptSection(id: "appleApps", label: "Apple Apps", text: block, tint: .green))
         }
-        // AppleScript (`W-applescript-agent`): upstream renders its guidance
-        // only when `applescript` / `mac_query` resolved into the schema.
-        if tools.contains(where: { ToolRegistry.appleScriptToolNames.contains($0.function.name) }) {
-            let block = "\n\n" + SystemPromptTemplates.intelAppleScriptGuidance
-            prompt += block
-            sections.append(PromptSection(id: "appleScript", label: "AppleScript", text: block, tint: .green))
+        // Project instructions (upstream, ChatView): constant per session, so
+        // they ride the system prompt rather than the per-turn `[Memory]`
+        // prefix.
+        if let projectId {
+            let project: (name: String, instructions: String)? = await MainActor.run {
+                ProjectManager.shared.project(for: projectId).map { ($0.name, $0.instructions) }
+            }
+            if let project {
+                let instructions = project.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !instructions.isEmpty {
+                    let block = "\n\n## Project: \(project.name)\n\n\(instructions)"
+                    prompt += block
+                    sections.append(
+                        PromptSection(id: "projectInstructions", label: L("Project"), text: block, tint: .cyan))
+                }
+            }
         }
-        // Browser Use (`W-browser-use`): upstream's guidance when the tool
-        // resolved into the schema.
-        if tools.contains(where: { $0.function.name == ToolRegistry.browserUseToolName }) {
-            let block = "\n\n" + SystemPromptTemplates.browserUseGuidance
-            prompt += block
-            sections.append(PromptSection(id: "browserUse", label: "Browser Use", text: block, tint: .green))
-        }
+        // Upstream canonical order, applied once the schema is final.
+        tools = canonicalToolOrder(tools)
         // Estimate the tool-schema token cost so the budget popover shows a real
         // "Tools" rail instead of 0.
         let toolTokens = ContextBudgetManager.estimateToolTokens(tools)
@@ -3050,7 +3178,8 @@ final class SystemPromptComposer: @unchecked Sendable {
         }
         if memCfg.enabled,
             !memoryDisabled,
-            let q = query?.trimmingCharacters(in: .whitespacesAndNewlines),
+            case let q = resolveEffectiveQuery(
+                query: query ?? "", messages: messages.compactMap { $0 as? ChatMessage }),
             !q.isEmpty
         {
             // `projectId` additionally opens the project's own namespace as a
@@ -3062,23 +3191,6 @@ final class SystemPromptComposer: @unchecked Sendable {
             memorySection = await MemorySearchService.shared.recall(
                 query: q, agentId: id.uuidString, projectId: projectId, days: days,
                 budgetTokens: memCfg.memoryBudgetTokens)
-        }
-
-        // Project instructions: shared free-form context for every chat in a
-        // project. Rides the SAME cache-safe inject-prefix path as recalled
-        // memory (spliced in by `injectMemoryPrefix` just before the last
-        // user turn) rather than the stable `prompt` above, so this stays a
-        // single injection point — Intel Projects have no per-turn-variable
-        // content, but reusing the existing plumbing avoids a second path
-        // doing the same job.
-        if let projectId,
-            let instructions = await MainActor.run(body: {
-                ProjectManager.shared.project(for: projectId)?.instructions
-            })?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !instructions.isEmpty
-        {
-            let block = "## Project Instructions\n" + instructions
-            memorySection = [block, memorySection].compactMap { $0 }.joined(separator: "\n\n")
         }
 
         if let databaseSchemaSection, !databaseSchemaSection.isEmpty {
@@ -3141,15 +3253,40 @@ final class SystemPromptComposer: @unchecked Sendable {
     /// then the time block right against the user's text, each with its
     /// trailing separator; nil when both are empty. Intel has no screen or
     /// automation context.
-    static func composeInjectedUserPrefix(memorySection: String?, timeContext: String? = nil) -> String? {
+    static func composeInjectedUserPrefix(
+        memorySection: String?, automationContext: String? = nil, timeContext: String? = nil
+    ) -> String? {
         var prefix = ""
         if let trimmed = memorySection?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
             prefix = "[Memory]\n\(trimmed)\n[/Memory]\n\n"
+        }
+        // Upstream: the automation context leads the memory block.
+        if let trimmed = automationContext?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            prefix = "\(trimmed)\n\n" + prefix
         }
         if let trimmed = timeContext?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
             prefix += "\(trimmed)\n\n"
         }
         return prefix.isEmpty ? nil : prefix
+    }
+
+    /// Upstream `appleScriptWorkingAppContext`: the app the user was working
+    /// in before this message, so "the file" / "the document" routes to
+    /// AppleScript. Callers include it only when `applescript` is in the
+    /// schema.
+    static func appleScriptWorkingAppContext(appName: String?) -> String? {
+        guard let appName else { return nil }
+        let app =
+            appName
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !app.isEmpty else { return nil }
+        return """
+            [Mac Automation Context]
+            Working app before this message: \(app)
+            If the request says `the file` or `the document`, it means that app's front open document. Use `applescript`; do not ask for a path or create a separate artifact.
+            [/Mac Automation Context]
+            """
     }
 
     /// Upstream: merge content into the first system message (prepending or

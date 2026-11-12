@@ -205,7 +205,12 @@ extension PluginHostContext {
             let instructions: String? = await MainActor.run {
                 PluginInstructionsResolver.instructions(pluginId: pid, agentId: agentCtx?.agentId)
             }
-            if let instructions {
+            // The composer already lists the instructions of every plugin whose
+            // tool is active; don't append them twice.
+            let alreadyComposed = instructions.map { text in
+                enriched.request.messages.contains { $0.role == "system" && ($0.content ?? "").contains(text) }
+            } ?? false
+            if let instructions, !alreadyComposed {
                 // Upstream `appendSystemContent`.
                 var messages = enriched.request.messages
                 SystemPromptComposer.mergeSystemContent(instructions, into: &messages, prepend: false)
@@ -263,19 +268,29 @@ extension PluginHostContext {
         }
         guard let resolved else { return nil }
 
+        // Upstream: a plugin inference resolves the folder of the SESSION
+        // driving it (the live dispatched session with this id), never a
+        // process-wide folder that could belong to an unrelated chat window.
+        let sessionFolderContext: FolderContext? = await MainActor.run {
+            guard let sid = sessionId, let sessionUUID = UUID(uuidString: sid) else { return nil }
+            return BackgroundTaskManager.shared.liveTask(forSessionId: sessionUUID)?.chatSession?.folderState.context
+        }
         let execMode: ExecutionMode = await MainActor.run {
             ToolRegistry.shared.resolveExecutionMode(
-                folderContext: nil,
+                folderContext: sessionFolderContext,
                 autonomousEnabled: resolved.autonomousEnabled
             )
         }
+        // Upstream: wait for the first plugin catalog scan before composing.
+        await PluginManager.shared.ensurePromptCatalogReady()
         let composed = await SystemPromptComposer.composeChatContext(
             agentId: agentId,
             executionMode: execMode,
             model: modelOverride ?? resolved.model,
             query: extractLatestUserQuery(from: messages),
             messages: messages,
-            toolsDisabled: resolved.toolsDisabled
+            toolsDisabled: resolved.toolsDisabled,
+            folderContext: sessionFolderContext
         )
         return await MainActor.run {
             let mgr = AgentManager.shared

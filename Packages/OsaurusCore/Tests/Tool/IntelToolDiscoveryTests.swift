@@ -95,7 +95,7 @@ struct IntelToolDiscoveryTests {
                 #expect(ToolRegistry.agentLoopToolNames.subtracting(["calculate"]).isSubset(of: names))  // built-ins stay (calculate is opt-in, #3307)
                 #expect(context.prompt.contains("## Enabled capabilities"))
                 #expect(context.prompt.contains("tool/\(weather)"))
-                #expect(context.prompt.contains("plugin/\(CapabilityCatalog.slug(group))"))
+                #expect(context.prompt.contains("<plugin: \(group)>"))
 
                 let later = await SystemPromptComposer.composeChatContext(
                     agentId: agent.id, query: "hi", additionalToolNames: [weather])

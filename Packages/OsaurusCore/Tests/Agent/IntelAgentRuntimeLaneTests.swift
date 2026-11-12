@@ -9,7 +9,7 @@ import Testing
 struct IntelAgentRuntimeLaneTests {
 
     @Test
-    func capabilityRevisionInvalidatesSessionState() async {
+    func capabilityRevisionReconcilesSessionState() async {
         await SessionToolStateStore.shared.reset()
         let sessionId = UUID()
         let initial = SessionToolState.fingerprint(executionMode: "none", toolMode: "auto")
@@ -20,15 +20,29 @@ struct IntelAgentRuntimeLaneTests {
             alwaysLoadedNames: ["old_tool"],
             fingerprint: initial
         )
-        #expect(await SessionToolStateStore.shared.get(sessionId)?.initialPreflight as? String == "old preflight")
+        await SessionToolStateStore.shared.appendLoadedTools(
+            sessionId, names: ["loaded_tool"], fallbackAlwaysLoadedNames: nil)
+        await SessionToolStateStore.shared.reconcileToolGrants(
+            sessionId, current: .init(capabilityRevision: 1, allowedNames: nil))
 
+        // A grant/catalog edit no longer wipes the session (upstream
+        // `reconcileToolGrants`): the fingerprint is unchanged, the frozen
+        // catalog snapshot is dropped and the loaded tools stay.
         AgentManager.shared.bumpCapabilityRevision()
         let current = SessionToolState.fingerprint(executionMode: "none", toolMode: "auto")
-        await SessionToolStateStore.shared.invalidateIfFingerprintChanged(
-            sessionId,
-            liveFingerprint: current
-        )
+        #expect(current == initial)
+        await SessionToolStateStore.shared.invalidateIfFingerprintChanged(sessionId, liveFingerprint: current)
+        await SessionToolStateStore.shared.reconcileToolGrants(
+            sessionId, current: .init(capabilityRevision: 2, allowedNames: nil))
 
+        let state = await SessionToolStateStore.shared.get(sessionId)
+        #expect(state?.loadedToolNames == ["loaded_tool"])
+        #expect(state?.initialPreflight == nil)
+        #expect(state?.initialAlwaysLoadedNames == nil)
+
+        // A mode flip still discards everything.
+        await SessionToolStateStore.shared.invalidateIfFingerprintChanged(
+            sessionId, liveFingerprint: SessionToolState.fingerprint(executionMode: "none", toolMode: "manual"))
         #expect(await SessionToolStateStore.shared.get(sessionId) == nil)
     }
 

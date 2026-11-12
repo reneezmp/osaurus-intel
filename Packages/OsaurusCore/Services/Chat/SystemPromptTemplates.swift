@@ -232,7 +232,30 @@ public enum SystemPromptTemplates {
         work around the gap or tell the user the capability is unavailable.
         """
 
+    // Intel: manifest block mirrors upstream/classic (names: CapabilityToolNames, skill cap, tiered compact form).
     // MARK: - Enabled Capabilities Manifest
+
+    /// Capability search/load tool names published to a request. Custom-agent
+    /// chat uses one unified gateway, while compatibility surfaces may still
+    /// publish the legacy discover/load pair.
+    public struct CapabilityToolNames: Sendable, Equatable {
+        public let discover: String
+        public let load: String
+
+        public init(discover: String, load: String) {
+            self.discover = discover
+            self.load = load
+        }
+
+        public static let gateway = CapabilityToolNames(
+            discover: "capabilities",
+            load: "capabilities"
+        )
+        public static let legacy = CapabilityToolNames(
+            discover: "capabilities_discover",
+            load: "capabilities_load"
+        )
+    }
 
     /// One tool or skill row in the enabled-capabilities manifest. Carries
     /// only the surface name + one-line description the model needs to
@@ -252,14 +275,22 @@ public enum SystemPromptTemplates {
     /// layout. `skills` render before `tools` so the "Skills that govern
     /// tool groups" rule has a visible anchor.
     public struct ManifestPluginGroup: Sendable, Equatable {
+        /// The plugin's tool-group id, used to form the loadable `plugin/<id>`
+        /// in the compact tiered manifest. Empty for synthetic groups that
+        /// have no single loadable group (built-in image tools, the
+        /// standalone-skills bucket); those fall back to listing their
+        /// directly-loadable `tool/`/`skill/` ids inline.
+        public let groupId: String
         public let pluginDisplay: String
         public let skills: [ManifestCapability]
         public let tools: [ManifestCapability]
         public init(
+            groupId: String = "",
             pluginDisplay: String,
             skills: [ManifestCapability],
             tools: [ManifestCapability]
         ) {
+            self.groupId = groupId
             self.pluginDisplay = pluginDisplay
             self.skills = skills
             self.tools = tools
@@ -275,6 +306,14 @@ public enum SystemPromptTemplates {
     /// **Adjust against your context budget.**
     public static let enabledManifestToolCap = 70
 
+    /// Cap on total skill lines rendered before the remainder collapses to
+    /// a `+N more` pointer. Skills are universally available (no per-agent
+    /// assignment), so a user who imports a large library would otherwise
+    /// grow every custom agent's static prefix without bound. The nine
+    /// built-ins plus a healthy plugin set stay well under this; past it,
+    /// the model reaches the tail via `capabilities_discover`.
+    public static let enabledManifestSkillCap = 30
+
     /// Render the `## Enabled capabilities` manifest from a pre-grouped,
     /// pre-sorted list. Returns `nil` when there is nothing to surface so the
     /// caller can skip an empty section.
@@ -282,27 +321,144 @@ public enum SystemPromptTemplates {
     /// The manifest is the grounded answer to "do you have X" — it lets a
     /// model confirm an enabled capability with zero tool calls. Every line
     /// begins with its loadable id (`tool/<name>` or `skill/<name>`) so the
-    /// model can pass it straight to `capabilities_load` without a discover.
+    /// model can pass it straight to the published load tool without a search.
     /// Tools past `enabledManifestToolCap` collapse to a per-plugin `+N more`
-    /// pointer the model can expand with `capabilities_discover`. `compact`
+    /// pointer the model can expand with the published search tool. `compact`
     /// (small-/tiny-context models) drops per-tool descriptions but keeps the
     /// ids, since naming the capability is what stops the model from denying
     /// it.
     public static func enabledCapabilitiesManifest(
         groups: [ManifestPluginGroup],
-        compact: Bool = false
+        compact: Bool = false,
+        names: CapabilityToolNames = .gateway
     ) -> String? {
         guard !groups.isEmpty else { return nil }
 
+        let blocks =
+            compact
+            ? tieredCompactBlocks(groups, names: names)
+            : verboseBlocks(groups, names: names)
+
+        // The "never deny a listed capability" rule is owned by
+        // `groundingDirective` (which co-fires whenever this section
+        // renders), so the intro doesn't restate it. Compact
+        // mode (small-context models) also drops the worked example — the
+        // ids themselves are what stop a small model from denying a
+        // capability, and the example's tokens crowd an 8K window.
+        let intro: String
+        if compact {
+            // Tiered manifest: one `plugin/<id>` line per plugin instead of a
+            // line per tool. A plugin with N tools costs one line, not N, so
+            // the cold first-turn prefill stays bounded as installed plugins
+            // grow — while the model still SEES every plugin (it never has to
+            // guess one exists and search for it). Loading
+            // `plugin/<id>` expands the whole group (and runs its governing
+            // skill) in one call.
+            intro = """
+                ## Enabled capabilities
+
+                Entries below are capability ids, not callable function names. \
+                Load a plugin by calling `\(names.load)` with its `ids` array \
+                containing the exact `plugin/<id>` printed below; `tool/` and \
+                `skill/` ids load individually the same way. Never call an id \
+                as a function, copy an example, or invent an id. List frozen at \
+                session start — search with `\(names.discover)` only when no \
+                exact listed id fits or to find anything installed since.
+                """
+        } else {
+            intro = """
+                ## Enabled capabilities
+
+                These capabilities are enabled for this session. Each line begins \
+                with a capability id, not a callable function name; some are already \
+                in your tool schema, others must be loaded first. To load one, call \
+                `\(names.load)` with its id exactly as shown \
+                (e.g. `\(names.load)({"ids": ["tool/<name>"]})`). This list is \
+                frozen at session start; capabilities installed after that won't \
+                appear here but searching with `\(names.discover)` still finds \
+                them — use search only when no exact listed id fits, and check it \
+                before declaring something unavailable.
+
+                Worked example — User: "You have a list_messages tool." If \
+                `tool/list_messages` is listed here, confirm it and load it with \
+                `\(names.load)` before use.
+                """
+        }
+
+        return intro + "\n\n" + blocks.joined(separator: "\n")
+    }
+
+    /// Compact (small-context model) rendering: one `plugin/<id>` line per
+    /// plugin. The model loads the id to pull in the whole group, so the menu
+    /// stays one line regardless of how many tools a plugin owns. Synthetic
+    /// groups with no loadable group id (built-in image tools, standalone
+    /// skills) keep listing their directly-loadable `tool/`/`skill/` ids
+    /// inline — there is no `plugin/<id>` to expand and they are few.
+    private static func tieredCompactBlocks(
+        _ groups: [ManifestPluginGroup],
+        names: CapabilityToolNames
+    ) -> [String] {
+        var renderedSkillLines = 0
+        return groups.map { group in
+            guard !group.groupId.isEmpty else {
+                // Synthetic groups (standalone skills, built-in image tools)
+                // list loadable ids inline. The standalone-skills bucket is
+                // the one unbounded list in compact mode — every installed
+                // skill lands here — so it takes the same running skill cap
+                // as the verbose renderer.
+                let remaining = max(enabledManifestSkillCap - renderedSkillLines, 0)
+                let skillsToShow = Array(group.skills.prefix(remaining))
+                let overflow = group.skills.count - skillsToShow.count
+                renderedSkillLines += skillsToShow.count
+
+                var lines = ["<\(group.pluginDisplay)>"]
+                lines.append(contentsOf: skillsToShow.map { "  skill/\($0.name)" })
+                if overflow > 0 {
+                    lines.append(
+                        "  +\(overflow) more skill(s) — search with `\(names.discover)` to list them."
+                    )
+                }
+                lines.append(contentsOf: group.tools.map { "  tool/\($0.name)" })
+                return lines.joined(separator: "\n")
+            }
+            // `skill-governed` tells the model to expect tool-ordering
+            // instructions when it loads the group; loading `plugin/<id>`
+            // surfaces them automatically, so it is a hint, not a step.
+            let governed = group.skills.isEmpty ? "" : " — skill-governed"
+            return "plugin/\(group.groupId) — \(group.pluginDisplay)\(governed)"
+        }
+    }
+
+    /// Verbose (large-context model) rendering: a line per tool/skill with
+    /// its one-line description, capped at `enabledManifestToolCap` total
+    /// tool lines before low-priority plugins collapse to a `+N more`
+    /// pointer. Unchanged from the original manifest behavior.
+    private static func verboseBlocks(
+        _ groups: [ManifestPluginGroup],
+        names: CapabilityToolNames
+    ) -> [String] {
         var blocks: [String] = []
         var renderedToolLines = 0
+        var renderedSkillLines = 0
 
         for group in groups {
-            let skillLines = group.skills.map { skill -> String in
+            // Skills use the same running-cap pattern as tools. With the
+            // universal library every installed skill is a candidate line,
+            // so an unbounded render would scale the static prefix with the
+            // user's import habits rather than the session's needs.
+            let skillsRemaining = max(enabledManifestSkillCap - renderedSkillLines, 0)
+            let skillsToShow = Array(group.skills.prefix(skillsRemaining))
+            let skillOverflow = group.skills.count - skillsToShow.count
+            renderedSkillLines += skillsToShow.count
+
+            var skillLines = skillsToShow.map { skill -> String in
                 let desc = skill.description.isEmpty ? "Plugin skill." : skill.description
-                return compact
-                    ? "  skill/\(skill.name)"
-                    : "  skill/\(skill.name) — \(desc)"
+                return "  skill/\(skill.name) — \(desc)"
+            }
+            if skillOverflow > 0 {
+                skillLines.append(
+                    "  +\(skillOverflow) more skill(s) — search with `\(names.discover)` to list them."
+                )
             }
 
             let remaining = max(enabledManifestToolCap - renderedToolLines, 0)
@@ -312,7 +468,7 @@ public enum SystemPromptTemplates {
                 var collapsed = ["<plugin: \(group.pluginDisplay)>"]
                 collapsed.append(contentsOf: skillLines)
                 collapsed.append(
-                    "  +\(group.tools.count) more tool(s) — call capabilities_discover to list them."
+                    "  +\(group.tools.count) more tool(s) — search with `\(names.discover)` to list them."
                 )
                 blocks.append(collapsed.joined(separator: "\n"))
                 continue
@@ -324,7 +480,7 @@ public enum SystemPromptTemplates {
 
             let toolLines = toolsToShow.map { tool -> String in
                 let desc = tool.description.isEmpty ? "(no description)" : tool.description
-                return compact ? "  tool/\(tool.name)" : "  tool/\(tool.name) — \(desc)"
+                return "  tool/\(tool.name) — \(desc)"
             }
 
             var lines = ["<plugin: \(group.pluginDisplay)>"]
@@ -332,30 +488,12 @@ public enum SystemPromptTemplates {
             lines.append(contentsOf: toolLines)
             if overflow > 0 {
                 lines.append(
-                    "  +\(overflow) more tool(s) — call capabilities_discover to list them."
+                    "  +\(overflow) more tool(s) — search with `\(names.discover)` to list them."
                 )
             }
             blocks.append(lines.joined(separator: "\n"))
         }
-
-        let intro = """
-            ## Enabled capabilities
-
-            These capabilities are enabled for this session. Each line begins \
-            with its loadable id. Some may already be in your current tool \
-            schema; others must be loaded before use. To load one, call \
-            capabilities_load with its id exactly as shown \
-            (e.g. `capabilities_load({"ids": ["tool/<name>"]})`). They are real \
-            — do not deny having a capability that appears here.
-
-            Worked example — User: "You have a list_messages tool." You: check \
-            this manifest. If tool/list_messages is listed, confirm it and call \
-            capabilities_load with that id before using it. Only if it is absent \
-            from both this manifest and an empty capabilities_discover result do \
-            you say it is unavailable.
-            """
-
-        return intro + "\n\n" + blocks.joined(separator: "\n")
+        return blocks
     }
 
     /// General rule that replaces the per-plugin "Plugin Companions"
@@ -363,17 +501,130 @@ public enum SystemPromptTemplates {
     /// this rule tells the model to load the skill first because a
     /// name+description manifest can't convey the skill-first ordering a
     /// tool-group skill (e.g. `Osaurus Browser`) teaches.
-    public static let skillsGovernToolGroups = """
-        ## Skills that govern tool groups
-
-        Some enabled capabilities are skills that teach you how to use a group \
-        of related tools. When the manifest shows a skill alongside tools from \
-        the same plugin, load the skill first with capabilities_load; it \
-        explains when each tool in that group applies. Loading the skill also \
-        loads that plugin's whole tool group in the same call, so you can call \
-        the tools directly afterward without a separate capabilities_load per \
-        tool.
+    public static func skillsGovernToolGroups(
+        names: CapabilityToolNames = .gateway
+    ) -> String {
         """
+            ## Skills that govern tool groups
+
+            Some enabled capabilities are skills that teach you how to use a group \
+            of related tools. When the manifest shows a skill alongside tools from \
+            the same plugin, load the skill first with `\(names.load)`; it \
+            explains when each tool in that group applies. Loading the skill also \
+            loads that plugin's whole tool group in the same call, so you can call \
+            the tools directly afterward without a separate `\(names.load)` call \
+            per tool.
+            """
+    }
+
+    /// Whether the rendered manifest needs the verbose skill-first teaching
+    /// block above. Compact manifests already collapse a governed plugin to a
+    /// single `plugin/<id> — skill-governed` load action, so repeating the
+    /// skill-loading workflow there is redundant. Verbose manifests need the
+    /// block only when one plugin actually contains both a skill and tools.
+    static func enabledManifestNeedsSkillGovernance(
+        _ manifest: String,
+        compact: Bool
+    ) -> Bool {
+        guard !compact else { return false }
+
+        var groupHasSkill = false
+        var groupHasTools = false
+
+        func currentGroupNeedsGuidance() -> Bool {
+            groupHasSkill && groupHasTools
+        }
+
+        for rawLine in manifest.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("<plugin:") || (line.hasPrefix("<") && line.hasSuffix(">")) {
+                if currentGroupNeedsGuidance() { return true }
+                groupHasSkill = false
+                groupHasTools = false
+            } else if line.hasPrefix("skill/") || line.contains("more skill(s)") {
+                groupHasSkill = true
+            } else if line.hasPrefix("tool/") || line.contains("more tool(s)") {
+                groupHasTools = true
+            }
+        }
+
+        return currentGroupNeedsGuidance()
+    }
+
+    // MARK: - Knowledge
+
+    /// Grant manifest + retrieval nudge for the knowledge tools, rendered
+    /// by the composer when any retrieval tool resolves into the schema.
+    /// The tool descriptions alone say "curated reference material: guides,
+    /// templates, standards" — that gives a small model no signal that a
+    /// question about a granted corpus's actual domain (a product FAQ, a
+    /// company handbook) is answerable via search, so it answers from thin
+    /// air. Enumerating each grant's name + summary makes the collection's
+    /// own description the affordance. Editing a grant or a collection's
+    /// name/summary re-renders the block (a one-time cached-prefix bust),
+    /// matching the other config-driven sections.
+    public static func knowledgeGuidance(
+        collections: [KnowledgeGrantDescriptor]
+    ) -> String {
+        var lines: [String] = ["## Knowledge", ""]
+        lines.append("Knowledge collections granted to this agent:")
+        for collection in collections {
+            let summary = collection.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            lines.append(
+                summary.isEmpty
+                    ? "- **\(collection.name)**"
+                    : "- **\(collection.name)** — \(summary)"
+            )
+        }
+        lines.append("")
+        lines.append(
+            "- For any question these collections could answer, call `search_knowledge` "
+                + "FIRST and ground your answer in what it returns — do not answer from memory."
+        )
+        lines.append(
+            "- When a matched excerpt is not enough, `read_knowledge` the result's path; "
+                + "`list_knowledge` browses a collection's documents."
+        )
+        lines.append(
+            "- To CHANGE an existing document, call `edit_knowledge` with find/replace. Do not "
+                + "restate the document: a long one will not fit in one reply and the truncated "
+                + "version would replace the original."
+        )
+        lines.append(
+            "- To ADD documents, call `write_knowledge` with the full markdown. Send EVERY "
+                + "document for a task in one call: `documents` is an array, and one call is one "
+                + "approval. `delete_knowledge` removes documents. The user reviews the paths and "
+                + "a diff before anything is written, so a rejected call is a normal outcome, not "
+                + "an error."
+        )
+        lines.append(
+            "- A write lands immediately once approved. Confirm with `search_knowledge` before "
+                + "telling the user a document is in place; never report work you have not "
+                + "verified."
+        )
+        // The single most damaging gap in the old block was silence about
+        // where a collection actually lives. Told only that it could not
+        // edit, a model asked to build a knowledge base invented a
+        // destination: in osaurus#2439 it wrote markdown into
+        // `<agent home>/knowledge/`, a plain sandbox directory the indexer
+        // never reads, then spent an hour reporting the successful writes as
+        // failures because `search_knowledge` stayed empty. This stays true
+        // even now that a real write path exists, and is the line that stops
+        // the model improvising one.
+        lines.append(
+            "- Writing a file with `file_write` or `shell_run` NEVER creates a knowledge "
+                + "document, whatever the path is named. Collections live outside your sandbox; "
+                + "only the tools above reach them. If `search_knowledge` cannot find what you "
+                + "just wrote, the file is not in a collection — it is not an indexing delay, "
+                + "and retrying the write will not change that."
+        )
+        lines.append(
+            "- When you notice a document is outdated but fixing it is not the current task, "
+                + "file `flag_knowledge_stale` instead. The ticket is a note to the user; it "
+                + "changes nothing on disk."
+        )
+        return lines.joined(separator: "\n")
+    }
 
     // MARK: - Cross-cutting Engineering Discipline
 

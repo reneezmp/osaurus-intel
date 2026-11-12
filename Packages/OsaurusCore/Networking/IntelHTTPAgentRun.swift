@@ -87,9 +87,8 @@ extension HTTPHandler {
     /// client schema must never revive or impersonate a registered Osaurus
     /// tool that the agent composer withheld. Registered tools come only from
     /// `agentTools`; unregistered caller functions are added after them.
-    /// (Upstream also sorts the union into its canonical order for KV-cache
-    /// reuse; Intel's composer has no canonical order, so the agent's order
-    /// is kept.)
+    /// The union is sorted into the composer's canonical order (upstream), so
+    /// appended client tools sit where the next recompose would put them.
     static func mergeAgentContextTools(
         _ agentTools: [Tool],
         clientTools: [Tool]?
@@ -102,7 +101,7 @@ extension HTTPHandler {
         let externalClientTools = clientTools.filter {
             !registeredNames.contains($0.function.name)
         }
-        return agentTools + externalClientTools
+        return SystemPromptComposer.canonicalToolOrder(agentTools + externalClientTools)
     }
 
     /// The agent's composed request (upstream `enrichWithAgentContext`): its
@@ -119,6 +118,8 @@ extension HTTPHandler {
     ) async -> (messages: [ChatMessage], tools: [Tool]?, toolChoice: ToolChoiceOption?) {
         var messages = request.messages
         let query = request.messages.last(where: { $0.role == "user" })?.content ?? ""
+        // Upstream: the first manifest must see the installed plugins.
+        await PluginManager.shared.ensurePromptCatalogReady()
         let composed = await SystemPromptComposer.composeChatContext(
             agentId: agentId,
             executionMode: executionMode,
