@@ -3573,6 +3573,26 @@ final class ChatSession: ObservableObject {
                 // One todo scope per run (upstream): `todo` tells progress
                 // from assertion, `complete` checks only this run's list.
                 let todoRunScope = AgentTodoRunScope()
+                // Upstream #2145 / Classic: resolve a slash-invoked skill
+                // BEFORE compose, so the tools it needs ride in through
+                // `additionalToolNames` (the same channel `capabilities_load`
+                // uses). For a user-editable skill that includes
+                // `update_skill`, the only route by which "update this skill"
+                // reaches a real write. Intel registers no dynamic tools
+                // (`listDynamicTools` is empty), so no other names apply.
+                var oneOffSkillSection: (name: String, body: String, editable: Bool)?
+                var skillReferencedTools: [String] = []
+                if let skillId = pendingOneOffSkillId {
+                    pendingOneOffSkillId = nil
+                    if let skill = SkillManager.shared.skill(for: skillId) {
+                        let body = await SkillManager.shared.buildFullInstructions(for: skill)
+                        oneOffSkillSection = (skill.name, body, SkillManager.isEditable(skill))
+                        skillReferencedTools = SkillManager.preloadedToolNames(
+                            for: skill, body: body, dynamicCandidates: [])
+                    }
+                }
+                let composeExtraToolNames: [String] =
+                    Array(cachedSession?.loadedToolNames ?? []) + skillReferencedTools
                 let context = await SystemPromptComposer.composeChatContext(
                     agentId: effectiveAgentId,
                     executionMode: executionMode,
@@ -3581,7 +3601,7 @@ final class ChatSession: ObservableObject {
                     messages: priorUserMessages,
                     toolsDisabled: chatCfg.disableTools,
                     cachedPreflight: cachedSession?.initialPreflight,
-                    additionalToolNames: cachedSession?.loadedToolNames ?? [],
+                    additionalToolNames: composeExtraToolNames,
                     // Upstream #2171: the first compose's baseline names, tool
                     // specs and manifest, frozen per chat.
                     frozenAlwaysLoadedNames: cachedSession?.initialAlwaysLoadedNames,
@@ -3631,13 +3651,12 @@ final class ChatSession: ObservableObject {
                     }
                 }
 
-                // Inject one-off skill if the user selected one via slash command
-                if let skillId = pendingOneOffSkillId {
-                    pendingOneOffSkillId = nil
-                    if let skill = SkillManager.shared.skill(for: skillId) {
-                        let section = await SkillManager.shared.buildFullInstructions(for: skill)
-                        sys += "\n\n## Active Skill: \(skill.name)\n\n\(section)"
-                    }
+                // The one-off skill chosen with a slash command (resolved
+                // above, before compose, so the tools it references made it
+                // into the schema). Upstream's section text.
+                if let oneOff = oneOffSkillSection {
+                    sys += "\n\n" + SkillManager.activeSkillPromptSection(
+                        name: oneOff.name, body: oneOff.body, editable: oneOff.editable)
                 }
 
                 var toolSpecs = context.tools
