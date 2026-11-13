@@ -1075,6 +1075,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             + "Increase the agent's Max Tokens setting and retry."
     }
 
+    /// Token counts for the run's Insights row: the sum over every model
+    /// round when any round reported usage (a round that reported none adds
+    /// nothing, so the row never claims more than the provider said), else
+    /// the last round's counts, else nil (estimated).
+    nonisolated static func loggedTokenCounts(
+        runPrompt: Int, runCompletion: Int, lastPrompt: Int?, lastCompletion: Int?
+    ) -> (prompt: Int?, completion: Int?) {
+        (
+            runPrompt > 0 ? runPrompt : lastPrompt,
+            runCompletion > 0 ? runCompletion : lastCompletion
+        )
+    }
+
     // MARK: - Router idempotency (upstream Classic, `idempotency_key`)
 
     /// Short, stable fingerprint of the outbound body bytes. Upstream hashes
@@ -1226,7 +1239,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 func logInference(error: Error? = nil) {
                     guard !didLogInference else { return }
                     didLogInference = true
-                    let outputTokens = completionTokens
+                    // Insights row = the whole run's tokens (every round summed,
+                    // upstream `AgentRunUsage`), not the last round's.
+                    closeRoundUsage()
+                    let counts = Self.loggedTokenCounts(
+                        runPrompt: runUsage.promptTokens, runCompletion: runUsage.completionTokens,
+                        lastPrompt: promptTokens, lastCompletion: completionTokens)
+                    let outputTokens = counts.completion
                         ?? max(responseText.isEmpty ? 0 : 1, responseText.count / 4)
                     let wire = wireProbe.snapshot()
                     let destination = Self.inferenceLogDestination(
@@ -1238,11 +1257,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         parentTurnId: loggedParentTurnId,
                         requestId: routerRequestKey,
                         model: resolvedModel,
-                        inputTokens: promptTokens ?? Self.estimatedInputTokens(request),
+                        inputTokens: counts.prompt ?? Self.estimatedInputTokens(request),
                         outputTokens: outputTokens,
                         // upstream #3286: say whether the counts came from the provider.
-                        inputTokenSource: promptTokens == nil ? .estimated : .reported,
-                        outputTokenSource: completionTokens == nil ? .estimated : .reported,
+                        inputTokenSource: counts.prompt == nil ? .estimated : .reported,
+                        outputTokenSource: counts.completion == nil ? .estimated : .reported,
                         durationMs: Date().timeIntervalSince(inferenceStartedAt) * 1_000,
                         temperature: request.temperature.map(Float.init),
                         maxTokens: request.max_tokens,  // upstream #3308: nil when the request set no limit
@@ -1328,6 +1347,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     // of the request in flight (ledger / Insights request id).
                     let idempotencyBase = request.idempotencyKey ?? "auto-\(UUID().uuidString)"
                     var recoveryOrdinal = 0
+                    // Upstream data-movement relief: successful bulk loads are
+                    // refunded against a separate, capped budget.
+                    let maxDataMovementSteps = AgentToolLoop.maxDataMovementSteps(maxIterations: maxToolRounds)
+                    var dataMovementStepsUsed = 0
+                    var announcedDataMovementRelief = false
 
                     while round < maxToolRounds {
                         try Task.checkCancellation()
@@ -1409,6 +1433,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // without a tool call (chat runs, like the grounded
                         // checks). No content is passed, so announce-only and
                         // continuation-request recovery stay off.
+                        // Upstream data-movement relief: a round whose calls are ALL
+                        // successful bulk loads is refunded (up to the cap) and
+                        // the model is told once that bulk loads are cheap.
+                        func refundDataMovementRound(_ flags: [Bool]) {
+                            guard maxDataMovementSteps > 0, dataMovementStepsUsed < maxDataMovementSteps,
+                                !flags.isEmpty, flags.allSatisfy({ $0 })
+                            else { return }
+                            dataMovementStepsUsed += 1
+                            round -= 1
+                            if !announcedDataMovementRelief {
+                                announcedDataMovementRelief = true
+                                let notice = AgentToolLoop.dataMovementReliefNotice(cap: maxDataMovementSteps)
+                                if !pendingHarnessNotices.contains(notice) { pendingHarnessNotices.append(notice) }
+                            }
+                        }
                         func terminalAction(visible: String, finishReason: String?) -> IntelTerminalRecovery.Action {
                             guard interactiveChatRun, !request.isToolFreeWrapUp else { return .finish }
                             let step = AgentLoopModelStep.classifyTerminal(
@@ -1651,6 +1690,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             let allowedTools = Set(activeTools?.map { $0.function.name } ?? [])
                             var decoder = IntelCodexResponsesSSEDecoder(allowedToolNames: allowedTools)
                             var buffer = Data()
+                            let finalized: IntelCodexResponsesFinalization
+                            do {
                             for try await byte in asyncBytes {
                                 try Task.checkCancellation()
                                 buffer.append(byte)
@@ -1674,12 +1715,40 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     continuation.yield(emission)
                                 }
                             }
-                            let finalized = try decoder.finish()
+                            finalized = try decoder.finish()
                             for emission in finalized.emissions {
                                 totalChunks += 1
                                 captureResponseText(emission)
                                 if let reasoning = StreamingReasoningHint.decode(emission) { noteReasoning(reasoning) }
                                 continuation.yield(emission)
+                            }
+                            } catch IntelCodexResponsesAdapter.Error.outputLimitDuringToolCall(let toolName, let characters)
+                                where interactiveChatRun && !request.isToolFreeWrapUp
+                            {
+                                // Upstream `.truncatedToolCall` on the Responses wire:
+                                // one smaller-chunks retry, then the honest fallback.
+                                continuation.yield(StreamingToolHint.encode(""))
+                                switch terminalRecovery.action(
+                                    for: .truncatedToolCall(toolName: toolName, argumentCharacters: characters),
+                                    completedToolWork: toolWorkThisRun)
+                                {
+                                case .retry(let notice):
+                                    pendingHarnessNotices = [notice]
+                                    round -= 1
+                                    continue
+                                case .finishWithText(let text):
+                                    let tail = IntelTerminalRecovery.appendedText(text, afterVisible: roundVisibleText())
+                                    responseText += tail
+                                    continuation.yield(tail)
+                                    NSLog("[CloudChatEngine] Tool call cut by the output limit twice; showed the fallback")
+                                    yieldUsageIfRequested()
+                                    logInference()
+                                    continuation.finish()
+                                    return
+                                case .finish, .retryInFreshTurn:
+                                    throw IntelCodexResponsesAdapter.Error.outputLimitDuringToolCall(
+                                        toolName: toolName, argumentCharacters: characters)
+                                }
                             }
                             if finalized.completion.toolCalls.isEmpty {
                                 // An incomplete response already failed the
@@ -1746,6 +1815,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             var results: [IntelCodexResponsesToolResult] = []
                             var resultImages: [Data] = []
                             var runEndedByTool = false
+                            var roundDataMovement: [Bool] = []
                             for rawCall in finalized.completion.toolCalls {
                                 try Task.checkCancellation()
                                 let call = IntelCodexResponsesToolCall(
@@ -1761,6 +1831,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                             callId: call.callID, name: call.name, arguments: call.arguments))
                                 }
                                 var result: String
+                                var wasHeld = false
                                 if !isOffered {
                                     NSLog("[CloudChatEngine] refusing '\(call.name)': not offered in this request")
                                     let offered = activeTools
@@ -1774,6 +1845,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     notices: &pendingHarnessNotices)
                                 {
                                     result = harnessResult
+                                    wasHeld = true
                                 } else {
                                     // Upstream checks arguments before its permission gate: a call
                                     // that cannot run is never put in front of the user. Treated
@@ -1902,6 +1974,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 results.append(.init(callID: call.callID, output: result))
                                 taskState.record(name: call.name, argsJSON: call.arguments, result: result)
                                 grounded.record(toolName: call.name, argumentsJSON: call.arguments, result: result)
+                                roundDataMovement.append(
+                                    AgentToolLoop.isSuccessfulDataMovement(
+                                        name: call.name, argumentsJSON: call.arguments, result: result,
+                                        wasHeld: wasHeld))
                                 if ChatExecutionContext.toolResultImagesEnabled {
                                     resultImages += ToolResultMediaBridge.attachments(toolName: call.name, result: result)
                                         .loadImages()
@@ -1922,6 +1998,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             codexReplayItems.append(
                                 contentsOf: try finalized.completion.replayInputItems(toolResults: results)
                             )
+                            refundDataMovementRound(roundDataMovement)
                             if let bias = taskState.nextStepBias() {
                                 Self.stageBiasNotice(bias, into: &pendingHarnessNotices)
                             }
@@ -2085,6 +2162,34 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // tool arguments were still streaming. Running the call
                         // would hand the tool truncated (or empty) arguments.
                         if roundFinishReason == "length", !partials.isEmpty {
+                            // Upstream `.truncatedToolCall`: the chat retries once
+                            // with a smaller-chunks notice, then ends honestly.
+                            if interactiveChatRun, !request.isToolFreeWrapUp {
+                                let named = partials.sorted { $0.key < $1.key }.map(\.value.name).first { !$0.isEmpty }
+                                let characters = partials.values.reduce(0) { $0 + $1.arguments.count }
+                                // Drop the half-built tool card from the screen.
+                                continuation.yield(StreamingToolHint.encode(""))
+                                switch terminalRecovery.action(
+                                    for: .truncatedToolCall(toolName: named, argumentCharacters: characters),
+                                    completedToolWork: toolWorkThisRun)
+                                {
+                                case .retry(let notice):
+                                    pendingHarnessNotices = [notice]
+                                    round -= 1
+                                    continue
+                                case .finishWithText(let text):
+                                    let tail = IntelTerminalRecovery.appendedText(text, afterVisible: assistantContent)
+                                    responseText += tail
+                                    continuation.yield(tail)
+                                    NSLog("[CloudChatEngine] Tool call cut by the output limit twice; showed the fallback")
+                                    yieldUsageIfRequested()
+                                    logInference()
+                                    continuation.finish()
+                                    return
+                                case .finish, .retryInFreshTurn:
+                                    break
+                                }
+                            }
                             throw EngineError(
                                 message: Self.outputLimitToolCallMessage(partials.values.map {
                                     (name: $0.name, argumentBytes: $0.arguments.utf8.count)
@@ -2187,6 +2292,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // Execute each tool, surface the result card, and feed
                         // the result back as a tool message.
                         var runEndedByTool = false
+                        var roundDataMovement: [Bool] = []
                         for call in orderedCalls {
                             try Task.checkCancellation()
                             let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
@@ -2201,6 +2307,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         callId: callId, name: call.name, arguments: call.arguments))
                             }
                             var result: String
+                            var wasHeld = false
                             let toolStart = Date()
 
                             if !isOffered {
@@ -2216,6 +2323,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 notices: &pendingHarnessNotices)
                             {
                                 result = harnessResult
+                                wasHeld = true
                             } else {
                                 // Enforce the user's per-tool permission policy
                                 // (Tools / Permissions tab). Deny blocks the tool;
@@ -2358,10 +2466,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     imagesEnabled: ChatExecutionContext.toolResultImagesEnabled))
                             taskState.record(name: call.name, argsJSON: call.arguments, result: result)
                             grounded.record(toolName: call.name, argumentsJSON: call.arguments, result: result)
+                            roundDataMovement.append(
+                                AgentToolLoop.isSuccessfulDataMovement(
+                                    name: call.name, argumentsJSON: call.arguments, result: result, wasHeld: wasHeld))
                             if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
                                 runEndedByTool = true
                             }
                         }
+                        refundDataMovementRound(roundDataMovement)
                         if let bias = taskState.nextStepBias() {
                             Self.stageBiasNotice(bias, into: &pendingHarnessNotices)
                         }

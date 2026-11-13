@@ -59,6 +59,77 @@ struct IntelTerminalRecoveryTests {
         #expect(recovery.action(for: .announcedToolCall, completedToolWork: false) == .finish)
     }
 
+    @Test func aTruncatedToolCallIsRetriedOnceThenGetsTheFallback() {
+        var recovery = IntelTerminalRecovery()
+        let step = AgentLoopModelStep.truncatedToolCall(toolName: "file_write", argumentCharacters: 4_000)
+        let first = recovery.action(for: step, completedToolWork: false)
+        #expect(first == .retry(notice: AgentToolLoop.truncatedToolCallNotice(toolName: "file_write", argumentCharacters: 4_000)))
+        #expect(recovery.action(for: step, completedToolWork: false) == .finishWithText(AgentToolLoop.truncatedToolCallFallback))
+        guard case .retry(let notice) = first else { return }
+        #expect(notice.contains("`file_write`"))
+        #expect(notice.contains("\(WorkspaceToolContract.recommendedWriteChunkCharacters) characters"))
+    }
+
+    @Test func dataMovementCallsAreOnlyBulkLoads() {
+        #expect(AgentToolLoop.isDataMovementCall(name: "db_import", argsJSON: "{}"))
+        #expect(AgentToolLoop.isDataMovementCall(name: "db_insert", argsJSON: #"{"rows":[{"a":1}]}"#))
+        #expect(AgentToolLoop.isDataMovementCall(name: "db_upsert", argsJSON: #"{"rows":[{"a":1}]}"#))
+        #expect(!AgentToolLoop.isDataMovementCall(name: "db_insert", argsJSON: #"{"row":{"a":1}}"#))
+        #expect(!AgentToolLoop.isDataMovementCall(name: "db_insert", argsJSON: #"{"rows":[]}"#))
+        #expect(!AgentToolLoop.isDataMovementCall(name: "file_write", argsJSON: "{}"))
+    }
+
+    @Test func onlySuccessfulUnheldBulkLoadsAreRefunded() {
+        let args = #"{"rows":[{"a":1}]}"#
+        func moved(_ result: String, held: Bool = false) -> Bool {
+            AgentToolLoop.isSuccessfulDataMovement(
+                name: "db_insert", argumentsJSON: args, result: result, wasHeld: held)
+        }
+        #expect(moved(#"{"ok":true}"#))
+        #expect(!moved(#"{"ok":false,"error":"quota"}"#))
+        #expect(!moved("\u{26D4}\u{FE0F} denied"))
+        #expect(!moved(#"{"ok":true}"#, held: true))
+        #expect(!moved("not json"))
+        #expect(AgentToolLoop.maxDataMovementSteps(maxIterations: 40) == 16)
+        #expect(AgentToolLoop.maxDataMovementSteps(maxIterations: 5) == 5)
+    }
+
+    @Test func theInsightsRowSumsEveryRound() {
+        // A 5-round run: 5 x (100, 10) is 500 / 50, not the last round's 100 / 10.
+        let all = ChatEngine.loggedTokenCounts(runPrompt: 500, runCompletion: 50, lastPrompt: 100, lastCompletion: 10)
+        #expect(all.prompt == 500 && all.completion == 50)
+        let none = ChatEngine.loggedTokenCounts(runPrompt: 0, runCompletion: 0, lastPrompt: nil, lastCompletion: nil)
+        #expect(none.prompt == nil && none.completion == nil)
+        let fallback = ChatEngine.loggedTokenCounts(runPrompt: 0, runCompletion: 0, lastPrompt: 7, lastCompletion: 3)
+        #expect(fallback.prompt == 7 && fallback.completion == 3)
+    }
+
+    @Test func aResponsesStreamCutInsideAFunctionCallReportsTheTruncation() throws {
+        var decoder = IntelCodexResponsesSSEDecoder(allowedToolNames: ["file_write"])
+        let events = [
+            #"{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"c1","name":"file_write","arguments":""}}"#,
+            #"{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":\"a"}"#,
+            #"{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}"#,
+        ]
+        let sse = events.map { "data: \($0)\n\n" }.joined()
+        do {
+            _ = try decoder.append(Data(sse.utf8))
+            Issue.record("expected the output-limit error")
+        } catch let error as IntelCodexResponsesAdapter.Error {
+            guard case .outputLimitDuringToolCall(let name, _) = error else {
+                Issue.record("unexpected error \(error)")
+                return
+            }
+            #expect(name == "file_write")
+        }
+        // Without a call in flight it stays an ordinary terminal failure.
+        var plain = IntelCodexResponsesSSEDecoder(allowedToolNames: [])
+        let incomplete =
+            #"data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}"#
+            + "\n\n"
+        #expect(throws: IntelCodexResponsesAdapter.Error.self) { _ = try plain.append(Data(incomplete.utf8)) }
+    }
+
     @Test func theFallbackFollowsVisibleTextAfterABlankLine() {
         #expect(IntelTerminalRecovery.appendedText("Note.", afterVisible: "") == "Note.")
         #expect(IntelTerminalRecovery.appendedText("Note.", afterVisible: "  \n") == "Note.")
@@ -160,6 +231,36 @@ struct IntelTerminalRecoveryEngineTests {
         let (deltas, bodies) = try await run([Self.cut("Partial answer")])
         #expect(bodies.count == 1)
         #expect(deltas.last == "\n\n" + AgentToolLoop.lengthExhaustedFallback)
+    }
+
+    static let cutToolCall =
+        frame(
+            #""tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_current_time","arguments":"{\"a"}}]"#
+        ) + frame("", finish: "length") + "data: [DONE]\n\n"
+
+    @Test("A tool call cut by the output limit is retried once with the smaller-chunks notice")
+    func truncatedToolCallIsRetried() async throws {
+        let (deltas, bodies) = try await run([Self.cutToolCall, Self.answer("Done.")], tools: [Self.offeredTool])
+        #expect(bodies.count == 2)
+        #expect(bodies[1].contains("reached the model output limit"))
+        // The cut call never ran: no result card, and the half-built card is cleared.
+        #expect(!deltas.contains { StreamingToolHint.decodeDone($0) != nil })
+        #expect(deltas.contains(StreamingToolHint.encode("")))
+        #expect(deltas.last == "Done.")
+    }
+
+    @Test("A second cut ends the run with the visible fallback, not a raw error")
+    func truncatedToolCallTwiceShowsTheFallback() async throws {
+        let (deltas, bodies) = try await run([Self.cutToolCall, Self.cutToolCall], tools: [Self.offeredTool])
+        #expect(bodies.count == 2)
+        #expect(deltas.last == AgentToolLoop.truncatedToolCallFallback)
+    }
+
+    @Test("Outside the chat a cut tool call still fails as before")
+    func truncatedToolCallOutsideTheChatStillThrows() async throws {
+        await #expect(throws: (any Error).self) {
+            _ = try await run([Self.cutToolCall, Self.answer("never sent")], tools: [Self.offeredTool], interactive: false)
+        }
     }
 
     @Test("Runs outside the chat and the step-limit wrap-up keep a blank reply as is")

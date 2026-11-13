@@ -3210,6 +3210,9 @@ final class ChatSession: ObservableObject {
                 }
                 if let toolName = StreamingToolHint.decode(delta) {
                     currentTurn.pendingToolName = toolName.isEmpty ? nil : toolName
+                    // An empty name drops a half-built card (a tool call the
+                    // output limit cut short, retried by the engine).
+                    if toolName.isEmpty { currentTurn.clearPendingToolArgs() }
                     rebuildVisibleBlocks()
                     continue
                 }

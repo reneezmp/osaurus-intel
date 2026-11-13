@@ -22,6 +22,10 @@ enum IntelCodexResponsesAdapter {
         case unsupportedOutput(String)
         case unknownTool(String)
         case terminalFailure(String)
+        /// `response.incomplete` for `max_output_tokens` while a function
+        /// call's arguments were still streaming (upstream's truncated tool
+        /// call; the engine retries it once with a smaller-chunks notice).
+        case outputLimitDuringToolCall(toolName: String?, argumentCharacters: Int)
         case incompleteStream
 
         var errorDescription: String? {
@@ -32,6 +36,10 @@ enum IntelCodexResponsesAdapter {
             case .unsupportedOutput(let detail): return "Unsupported Codex Responses output: \(detail)"
             case .unknownTool(let name): return "Codex requested unknown tool \"\(name)\"."
             case .terminalFailure(let detail): return "Codex Responses failed: \(detail)"
+            case .outputLimitDuringToolCall(let name, let characters):
+                return "Codex Responses reached the output token limit while generating tool call "
+                    + "'\(name ?? "?")' arguments (received \(characters) characters). "
+                    + "Increase the agent's Max Tokens setting and retry."
             case .incompleteStream: return "Codex Responses stream ended without response.completed."
             }
         }
@@ -460,6 +468,12 @@ struct IntelCodexResponsesSSEDecoder {
         case "response.completed":
             try complete(event, emissions: &emissions)
 
+        case "response.incomplete" where hitOutputLimit(event) && !pendingTools.isEmpty:
+            let last = pendingTools.sorted { $0.key < $1.key }.last?.value
+            throw IntelCodexResponsesAdapter.Error.outputLimitDuringToolCall(
+                toolName: last?.name.isEmpty == false ? last?.name : nil,
+                argumentCharacters: pendingTools.values.reduce(0) { $0 + $1.arguments.count })
+
         case "response.failed", "response.incomplete", "error":
             throw IntelCodexResponsesAdapter.Error.terminalFailure(terminalMessage(event, type: type))
 
@@ -617,6 +631,13 @@ struct IntelCodexResponsesSSEDecoder {
     private func requiredInteger(_ object: [String: Any], key: String, context: String) throws -> Int {
         guard let value = object[key] as? Int else { throw IntelCodexResponsesAdapter.Error.malformedEvent("\(context).\(key) must be an integer") }
         return value
+    }
+
+    private func hitOutputLimit(_ event: [String: Any]) -> Bool {
+        guard let response = event["response"] as? [String: Any],
+            let details = response["incomplete_details"] as? [String: Any]
+        else { return false }
+        return (details["reason"] as? String) == "max_output_tokens"
     }
 
     private func terminalMessage(_ event: [String: Any], type: String) -> String {

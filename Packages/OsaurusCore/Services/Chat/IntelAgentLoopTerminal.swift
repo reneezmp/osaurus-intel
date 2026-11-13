@@ -369,6 +369,74 @@ extension AgentToolLoop {
         "The model ended in reasoning without producing a user-visible final answer. "
         + "The agent task may be incomplete; retry with Thinking disabled or continue from the latest tool result."
 
+    // There is deliberately no cap on streamed tool-call argument size; the
+    // model's own output-token ceiling is the only limit, and when that cuts a
+    // call short `truncatedToolCallNotice` says so (upstream).
+    static let maxTruncatedToolCallRetries = 1
+
+    static func truncatedToolCallNotice(toolName: String?, argumentCharacters: Int) -> String {
+        let tool = toolName?.isEmpty == false ? "`\(toolName!)`" : "tool"
+        return
+            "[System Notice] The previous \(tool) call reached the model output limit after "
+            + "\(argumentCharacters) argument characters and did not execute. "
+            + "Retry now with `file_write` content under "
+            + "\(WorkspaceToolContract.recommendedWriteChunkCharacters) characters. "
+            + "Write a viable first chunk, then use `file_write` with `mode: \"append\"` "
+            + "for every later chunk."
+    }
+
+    static let truncatedToolCallFallback =
+        "The model repeatedly reached its output limit inside an unfinished tool call. "
+        + "The task is incomplete; retry with a higher Max Tokens setting or smaller file-write chunks."
+
+    /// Staged once per run, the first time a data-movement step is refunded,
+    /// so the model learns it can lean on bulk loads without burning budget.
+    static func dataMovementReliefNotice(cap: Int) -> String {
+        "[System Notice] Bulk data-movement steps (db_import, or db_insert/db_upsert with `rows[]`) don't count against your tool-call budget — up to \(cap) such steps. Prefer them for loading or moving large data."
+    }
+
+    /// Upstream's per-run cap on refunded data-movement steps
+    /// (`maxDataMovementSteps: min(16, maxIterations)`).
+    static func maxDataMovementSteps(maxIterations: Int) -> Int { min(16, max(0, maxIterations)) }
+
+    /// True for a successful bulk DB load that is refunded by the
+    /// data-movement budget instead of charged against the tool-round limit.
+    /// Held / deduped replays and failures never qualify (upstream
+    /// `isSuccessfulDataMovement`).
+    static func isSuccessfulDataMovement(
+        name: String, argumentsJSON: String, result: String, wasHeld: Bool
+    ) -> Bool {
+        guard !wasHeld, !result.hasPrefix("⛔️"), isDataMovementCall(name: name, argsJSON: argumentsJSON) else {
+            return false
+        }
+        return envelopeReportsSuccess(result)
+    }
+
+    /// `db_import`, or `db_insert` / `db_upsert` in their bulk (`rows[]`)
+    /// form. Single-row writes are organic agent work and stay charged.
+    static func isDataMovementCall(name: String, argsJSON: String) -> Bool {
+        switch name {
+        case "db_import":
+            return true
+        case "db_insert", "db_upsert":
+            guard let data = argsJSON.data(using: .utf8),
+                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let rows = obj["rows"] as? [Any]
+            else { return false }
+            return !rows.isEmpty
+        default:
+            return false
+        }
+    }
+
+    /// A tool-result envelope that reports `"ok": true`.
+    static func envelopeReportsSuccess(_ result: String) -> Bool {
+        guard let data = result.data(using: .utf8),
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        return (obj["ok"] as? Bool) == true
+    }
+
     /// Honest chat fallback when a structured current-run Todo remains
     /// unfinished at the hard agent-step cap. This is driven by typed Todo
     /// state, never by classifying the model's prose.
@@ -414,6 +482,7 @@ struct IntelTerminalRecovery: Equatable {
 
     private(set) var consecutiveEmptyTurns = 0
     private(set) var incompleteReasoningRetries = 0
+    private(set) var truncatedToolCallRetries = 0
 
     /// A round with tool calls resets the empty-turn budget (upstream resets
     /// it on every productive step).
@@ -440,8 +509,18 @@ struct IntelTerminalRecovery: Equatable {
             return .finishWithText(AgentToolLoop.incompleteReasoningFallback)
         case .incompleteVisibleResponse:
             return .finishWithText(AgentToolLoop.incompleteReasoningFallback)
-        case .finalResponse, .announcedToolCall, .continuationRequest, .toolCalls, .retryWithoutCharge,
-            .truncatedToolCall:
+        case .truncatedToolCall(let toolName, let argumentCharacters):
+            // Upstream: one bounded retry with a smaller-chunks notice, then
+            // the honest fallback. The cut call never ran and never enters
+            // the model's history.
+            truncatedToolCallRetries += 1
+            if truncatedToolCallRetries <= AgentToolLoop.maxTruncatedToolCallRetries {
+                return .retry(
+                    notice: AgentToolLoop.truncatedToolCallNotice(
+                        toolName: toolName, argumentCharacters: argumentCharacters))
+            }
+            return .finishWithText(AgentToolLoop.truncatedToolCallFallback)
+        case .finalResponse, .announcedToolCall, .continuationRequest, .toolCalls, .retryWithoutCharge:
             return .finish
         }
     }
