@@ -4,22 +4,6 @@
 //
 //  Management view for creating, editing, and viewing skills.
 //
-//  Intel fork: un-body-swapped in M11 Phase 11.A.2.1. The
-//  SkillManager Intel conformer (extended in 11.A.2.0) mirrors the
-//  upstream ObservableObject CRUD surface against real on-disk
-//  persistence via SkillStore. The GitHubImportSheet Intel stub
-//  renders AppleSiliconOnlyTab because GitHubSkillService /
-//  ClaudePluginInstaller are excluded. Local skill creation /
-//  editing / import-from-JSON-data / delete all work on Intel; zip
-//  import / export surface throws "unavailable" errors.
-//
-//  Upstream #2050 (Universal skills library): skills are a toggle-free
-//  library that every custom agent can use, so the per-skill enable switch
-//  and enabled count are gone; the All / Custom tabs slice by source and the
-//  search covers name, description, category and keywords. Upstream's Claude
-//  Plugins tab is `W-skills-plugins-import`; Intel keeps its installed-plugins
-//  section and Import menu.
-//
 
 import AppKit
 import SwiftUI
@@ -37,16 +21,18 @@ struct SkillsView: View {
     @State private var editingSkill: Skill?
     @State private var hasAppeared = false
     @State private var toastMessage: (text: String, isError: Bool)?
-    @State private var showImportPicker = false
+    @State private var exportingSkill: Skill?
+    @State private var isProcessing = false
+    @State private var showProgress = false
+    @State private var searchText = ""
+    @State private var selectedTab: SkillsTab = .all
     @State private var pendingOverwriteImportURL: URL?
     @State private var pendingOverwriteSkillName = ""
     @State private var showOverwriteConfirmation = false
     @State private var showGitHubImport = false
-    @State private var searchText = ""
-    @State private var selectedTab: SkillsTab = .all
-    @State private var exportingSkill: Skill?
-    @State private var isProcessing = false
-    @State private var showProgress = false
+    /// Bumped after a GitHub plugin install so the Claude Plugins marketplace
+    /// re-reads installed state.
+    @State private var claudePluginInstallGeneration = 0
 
     /// Base skill set for a tab, sliced by source: shipped with Osaurus,
     /// created/imported by the user, or installed as part of a plugin.
@@ -54,6 +40,8 @@ struct SkillsView: View {
         switch tab {
         case .all: return skillManager.skills
         case .custom: return skillManager.skills.filter { !$0.isBuiltIn && !$0.isFromPlugin }
+        // The Claude Plugins tab shows the marketplace, not the skill list.
+        case .claudePlugins: return []
         }
     }
 
@@ -96,7 +84,13 @@ struct SkillsView: View {
 
             // Content
             ZStack {
-                if skillManager.skills.isEmpty && !skillManager.isRefreshing {
+                if selectedTab == .claudePlugins {
+                    ClaudePluginsMarketplaceView(
+                        searchText: searchText,
+                        installGeneration: claudePluginInstallGeneration
+                    )
+                        .opacity(hasAppeared ? 1 : 0)
+                } else if skillManager.skills.isEmpty && !skillManager.isRefreshing {
                     SettingsEmptyState(
                         icon: "sparkles",
                         title: L("Create Your First Skill"),
@@ -125,10 +119,6 @@ struct SkillsView: View {
                     ScrollView {
                         LazyVStack(spacing: 12) {
                             availabilityHint
-
-                            InstalledPluginsSection(onMessage: { message, isError in
-                                showToast(message, isError: isError)
-                            })
 
                             let shown = filteredSkills
                             if shown.isEmpty {
@@ -222,30 +212,22 @@ struct SkillsView: View {
             GitHubImportSheet(
                 onImport: { skills in
                     Task { @MainActor in
-                        isProcessing = true
-                        defer { isProcessing = false }
-                        let imported = await skillManager.importSkillsFromMarkdown(skills)
+                        _ = await skillManager.importSkillsFromMarkdown(skills)
                         showGitHubImport = false
-                        if imported.count == 1 {
-                            showToast(L("Imported \"\(imported[0].name)\""))
-                        } else {
-                            showToast(L("Imported \(imported.count) skills"))
-                        }
+                        claudePluginInstallGeneration += 1
+                        showToast(skills.count == 1 ? L("Imported 1 item") : L("Imported \(skills.count) items"))
                     }
                 },
-                onCancel: {
-                    showGitHubImport = false
-                },
+                onCancel: { showGitHubImport = false },
                 onPluginInstallComplete: { report in
-                    // The sheet shows its own summary screen; just refresh the
-                    // skills list and surface a short toast in the background.
                     Task { @MainActor in
                         await skillManager.refresh()
+                        claudePluginInstallGeneration += 1
                         let total =
                             report.totalImportedSkills + report.totalImportedAgents
                             + report.totalImportedCommands + report.totalImportedMCPProviders
                         if total > 0 {
-                            showToast(L("Installed \(total) items"))
+                            showToast(total == 1 ? L("Installed 1 item") : L("Installed \(total) items"))
                         }
                     }
                 }
@@ -261,10 +243,6 @@ struct SkillsView: View {
                 pendingOverwriteImportURL = nil
                 pendingOverwriteSkillName = ""
                 Task { @MainActor in
-                    // The security scope from the picker ended with the first
-                    // attempt; reopen it for the retry.
-                    let scoped = url.startAccessingSecurityScopedResource()
-                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
                     await performSkillImport(from: url, overwriteExisting: true)
                 }
             }
@@ -300,20 +278,6 @@ struct SkillsView: View {
                 }
             }
         }
-        .fileImporter(
-            isPresented: $showImportPicker,
-            allowedContentTypes: [
-                .json,
-                UTType(filenameExtension: "md") ?? .plainText,
-                .zip,
-                UTType(filenameExtension: "zip") ?? .archive,
-            ],
-            allowsMultipleSelection: false
-        ) { result in
-            Task { @MainActor in
-                await handleImport(result)
-            }
-        }
         .onChange(of: exportingSkill) { skill in
             if let skill = skill {
                 Task { @MainActor in
@@ -323,72 +287,16 @@ struct SkillsView: View {
         }
     }
 
-    // MARK: - Import/Export
+    // MARK: - Export
 
-    @MainActor
-    private func handleImport(_ result: Result<[URL], Error>) async {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            // Security-scoped access must last for the whole read / unzip.
-            guard url.startAccessingSecurityScopedResource() else {
-                showToast(L("Cannot access file"), isError: true)
-                return
-            }
-            defer { url.stopAccessingSecurityScopedResource() }
-            await performSkillImport(from: url, overwriteExisting: false)
-        case .failure(let error):
-            showToast(L("Import failed: \(error.localizedDescription)"), isError: true)
-        }
-    }
-
-    /// Upstream Classic's import flow: .zip bundles go through
-    /// `SkillImportPolicy`, a name collision asks before replacing, and the
-    /// import may hand back notes (ignored extra SKILL.md files).
-    @MainActor
-    private func performSkillImport(from url: URL, overwriteExisting: Bool) async {
-        isProcessing = true
-        defer { isProcessing = false }
-        do {
-            switch url.pathExtension.lowercased() {
-            case "zip":
-                let result = try await skillManager.importSkillFromZip(url, overwriteExisting: overwriteExisting)
-                showImportSuccess(for: result.skill, notes: result.notes)
-            case "json":
-                let data = try Data(contentsOf: url)
-                let skill = try await skillManager.importSkill(from: data)
-                showImportSuccess(for: skill, notes: [])
-            default:
-                // Read off the main thread so a large file can't hang the UI.
-                let content = try await Task.detached(priority: .userInitiated) {
-                    try String(contentsOf: url, encoding: .utf8)
-                }.value
-                let skill = try await skillManager.importSkillFromMarkdown(
-                    content,
-                    overwriteExisting: overwriteExisting
-                )
-                showImportSuccess(for: skill, notes: [])
-            }
-        } catch SkillFileError.skillAlreadyExists(let name) {
-            pendingOverwriteImportURL = url
-            pendingOverwriteSkillName = name
-            showOverwriteConfirmation = true
-        } catch {
-            showToast(L("Import failed: \(error.localizedDescription)"), isError: true)
-        }
-    }
-
-    @MainActor
-    private func showImportSuccess(for skill: Skill, notes: [String]) {
-        let note = notes.first.map { " \($0)" } ?? ""
-        showToast(L("Imported \"\(skill.name)\"") + note)
-    }
-
+    /// Export a user-created skill as SKILL.md or a ZIP bundle with
+    /// associated files. Kept here so the in-row Export button keeps
+    /// working after the broader Import dropdown migrated to the
+    /// Plugins tab.
     @MainActor
     private func exportSkill(_ skill: Skill) {
         let panel = NSSavePanel()
 
-        // If skill has associated files, export as ZIP; otherwise just SKILL.md
         if skill.hasAssociatedFiles {
             panel.allowedContentTypes = [.zip]
             panel.nameFieldStringValue = "\(skill.xplaceholder_agentSkillsNamex).zip"
@@ -408,13 +316,11 @@ struct SkillsView: View {
                     defer { self.isProcessing = false }
                     do {
                         if skill.hasAssociatedFiles {
-                            // export as ZIP
                             let zipURL = try await skillManager.exportSkillAsZip(skill)
                             try FileManager.default.copyItem(at: zipURL, to: url)
                             try? FileManager.default.removeItem(at: zipURL)
                             self.showToast(L("Exported \"\(skill.name)\" as ZIP"))
                         } else {
-                            // export as SKILL.md
                             let content = skillManager.exportSkillAsAgentSkills(skill)
                             try content.write(to: url, atomically: true, encoding: .utf8)
                             self.showToast(L("Exported \"\(skill.name)\" as SKILL.md"))
@@ -428,36 +334,65 @@ struct SkillsView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - Import
 
-    private var headerView: some View {
-        ManagerHeaderWithTabs(
-            title: L("Skills"),
-            subtitle: L("Reusable workflows, automatically available to every custom agent")
-        ) {
-            HeaderIconButton("arrow.clockwise", isLoading: skillManager.isRefreshing, help: "Refresh skills") {
-                Task { @MainActor in
-                    await skillManager.refresh()
-                }
-            }
-            ImportDropdownButton(
-                onGitHub: { showGitHubImport = true },
-                onLocal: { showImportPicker = true }
-            )
-            .disabled(isProcessing || skillManager.isRefreshing)
+    /// Import a third-party skill from disk: either a SKILL.md file or a ZIP
+    /// bundle carrying nested `references/`/`assets/` resources. Uses an
+    /// AppKit `NSOpenPanel` (not SwiftUI `.fileImporter`) to avoid the dialog
+    /// freeze that previously affected the import flow.
+    @MainActor
+    private func importSkill() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.zip, UTType(filenameExtension: "md") ?? .plainText]
+        panel.title = L("Import Skill")
+        panel.message = L("Choose a SKILL.md file or a ZIP bundle to import")
 
-            HeaderPrimaryButton("Create Skill", icon: "plus") {
-                isCreating = true
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                await self.performSkillImport(from: url, overwriteExisting: false)
             }
-            .disabled(isProcessing || skillManager.isRefreshing)
-        } tabsRow: {
-            HeaderTabsRow(
-                selection: $selectedTab,
-                counts: tabCounts,
-                searchText: $searchText,
-                searchPlaceholder: "Search skills"
+        }
+    }
+
+    @MainActor
+    private func performSkillImport(from url: URL, overwriteExisting: Bool) async {
+        isProcessing = true
+        defer { isProcessing = false }
+        do {
+            if url.pathExtension.lowercased() == "zip" {
+                let result = try await skillManager.importSkillFromZip(url, overwriteExisting: overwriteExisting)
+                showImportSuccess(for: result.skill, notes: result.notes)
+            } else {
+                // Read off the main thread so a large file can't hang the UI.
+                let content = try await Task.detached(priority: .userInitiated) {
+                    try String(contentsOf: url, encoding: .utf8)
+                }.value
+                let skill = try await skillManager.importSkillFromMarkdown(
+                    content,
+                    overwriteExisting: overwriteExisting
+                )
+                showImportSuccess(for: skill, notes: [])
+            }
+        } catch SkillFileError.skillAlreadyExists(let name) {
+            pendingOverwriteImportURL = url
+            pendingOverwriteSkillName = name
+            showOverwriteConfirmation = true
+        } catch {
+            showToast(
+                L("Import failed: \(error.localizedDescription)"),
+                isError: true
             )
         }
+    }
+
+    @MainActor
+    private func showImportSuccess(for skill: Skill, notes: [String]) {
+        let note = notes.first.map { " \($0)" } ?? ""
+        showToast(L("Imported \"\(skill.name)\"") + note)
     }
 
     // MARK: - Availability Hint
@@ -516,6 +451,43 @@ struct SkillsView: View {
         .padding(.vertical, 48)
     }
 
+    // MARK: - Header
+
+    private var headerView: some View {
+        ManagerHeaderWithTabs(
+            title: L("Skills"),
+            subtitle: L("Reusable workflows, automatically available to every custom agent")
+        ) {
+            HeaderIconButton("arrow.clockwise", isLoading: skillManager.isRefreshing, help: "Refresh skills") {
+                Task { @MainActor in
+                    await skillManager.refresh()
+                }
+            }
+
+            HeaderIconButton("square.and.arrow.down", help: "Import skill") {
+                importSkill()
+            }
+            .disabled(isProcessing || skillManager.isRefreshing)
+
+            HeaderIconButton("link.badge.plus", help: "Import Claude plugin from GitHub") {
+                showGitHubImport = true
+            }
+            .disabled(isProcessing || skillManager.isRefreshing)
+
+            HeaderPrimaryButton("Create Skill", icon: "plus") {
+                isCreating = true
+            }
+            .disabled(isProcessing || skillManager.isRefreshing)
+        } tabsRow: {
+            HeaderTabsRow(
+                selection: $selectedTab,
+                counts: tabCounts,
+                searchText: $searchText,
+                searchPlaceholder: "Search skills"
+            )
+        }
+    }
+
     // MARK: - Toast Helper
 
     @MainActor
@@ -528,76 +500,6 @@ struct SkillsView: View {
             withAnimation(theme.animationQuick()) {
                 toastMessage = nil
             }
-        }
-    }
-}
-
-// MARK: - Import Dropdown Button
-
-private struct ImportDropdownButton: View {
-    @Environment(\.theme) private var theme
-
-    let onGitHub: () -> Void
-    let onLocal: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        // Menu actions are dispatched via `dispatchAfterDismiss` so the
-        // parent state mutation runs *after* the menu popover has finished
-        // animating closed. Presenting a `.sheet` or `.fileImporter`
-        // synchronously from inside a `Menu` button can deadlock SwiftUI
-        // — historically the root cause of an instant beachball on this
-        // dropdown. See commit 31efc410.
-        Menu {
-            Button(action: { dispatchAfterDismiss(onGitHub) }) {
-                Label {
-                    Text("From GitHub", bundle: .module)
-                } icon: {
-                    Image(systemName: "link")
-                }
-            }
-            Divider()
-            Button(action: { dispatchAfterDismiss(onLocal) }) {
-                Label {
-                    Text("From File", bundle: .module)
-                } icon: {
-                    Image(systemName: "doc")
-                }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "square.and.arrow.down")
-                    .font(.system(size: 12, weight: .medium))
-                Text("Import", bundle: .module)
-                    .font(.system(size: 13, weight: .medium))
-            }
-            .foregroundColor(theme.primaryText)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(theme.tertiaryBackground)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(theme.inputBorder, lineWidth: 1)
-                    )
-                    .opacity(isHovering ? 0.8 : 1)
-            )
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.15)) {
-                isHovering = hovering
-            }
-        }
-    }
-
-    private func dispatchAfterDismiss(_ action: @escaping () -> Void) {
-        Task { @MainActor in
-            try? await Task.sleepForPopoverDismiss()
-            action()
         }
     }
 }

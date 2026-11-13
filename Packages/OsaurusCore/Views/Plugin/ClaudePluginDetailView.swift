@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  ClaudePluginDetailView.swift
 //  osaurus
@@ -96,17 +95,17 @@ struct ClaudePluginDetailView: View {
             loadChangelogIfNeeded()
         }
         .themedAlert(
-            "Error",
+            L("Error"),
             isPresented: $showError,
-            message: errorMessage ?? "Unknown error",
+            message: errorMessage ?? L("Unknown error"),
             primaryButton: .primary("OK") {}
         )
         .themedAlert(
-            "Uninstall Plugin",
+            L("Uninstall Plugin"),
             isPresented: $showDeleteConfirm,
             message:
-                "Are you sure you want to uninstall \"\(plugin.displayName)\"? This action cannot be undone.",
-            primaryButton: .destructive("Uninstall") {
+                L("Are you sure you want to uninstall \"\(plugin.displayName)\"? This action cannot be undone."),
+            primaryButton: .destructive(L("Uninstall")) {
                 guard let onUninstall else { return }
                 Task {
                     do {
@@ -118,7 +117,7 @@ struct ClaudePluginDetailView: View {
                     }
                 }
             },
-            secondaryButton: .cancel("Cancel")
+            secondaryButton: .cancel(L("Cancel"))
         )
     }
 
@@ -570,20 +569,20 @@ struct ClaudePluginDetailView: View {
             if declared > 0 {
                 switch kind {
                 case .skill:
-                    return "No skills imported; \(declared) declared."
+                    return L("No skills imported; \(declared) declared.")
                 case .schedule:
-                    return "No schedules imported; \(declared) declared."
+                    return L("No schedules imported; \(declared) declared.")
                 case .command:
-                    return "No slash commands imported; \(declared) declared."
+                    return L("No slash commands imported; \(declared) declared.")
                 case .mcp:
-                    return "No MCP providers imported; \(declared) declared."
+                    return L("No MCP providers imported; \(declared) declared.")
                 }
             } else {
                 switch kind {
-                case .skill: return "No skills shipped with this plugin."
-                case .schedule: return "No schedules shipped with this plugin."
-                case .command: return "No slash commands shipped with this plugin."
-                case .mcp: return "No MCP providers shipped with this plugin."
+                case .skill: return L("No skills shipped with this plugin.")
+                case .schedule: return L("No schedules shipped with this plugin.")
+                case .command: return L("No slash commands shipped with this plugin.")
+                case .mcp: return L("No MCP providers shipped with this plugin.")
                 }
             }
         }()
@@ -1512,5 +1511,3 @@ private struct PreviewMeta: View {
 
 // Keyword chips are arranged via the shared `FlowLayout` defined in
 // `Views/Common/FlowLayout.swift` — no per-view redeclaration needed.
-
-#endif

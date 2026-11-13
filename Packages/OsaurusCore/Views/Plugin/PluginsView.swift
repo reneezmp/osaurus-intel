@@ -1920,7 +1920,7 @@ enum PluginSecretsStatus {
 
 // MARK: - Shared Components
 
-private struct StatusCapsuleBadge: View {
+struct StatusCapsuleBadge: View {
     let icon: String
     let text: String
     let color: Color

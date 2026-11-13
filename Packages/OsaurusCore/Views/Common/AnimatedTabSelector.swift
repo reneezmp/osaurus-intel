@@ -188,15 +188,17 @@ enum ToolsTab: String, CaseIterable, AnimatedTabItem {
 /// Source-based filters for the Skills library (upstream #2050). Every
 /// installed skill is automatically available to custom agents, so the tabs
 /// slice by where a skill came from rather than by an enablement state.
-/// Upstream's third tab (Claude Plugins) is `W-skills-plugins-import`.
+/// The third tab (Claude Plugins) is the marketplace (`W-skills-plugins-import`).
 enum SkillsTab: String, CaseIterable, AnimatedTabItem {
     case all = "All"
     case custom = "Custom"
+    case claudePlugins = "Claude Plugins"
 
     var title: String {
         switch self {
         case .all: return L("All")
         case .custom: return L("Custom")
+        case .claudePlugins: return L("Claude Plugins")
         }
     }
 }
