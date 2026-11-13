@@ -4722,6 +4722,33 @@ Sparkle key `bYYJJqFx…`. Not launched on the build Mac (macOS 27.2 beta
 26B5086k). The public release needs build 67 or higher. Rosy steps: "Release
 candidate 1.0.62 (build 66)" in the Rosy retest checklist.
 
+### Rosy candidate 1.0.62 (build 68) — 2026-11-13
+
+Built from `541cd7a06` with `scripts/build/build_rosy.sh` (Debug, thin
+x86_64, macOS 13.0 minimum): everything since candidate 67 (`5f67afc1d`),
+that is `W-cov-reaudit` 4–5b, 5a, 5c's Router `idempotency_key` and slice 1,
+the Classic fixes (groups A–D), Anthropic thinking replay, per-agent
+generation settings, the shared skills library, skill and Claude plugin
+import, and the `file_read` OCR crash fix. Full suite 5,467 tests passed
+before the build. Archive
+`build/rosy-deploy/Osaurus-Intel-RC-1.0.62-68-2026-11-13.zip` in the main
+checkout (93,396,646 bytes, SHA-256 `98d1ce06…16bff7`); ZIP valid, all six
+framework symlinks kept after unpacking, strict codesign (before and after
+unpacking), canonical `~/.osaurus`, Sparkle key `bYYJJqFx…`. Not launched on
+the build Mac. The public release needs build 69 or higher and Renée's
+signed plugin publish. Rosy steps: the checklist sections dated 2026-11-11
+to 2026-11-13 in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+
+**Paused 2026-11-13 (weekly usage limit), saved as WIP commits, not in this
+build:** `W-cov-reaudit` 5c slice 2 (branch
+`worktree-agent-a1f0309863791d06e`, WIP `d1687dcab`: Deny skips the rest of
+the batch, unique call ids, mid-stream errors appended below streamed text;
+untested) and `W-declarative-config` stage 1 (branch
+`worktree-agent-acf5197986196bd17`, WIP `20e0cb64a`: the
+`Configuration/Declarative` model and YAML with secret references; builds,
+untested, touches `Package.swift`). Resume both from those branches; then 5c
+slices 3+ and 5d.
+
 ### Plugin host safety (`W-plugin-reliability` stage 2a) — 2026-11-04
 
 Intel's plugin host (`IntelPluginExecution`) now answers `http_request` and

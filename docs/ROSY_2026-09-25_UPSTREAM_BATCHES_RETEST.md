@@ -13,6 +13,15 @@ nothing here is accepted until checked on Rosy.
 
 ## Candidate
 
+- **Current: `1.0.62` build `68`** (Debug, thin x86_64), built from
+  `541cd7a06` on 2026-11-13: archive
+  `build/rosy-deploy/Osaurus-Intel-RC-1.0.62-68-2026-11-13.zip`, SHA-256
+  `98d1ce06b55a9ad72083f1f11074f98e663352c478f9dd9e19d7566fae16bff7`. It
+  contains every section marked "Not in candidate 67" (2026-11-11 to
+  2026-11-13); test those first. Details: `UPSTREAM_SYNC.md`, "Rosy candidate
+  1.0.62 (build 68)".
+- Earlier:
+
 - Candidate: `1.0.56` build `57` (Debug, thin x86_64), built from
   `e8c5a6bd4` on 2026-09-26.
 - Archive: `build/rosy-deploy/Osaurus-Intel-RC-UpstreamBatches-2026-09-26.zip`
@@ -3429,3 +3438,10 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] The link icon (import from GitHub): a public repo with `SKILL.md` folders lets you pick skills to import. A repo with `.claude-plugin/marketplace.json` shows an install summary (stdio MCP servers listed as blocked).
 - [ ] Claude Plugins tab: the catalog loads (add a GitHub token if rate limited); install a plugin, open it (update, configure, uninstall); uninstalling removes its skills.
 - [ ] Type `/` and pick one of your own skills, then ask "change this skill's instructions to also …": an approval card for `update_skill` appears and the skill file changes (built-in skills can't be edited this way).
+
+## Router billing key and engine slice 1 (2026-11-13)
+
+`W-cov-reaudit` 5c (`COV_REAUDIT_STAGE5C_ENGINE.md`). In candidate 68.
+
+- [ ] Chat on an Osaurus Router model with a tool-heavy request: Insights' run row shows input/output tokens summed over all rounds (larger than the last round alone), and Credits' activity shows one charge per round (no doubled charges on a retried round).
+- [ ] Ask a model with a small Max Tokens to write a long file: instead of a raw "exhausted its output limit" error, it retries once with smaller chunks.
