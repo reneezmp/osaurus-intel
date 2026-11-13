@@ -3419,3 +3419,13 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] Custom agent (Auto tools): the popover shows only Platform and Persona (plus Enabled Capabilities with plugins); the agent still calls tools when asked (todo, share_artifact, capabilities).
 - [ ] **Weak model:** custom agent + working folder + DeepSeek. Ask "list the files in this folder and show me README.md", then "create notes.txt with three bullet points". Expect real file tool calls, not typed-out listings or fake `ls` output. Repeat with the Default agent + folder. Report any reply that describes a tool call instead of making it.
 - [ ] Disable Tools with a folder attached: the "Folder tools are disabled" notice, no tool calls.
+
+## Skill import, GitHub skills and Claude plugins (2026-11-12)
+
+`W-skills-plugins-import`. Not in candidate 67.
+
+- [ ] Skills › Import: pick a `.zip` with `SKILL.md` and a `references/` folder: an "Imported" toast and the skill in the list. Import it again: "Replace Existing Skill?", and Replace overwrites it.
+- [ ] Export a custom skill that has files as `.zip`, then import it under a new name: the files come back.
+- [ ] The link icon (import from GitHub): a public repo with `SKILL.md` folders lets you pick skills to import. A repo with `.claude-plugin/marketplace.json` shows an install summary (stdio MCP servers listed as blocked).
+- [ ] Claude Plugins tab: the catalog loads (add a GitHub token if rate limited); install a plugin, open it (update, configure, uninstall); uninstalling removes its skills.
+- [ ] Type `/` and pick one of your own skills, then ask "change this skill's instructions to also …": an approval card for `update_skill` appears and the skill file changes (built-in skills can't be edited this way).
