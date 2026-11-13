@@ -3869,6 +3869,11 @@ final class ChatSession: ObservableObject {
                     req.samplingParametersAreImplicit = true
                     turnGenerationControls.apply(to: &req)
                     req.ttftTrace = ttftTrace
+                    // Router billing dedupe (upstream Classic): one stable key per
+                    // logical step; the engine appends the round and a body
+                    // fingerprint, so in-run re-POSTs of an identical body share
+                    // a key. A user Retry is a new run and re-bills by design.
+                    req.idempotencyKey = "\(runId.uuidString):\(attempts)"
                     // Intel: the engine runs the tool rounds itself, so it gets
                     // what is left of Max Tool Attempts (upstream's
                     // `maxIterations`); it used to stop at its own default of 12.
@@ -4347,6 +4352,7 @@ final class ChatSession: ObservableObject {
                             finalReq.samplingParametersAreImplicit = true
                             turnGenerationControls.apply(to: &finalReq)
                             finalReq.isToolFreeWrapUp = true
+                            finalReq.idempotencyKey = "\(runId.uuidString):final"
                             // The request has no tools; the notice says so, so
                             // the model reports what is unfinished instead of
                             // imitating a tool call (upstream #2235). It rides

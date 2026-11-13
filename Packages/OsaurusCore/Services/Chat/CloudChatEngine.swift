@@ -8,6 +8,7 @@
 
 #if OSAURUS_INTEL
 
+import CryptoKit
 import Foundation
 
 // MARK: - Protocol (mirrors excluded ChatEngineProtocol.swift)
@@ -1074,6 +1075,46 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             + "Increase the agent's Max Tokens setting and retry."
     }
 
+    // MARK: - Router idempotency (upstream Classic, `idempotency_key`)
+
+    /// Short, stable fingerprint of the outbound body bytes. Upstream hashes
+    /// the message array (`AgentToolLoop.stepIdempotencyFingerprint`); Intel
+    /// hashes the whole canonical body, a superset of what reaches the wire.
+    /// An identical re-POST dedupes on the same key; any body change (a retry
+    /// notice, stripped images) mints a fresh key, because the Router answers
+    /// a same-key, different-body request with 409 IDEMPOTENCY_CONFLICT.
+    nonisolated static func bodyFingerprint(_ data: Data) -> String {
+        SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Key for one logical generation attempt:
+    /// `<base>:<round>:r<recovery ordinal>-<body fingerprint>` (upstream
+    /// `recoveryAwareIdempotencySuffix`). The ordinal increments on the
+    /// fresh-turn reasoning recovery, whose body is otherwise identical to
+    /// the attempt it replaces. `base` is the chat surface's per-run key, or
+    /// `auto-<UUID>` for surfaces that set none (plugin, HTTP, headless).
+    nonisolated static func routerIdempotencyKey(
+        base: String, round: Int, recoveryOrdinal: Int, bodyFingerprint: String
+    ) -> String {
+        "\(base):\(round):r\(max(0, recoveryOrdinal))-\(bodyFingerprint)"
+    }
+
+    /// Router-only: add `idempotency_key` to the (about to be signed) body.
+    /// Returns the key sent, nil for every other provider, which must never
+    /// see the field (some reject unknown keys with 422).
+    nonisolated static func applyRouterIdempotency(
+        to body: inout [String: Any], isOsaurusRouter: Bool, base: String, round: Int, recoveryOrdinal: Int
+    ) throws -> String? {
+        guard isOsaurusRouter else { return nil }
+        body.removeValue(forKey: "idempotency_key")
+        let fingerprint = bodyFingerprint(
+            try JSONSerialization.data(withJSONObject: body, options: .osaurusCanonical))
+        let key = routerIdempotencyKey(
+            base: base, round: round, recoveryOrdinal: recoveryOrdinal, bodyFingerprint: fingerprint)
+        body["idempotency_key"] = key
+        return key
+    }
+
     nonisolated static func wireToolChoice(_ choice: ToolChoiceOption?) -> Any {
         switch choice {
         case nil, .some(.auto): return "auto"
@@ -1139,6 +1180,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 var completionTokens: Int?
                 var insightToolCalls: [ToolCallLog] = []
                 var didLogInference = false
+                // Key of the Router request in flight (ledger / Insights request id).
+                var routerRequestKey: String?
 
                 // Automatic tool discovery (docs/TOOL_DISCOVERY_INTEL.md):
                 // `capabilities` loads tools mid-run; they join the request
@@ -1193,6 +1236,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         source: loggedSource,
                         turnId: loggedTurnId,
                         parentTurnId: loggedParentTurnId,
+                        requestId: routerRequestKey,
                         model: resolvedModel,
                         inputTokens: promptTokens ?? Self.estimatedInputTokens(request),
                         outputTokens: outputTokens,
@@ -1278,6 +1322,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     let maxToolRounds = request.maxToolRounds ?? 12
                     var round = 0
                     var totalChunks = 0
+                    // Router idempotency (upstream Classic): the surface's per-run
+                    // key, or a synthesized one; `recoveryOrdinal` bumps on the
+                    // fresh-turn reasoning recovery; `routerRequestKey` is the key
+                    // of the request in flight (ledger / Insights request id).
+                    let idempotencyBase = request.idempotencyKey ?? "auto-\(UUID().uuidString)"
+                    var recoveryOrdinal = 0
 
                     while round < maxToolRounds {
                         try Task.checkCancellation()
@@ -1481,6 +1531,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             }
                         }
 
+                        // Router only, inside the signed body (upstream Classic).
+                        routerRequestKey = try Self.applyRouterIdempotency(
+                            to: &body, isOsaurusRouter: endpoint.isOsaurusRouter,
+                            base: idempotencyBase, round: round, recoveryOrdinal: recoveryOrdinal)
+
                         let requestURL =
                             endpoint.usesGeminiWire
                             ? IntelGeminiAdapter.streamURL(modelsEndpoint: endpoint.url, model: endpoint.modelId)
@@ -1638,6 +1693,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     continue
                                 case .retryInFreshTurn:
                                     continuation.yield(StreamingGroundedRetryHint.sentinel)
+                                    recoveryOrdinal += 1
                                     round -= 1
                                     continue
                                 case .finishWithText(let text):
@@ -1951,7 +2007,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     Task { @MainActor in
                                         OsaurusRouterAccountService.shared.noteRouterSummary(summary)
                                     }
-                                    continuation.yield(StreamingBillingHint.encode(RouterBillingSummary(summary)))
+                                    var billingSummary = RouterBillingSummary(summary)
+                                    if billingSummary.requestId == nil {
+                                        billingSummary.requestId = routerRequestKey
+                                    }
+                                    continuation.yield(StreamingBillingHint.encode(billingSummary))
                                     continue
                                 }
 
@@ -2048,6 +2108,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 // but out of the next request (upstream
                                 // `prepareIncompleteReasoningContinuation`).
                                 continuation.yield(StreamingGroundedRetryHint.sentinel)
+                                recoveryOrdinal += 1
                                 round -= 1
                                 continue
                             case .finishWithText(let text):

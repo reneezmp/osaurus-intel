@@ -112,6 +112,65 @@ struct IntelAgentRunEngineTests {
         #expect(deltas.compactMap(StreamingUsageHint.decode).isEmpty)
     }
 
+    // MARK: - Router idempotency (upstream Classic `idempotency_key`)
+
+    @Test("Non-Router providers never receive an idempotency_key, even when the surface set one")
+    func nonRouterBodyCarriesNoKey() async throws {
+        _ = try await run([Self.toolCallStream(callId: "call_1", usage: nil), Self.textStream(usage: nil)]) {
+            $0.idempotencyKey = "run-1:1"
+        }
+        let bodies = RunFixtureProtocol.requestBodies
+        #expect(bodies.count == 2)
+        for body in bodies {
+            #expect(!String(decoding: body, as: UTF8.self).contains("idempotency_key"))
+        }
+    }
+
+    @Test("The Router key is added only for the Router, and an identical re-POST reuses it")
+    func routerKeyIsStableForIdenticalBodies() throws {
+        var other: [String: Any] = ["model": "m", "messages": [["role": "user", "content": "hi"]]]
+        let none = try ChatEngine.applyRouterIdempotency(
+            to: &other, isOsaurusRouter: false, base: "run-1:1", round: 1, recoveryOrdinal: 0)
+        #expect(none == nil)
+        #expect(other["idempotency_key"] == nil)
+
+        var first: [String: Any] = ["model": "m", "messages": [["role": "user", "content": "hi"]]]
+        var replay = first
+        let k1 = try #require(
+            try ChatEngine.applyRouterIdempotency(
+                to: &first, isOsaurusRouter: true, base: "run-1:1", round: 1, recoveryOrdinal: 0))
+        let k2 = try #require(
+            try ChatEngine.applyRouterIdempotency(
+                to: &replay, isOsaurusRouter: true, base: "run-1:1", round: 1, recoveryOrdinal: 0))
+        #expect(k1 == k2)
+        #expect(first["idempotency_key"] as? String == k1)
+        #expect(k1.hasPrefix("run-1:1:1:r0-"))
+    }
+
+    @Test("A changed body, round or recovery ordinal mints a fresh Router key")
+    func routerKeyChangesWithTheAttempt() throws {
+        func key(_ text: String, round: Int = 1, ordinal: Int = 0, base: String = "b") throws -> String {
+            var body: [String: Any] = ["messages": [["role": "user", "content": text]]]
+            return try #require(
+                try ChatEngine.applyRouterIdempotency(
+                    to: &body, isOsaurusRouter: true, base: base, round: round, recoveryOrdinal: ordinal))
+        }
+        let original = try key("hi")
+        #expect(try key("hi + notice") != original)
+        #expect(try key("hi", round: 2) != original)
+        #expect(try key("hi", ordinal: 1) != original)
+        #expect(try key("hi") == original)
+    }
+
+    @Test("Surfaces that set no key get an auto-UUID base, and the key is a valid Router token")
+    func autoKeyShape() throws {
+        let key = ChatEngine.routerIdempotencyKey(
+            base: "auto-\(UUID().uuidString)", round: 3, recoveryOrdinal: 0, bodyFingerprint: "0123456789abcdef")
+        #expect(key.hasPrefix("auto-"))
+        #expect(key.count <= 200)
+        #expect(key.range(of: "^[A-Za-z0-9._:-]{1,200}$", options: .regularExpression) != nil)
+    }
+
     @Test("The started marker is an in-band hint, never text")
     func startedMarkerIsASentinel() {
         let encoded = StreamingToolHint.encodeStarted(callId: "c", name: "n", arguments: "{\"a\":1}")
@@ -125,16 +184,30 @@ private final class RunFixtureProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var queue: [String] = []
     nonisolated(unsafe) private static var count = 0
+    nonisolated(unsafe) private static var bodies: [Data] = []
+    static var requestBodies: [Data] { lock.lock(); defer { lock.unlock() }; return bodies }
     static var requestCount: Int { lock.lock(); defer { lock.unlock() }; return count }
     static func configure(responses: [String]) {
         lock.lock(); defer { lock.unlock() }
-        queue = responses; count = 0
+        queue = responses; count = 0; bodies = []
     }
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "run-fixture.invalid" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         Self.lock.lock()
         Self.count += 1
+        var sent = request.httpBody ?? Data()
+        if sent.isEmpty, let stream = request.httpBodyStream {
+            stream.open()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let n = stream.read(&buffer, maxLength: buffer.count)
+                if n <= 0 { break }
+                sent.append(buffer, count: n)
+            }
+            stream.close()
+        }
+        Self.bodies.append(sent)
         let text = Self.queue.isEmpty ? "data: [DONE]\n\n" : Self.queue.removeFirst()
         Self.lock.unlock()
         let response = HTTPURLResponse(

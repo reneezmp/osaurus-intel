@@ -187,6 +187,12 @@ struct ChatCompletionRequest: Codable, Sendable {
     /// terminal recovery stays off and a blank reply gets the chat's own
     /// limit text. Not encoded.
     var isToolFreeWrapUp: Bool = false
+    /// Stable per-logical-step idempotency token (upstream Classic
+    /// `inferenceContext.idempotencyKey`). Set by the chat surface; the engine
+    /// appends the round and a body fingerprint, and sends the result to the
+    /// Osaurus Router ONLY, inside the signed body, so a re-POST dedupes
+    /// billing. Not decoded from inbound JSON, not encoded.
+    var idempotencyKey: String? = nil
     /// Intel: `[System Notice]` lines for the first round only, applied the
     /// engine's way (appended to the trailing tool result, else a trailing
     /// user message; `CloudChatEngine.appendingTransientNotices`). Never
