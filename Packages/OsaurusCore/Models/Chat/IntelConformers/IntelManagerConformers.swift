@@ -449,6 +449,15 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
             existingAgentIds: agents.map(\.id))
     }
 
+    /// Sets which agent new chats open with (upstream `setNewChatAgent`, used by
+    /// the declarative config applier). Intel stores `nil` for the
+    /// Orchestrator so the setting survives its id being re-derived.
+    func setNewChatAgent(_ id: UUID) {
+        var config = DefaultAgentConfigurationStore.load()
+        config.newChatAgentId = id == Agent.defaultId ? nil : id
+        DefaultAgentConfigurationStore.save(config)
+    }
+
     static func resolveNewChatAgentId(configured: UUID?, existingAgentIds: [UUID]) -> UUID {
         guard let configured, existingAgentIds.contains(configured) else { return Agent.defaultId }
         return configured
@@ -480,6 +489,41 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
             createdAt: now,
             updatedAt: now
         )
+    }
+
+    /// Upstream's `create` (declarative config applier): a new custom agent with
+    /// the normal seed, saved. Unlike `createFromPhone` it leaves the
+    /// capability switches at their defaults; the document sets them next.
+    @discardableResult
+    func create(
+        name: String,
+        description: String = "",
+        systemPrompt: String = "",
+        themeId: UUID? = nil,
+        defaultModel: String? = nil,
+        temperature: Float? = nil,
+        maxTokens: Int? = nil
+    ) -> Agent {
+        let agent = Self.newCustomAgentRecord(
+            name: name,
+            description: AgentDescriptionPolicy.normalized(description),
+            systemPrompt: systemPrompt,
+            themeId: themeId,
+            defaultModel: defaultModel,
+            temperature: temperature,
+            maxTokens: maxTokens
+        )
+        add(agent)
+        return agent
+    }
+
+    /// The model a new agent inherits when none is given: the Orchestrator's
+    /// current model, falling back to the chat default (upstream).
+    func orchestratorModelForNewAgents() -> String? {
+        let model = DefaultAgentConfigurationStore.load().defaultModel
+            ?? ChatConfigurationStore.load().defaultModel
+        let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 
     /// Creates an agent from the paired phone or the API (`POST /agents`,

@@ -1,0 +1,2004 @@
+//
+//  ConfigApplier.swift
+//  osaurus
+//
+//  Executes a validated document against the live managers/stores —
+//  the same code paths Settings and the old per-domain tools used.
+//  Apply is idempotent: it recomputes current state per section and
+//  only touches what differs, so re-applying a document is a no-op.
+//
+//  Secrets: the document never carries any. Creating a cloud provider
+//  opens the native credential sheet (user pastes / signs in; the
+//  manager writes straight to Keychain). Keyed MCP/search providers
+//  are registered and reported as `needs_user_action` pointing at the
+//  right Settings pane.
+//
+//  Intel port (W-declarative-config stage 2) of upstream Classic's applier.
+//  Left out because Intel has no matching feature: channels, harness runtimes
+//  and the default agent's `runtime` / `claude_code`, local `models`, agent
+//  `skills`, `show_response_metrics`, `source_template`, knowledge and redaction
+//  agent switches, sandbox network keys, the same-turn spawn staging, and the
+//  native provider credential sheet (a key only arrives as `api_key_ref`; the
+//  rest is reported as `needs_user_action`). The document schema omits those
+//  keys, so a document that names one is rejected by the strict decoder before
+//  it reaches here.
+//
+
+import Foundation
+@preconcurrency import MLXLMCommon
+
+/// Process-wide serialization for `ConfigApplier.apply`. Applies can arrive
+/// concurrently from three surfaces (the `osaurus_config` tool, the CLI via
+/// `/admin/config/apply`, and direct HTTP callers); an apply mutates many
+/// managers/stores across multiple actor hops, so two interleaved applies
+/// could tear state (e.g. one pruning an agent the other just created).
+/// FIFO: waiters resume in arrival order.
+private actor ConfigApplySerialQueue {
+    static let shared = ConfigApplySerialQueue()
+
+    private var busy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !busy {
+            busy = true
+            return
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            waiters.append(cont)
+        }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            busy = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
+/// How an apply treats things this Mac cannot honour yet. Interactive
+/// applies use `.default`; `osaurus import` runs before the MCP servers it
+/// adds have connected and before the user can paste a secret, so it keeps
+/// what it cannot resolve yet and reports it instead.
+struct ConfigApplyOptions: Sendable, Equatable {
+    /// Keep `tools.enabled` names no tool on this Mac provides yet (a server
+    /// still connecting) instead of skipping them.
+    var keepUnregisteredTools = false
+    /// Register an MCP server whose secret reference does not resolve, with
+    /// the secret keys pending, instead of refusing to add it.
+    var registerWithUnresolvedSecrets = false
+
+    static let `default` = ConfigApplyOptions()
+    static let bundleImport = ConfigApplyOptions(
+        keepUnregisteredTools: true, registerWithUnresolvedSecrets: true)
+}
+
+enum ConfigApplier {
+
+    /// Apply the document. The caller (tool / CLI endpoint) has already
+    /// validated it via `ConfigPlanner.plan` and obtained user approval.
+    /// Applies are serialized process-wide: a second apply waits for the
+    /// first to finish rather than interleaving with it.
+    static func apply(
+        document: OsaurusConfigDocument,
+        prune: Bool,
+        options: ConfigApplyOptions = .default
+    ) async -> [ConfigApplyResult] {
+        await ConfigApplySerialQueue.shared.acquire()
+        let results = await applyLocked(document: document, prune: prune, options: options)
+        await ConfigApplySerialQueue.shared.release()
+        return results
+    }
+
+    private static func applyLocked(
+        document: OsaurusConfigDocument,
+        prune: Bool,
+        options: ConfigApplyOptions
+    ) async -> [ConfigApplyResult] {
+        var results: [ConfigApplyResult] = []
+
+        if let section = document.memory {
+            results.append(await applyMemory(section))
+        }
+        if let section = document.defaultAgent {
+            results.append(await applyDefaultAgent(section))
+        }
+        if let entries = document.agents {
+            results.append(
+                contentsOf: await applyAgents(
+                    entries, prune: prune, options: options))
+        }
+        if let section = document.tools {
+            results.append(contentsOf: await applyTools(section))
+        }
+        if let entries = document.commands {
+            results.append(contentsOf: await applyCommands(entries, prune: prune))
+        }
+        if let entries = document.knowledgeCollections {
+            results.append(contentsOf: await applyKnowledgeCollections(entries, prune: prune))
+        }
+        if let entries = document.mcpServers {
+            results.append(contentsOf: await applyMCPServers(entries, prune: prune, options: options))
+        }
+        if let plugins = document.plugins {
+            results.append(contentsOf: await applyPlugins(plugins, prune: prune))
+        }
+        if let entries = document.providers {
+            results.append(contentsOf: await applyProviders(entries, prune: prune))
+        }
+        // After providers: privacy_filter.provider_overrides resolves names
+        // against providers this same document may have just created.
+        if let section = document.delegation {
+            results.append(await applyDelegation(section))
+        }
+        if let section = document.searchProviders {
+            results.append(contentsOf: await applySearchProviders(section, prune: prune))
+        }
+        if let entries = document.schedules {
+            results.append(contentsOf: await applySchedules(entries, prune: prune))
+        }
+        if let entries = document.watchers {
+            results.append(contentsOf: await applyWatchers(entries, prune: prune))
+        }
+        // Last: activation may reference an agent created above.
+        if let name = document.activeAgent {
+            results.append(await applyActiveAgent(name))
+        }
+
+        return results
+    }
+
+    // MARK: - Settings scopes
+
+    @MainActor
+    private static func applyMemory(_ desired: MemorySection) -> ConfigApplyResult {
+        var config = MemoryConfigurationStore.load()
+        if let v = desired.enabled { config.enabled = v }
+        if let v = desired.budgetTokens { config.memoryBudgetTokens = v }
+        if let v = desired.retentionDays { config.episodeRetentionDays = v }
+        MemoryConfigurationStore.save(config)
+        return ConfigApplyResult(section: "memory", target: "memory", status: .done)
+    }
+
+    @MainActor
+    private static func applyDefaultAgent(
+        _ desired: DefaultAgentSection
+    ) -> ConfigApplyResult {
+        var config = DefaultAgentConfigurationStore.load()
+        var nameChanged = false
+        if desired.name.isSpecified {
+            let trimmed = desired.name.valueOrNil?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let newName = (trimmed?.isEmpty ?? true) ? nil : trimmed
+            nameChanged = newName != config.displayName
+            config.displayName = newName
+        }
+        if desired.model.isSpecified {
+            let trimmed = desired.model.valueOrNil?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value = trimmed, !value.isEmpty {
+                // Store the canonical runtime id (auto-prefixing bare cloud
+                // ids) so the model actually routes — a raw store here is how
+                // agents silently lose their model. A value equal to what is
+                // already stored is a no-op even when stale, so exported
+                // snapshots always re-apply.
+                let unchanged = config.defaultModel?.caseInsensitiveCompare(value) == .orderedSame
+                switch ConfigModelReference.resolve(
+                    value,
+                    catalog: ConfigModelReference.liveCatalog(),
+                    pendingLocalIds: []
+                ) {
+                case .resolved(let canonical):
+                    config.defaultModel = canonical
+                case .invalid(let message):
+                    if !unchanged {
+                        return ConfigApplyResult(
+                            section: "default_agent", target: "default_agent",
+                            status: .failed, message: "model: \(message)")
+                    }
+                }
+            } else {
+                config.defaultModel = nil
+            }
+        }
+        if desired.temperature.isSpecified {
+            config.temperature = desired.temperature.valueOrNil.map(Float.init)
+        }
+        if desired.maxTokens.isSpecified { config.maxTokens = desired.maxTokens.valueOrNil }
+        // The persona's home is `DefaultAgentConfiguration.systemPrompt`; the
+        // store's save posts `.appConfigurationChanged` so live chats re-read it.
+        if let prompt = desired.systemPrompt {
+            config.systemPrompt = prompt
+        }
+        DefaultAgentConfigurationStore.save(config)
+        // A name change must rebuild the published agent snapshot so the
+        // picker pill and chat headers re-render with the new name.
+        if nameChanged {
+            AgentManager.shared.refresh()
+        }
+        return ConfigApplyResult(section: "default_agent", target: "default_agent", status: .done)
+    }
+
+    @MainActor
+    private static func applyActiveAgent(_ name: String) -> ConfigApplyResult {
+        // `new_chat_agent` sets which agent NEW chats open with — and only
+        // that. The foreground window's agent (`activeAgentId`) is the
+        // user's browsing position and is left alone.
+        if name.lowercased() == "default" {
+            AgentManager.shared.setNewChatAgent(Agent.defaultId)
+            return ConfigApplyResult(section: ConfigSectionID.activeAgent.rawValue, target: "default", status: .done)
+        }
+        guard
+            let agent = AgentManager.shared.agents.first(where: {
+                $0.name.lowercased() == name.lowercased()
+            })
+        else {
+            return ConfigApplyResult(
+                section: ConfigSectionID.activeAgent.rawValue, target: name, status: .failed,
+                message: "No agent named `\(name)` found.")
+        }
+        AgentManager.shared.setNewChatAgent(agent.id)
+        return ConfigApplyResult(section: ConfigSectionID.activeAgent.rawValue, target: agent.name, status: .done)
+    }
+
+    // MARK: - Agents
+
+    private static func applyAgents(
+        _ entries: [AgentEntry], prune: Bool, options: ConfigApplyOptions
+    ) async -> [ConfigApplyResult] {
+        var results: [ConfigApplyResult] = []
+        var matchedIds = Set<UUID>()
+
+        for entry in entries {
+            // Bookmark minting opens the folder on disk; do it here, off the
+            // main actor, so a slow or unmounted volume cannot stall the UI.
+            let preparedFolder = prepareWorkingFolder(entry.workingFolder)
+            let result: ConfigApplyResult = await MainActor.run {
+                var entry = entry
+                let existing = AgentManager.shared.agents.first {
+                    !$0.isBuiltIn && $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        == entry.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                }
+                // Every validation failure must preserve an existing match
+                // during prune, including invalid templates.
+                if let agent = existing { matchedIds.insert(agent.id) }
+                // `template:` seeds description + prompt for a one-line
+                // agent; explicit fields in the entry still win.
+                if let rawTemplate = entry.template?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    !rawTemplate.isEmpty
+                {
+                    guard let template = AgentStarterTemplate(rawValue: rawTemplate.lowercased()),
+                        template != .blank
+                    else {
+                        return ConfigApplyResult(
+                            section: "agents", target: entry.name, status: .failed,
+                            message: "template: `\(rawTemplate)` is not a starter template. Valid: "
+                                + AgentStarterTemplate.configTemplateIds.joined(separator: ", ") + ".")
+                    }
+                    if entry.systemPrompt?.isEmpty ?? true { entry.systemPrompt = template.systemPrompt }
+                    if entry.description?.isEmpty ?? true { entry.description = template.routingDescription }
+                }
+                if let description = entry.description {
+                    entry.description = AgentDescriptionPolicy.normalized(description)
+                }
+                let rawModel = entry.model.valueOrNil?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if let raw = rawModel, !raw.isEmpty {
+                    switch ConfigModelReference.resolve(
+                        raw,
+                        catalog: ConfigModelReference.liveCatalog(),
+                        pendingLocalIds: []
+                    ) {
+                    case .resolved(let canonical):
+                        entry.model = .value(canonical)
+                    case .invalid(let message):
+                        // Unchanged-but-stale values are a no-op so exported
+                        // snapshots always re-apply; only new/changed
+                        // references must ground.
+                        if existing?.defaultModel?.caseInsensitiveCompare(raw) == .orderedSame {
+                            entry.model = .absent
+                        } else {
+                            return ConfigApplyResult(
+                                section: "agents", target: entry.name,
+                                status: .failed, message: "model: \(message)")
+                        }
+                    }
+                }
+                if var agent = existing {
+                    let outcome = patch(&agent, from: entry, options: options, preparedFolder: preparedFolder)
+                    AgentManager.shared.update(agent)
+                    // A patch can open a blocking gap (a folder this Mac
+                    // cannot reach, a tool that is not installed) on an agent
+                    // that was fine a moment ago. Creation arms the setup
+                    // marker through `AgentManager.add`; an edit has to arm it
+                    // here, or the next spawn runs straight into the gap.
+                    // (Upstream also arms its `SetupStateStore` marker here;
+                    // Intel has no Needs Setup badge, so the result status
+                    // `needs_user_action` is the only signal.)
+                    applyRelay(entry.capabilities?.relayEnabled, to: agent.id)
+                    return ConfigApplyResult(
+                        section: "agents", target: agent.name,
+                        status: outcome.needsUserAction ? .needsUserAction : .done,
+                        message: outcome.notes.isEmpty ? nil : outcome.notes.joined(separator: " "))
+                } else {
+                    // The live chat can have a selected model without any
+                    // persisted default (for example on first launch). Carry
+                    // that model into the worker instead of creating a target
+                    // that disappears from the next turn's runnable pool.
+                    let chatModel = ChatExecutionContext.currentChatSessionBox?.session?
+                        .selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    var agent = AgentManager.shared.create(
+                        name: entry.name,
+                        description: entry.description ?? "",
+                        systemPrompt: entry.systemPrompt ?? "",
+                        defaultModel: entry.model.valueOrNil
+                            ?? (chatModel?.isEmpty == false ? chatModel : nil)
+                            ?? AgentManager.shared.orchestratorModelForNewAgents(),
+                        temperature: entry.temperature.valueOrNil.map(Float.init),
+                        maxTokens: entry.maxTokens.valueOrNil
+                    )
+                    matchedIds.insert(agent.id)
+                    let outcome = patch(&agent, from: entry, options: options, preparedFolder: preparedFolder)
+                    AgentManager.shared.update(agent)
+                    applyRelay(entry.capabilities?.relayEnabled, to: agent.id)
+                    // Upstream (#2498) adds a new agent to the Default spawn pool
+                    // here and stages the spawn tools for the same turn; Intel's
+                    // Orchestrator delegates only to agents the user lists in its
+                    // delegation allowlist (Gate 4), so a created agent is NOT
+                    // spawnable until the user adds it. `orchestrator_spawnable:
+                    // false` therefore has nothing to opt out of on Intel; it
+                    // still clears any pool entry the same way upstream does.
+                    if entry.orchestratorSpawnable == false {
+                        let agentId = agent.id
+                        _ = SubagentConfigurationStore.mutate { config in
+                            config.spawnableAgentIDs.removeAll { $0 == agentId }
+                        }
+                    }
+                    var message =
+                        "Created. `\(agent.name)` is not in the Orchestrator's delegation list yet; "
+                        + "the user adds it in Settings → Orchestrator before the Orchestrator can delegate to it."
+                    if !outcome.notes.isEmpty {
+                        message += " " + outcome.notes.joined(separator: " ")
+                    }
+                    return ConfigApplyResult(
+                        section: "agents", target: agent.name,
+                        status: outcome.needsUserAction ? .needsUserAction : .done,
+                        message: message)
+                }
+            }
+            results.append(result)
+        }
+
+        if prune {
+            let toDelete: [(UUID, String)] = await MainActor.run {
+                AgentManager.shared.agents
+                    .filter { !$0.isBuiltIn && !matchedIds.contains($0.id) }
+                    .map { ($0.id, $0.name) }
+            }
+            for (id, name) in toDelete {
+                _ = await AgentManager.shared.delete(id: id)
+                results.append(ConfigApplyResult(section: "agents", target: name, status: .done))
+            }
+        }
+        return results
+    }
+
+    /// What an agent patch could not fully honour on this machine. These
+    /// are portability gaps (a template written elsewhere), never failures:
+    /// the agent is still created / updated with everything that resolved.
+    struct AgentPatchOutcome {
+        var notes: [String] = []
+        /// Set when the user must finish a step in the app (pick a folder).
+        var needsUserAction = false
+    }
+
+    /// An UNSAVED agent record built from a document entry, for prefilling
+    /// the Create Agent sheet from a template. Same mapping as apply, so the
+    /// sheet and `osaurus_config` cannot drift; nothing is persisted and the
+    /// spawn pool is untouched until the caller saves.
+    @MainActor
+    static func draftAgent(from entry: AgentEntry) -> (agent: Agent, outcome: AgentPatchOutcome) {
+        var agent = AgentManager.newCustomAgentRecord(
+            name: entry.name,
+            description: entry.description ?? "",
+            systemPrompt: entry.systemPrompt ?? "",
+            themeId: nil,
+            defaultModel: entry.model.valueOrNil,
+            temperature: entry.temperature.valueOrNil.map(Float.init),
+            maxTokens: entry.maxTokens.valueOrNil
+        )
+        let outcome = patch(&agent, from: entry)
+        return (agent, outcome)
+    }
+
+    @MainActor
+    @discardableResult
+    private static func patch(
+        _ agent: inout Agent, from entry: AgentEntry, options: ConfigApplyOptions = .default,
+        preparedFolder: PreparedWorkingFolder? = nil
+    ) -> AgentPatchOutcome {
+        var outcome = AgentPatchOutcome()
+        if let v = entry.description { agent.description = v }
+        if let v = entry.systemPrompt { agent.systemPrompt = v }
+        if entry.model.isSpecified { agent.defaultModel = entry.model.valueOrNil }
+        if entry.temperature.isSpecified {
+            agent.temperature = entry.temperature.valueOrNil.map(Float.init)
+        }
+        if entry.maxTokens.isSpecified { agent.maxTokens = entry.maxTokens.valueOrNil }
+        if entry.generationSettings.isSpecified {
+            agent.generationSettings = entry.generationSettings.valueOrNil
+        }
+        patchToolSelection(&agent, from: entry, options: options, outcome: &outcome)
+        if let instructions = entry.pluginInstructions {
+            agent.pluginInstructions = instructions.isEmpty ? nil : instructions
+        }
+        if let sandbox = entry.sandbox { patchSandbox(&agent, from: sandbox) }
+        if let subagents = entry.subagents {
+            patchSubagents(&agent, from: subagents, outcome: &outcome)
+        }
+        patchWorkingFolder(
+            &agent, from: entry.workingFolder,
+            prepared: preparedFolder ?? prepareWorkingFolder(entry.workingFolder),
+            outcome: &outcome)
+        guard let caps = entry.capabilities else { return outcome }
+        patchCapabilities(&agent, from: caps)
+        return outcome
+    }
+
+    @MainActor
+    private static func patchToolSelection(
+        _ agent: inout Agent, from entry: AgentEntry, options: ConfigApplyOptions,
+        outcome: inout AgentPatchOutcome
+    ) {
+        let hasGroups = entry.mcpServers != nil || entry.plugins != nil
+        guard entry.tools != nil || hasGroups else { return }
+        if let raw = entry.tools?.mode, let mode = ToolSelectionMode(rawValue: raw) {
+            agent.toolSelectionMode = mode
+        } else if hasGroups || entry.tools?.enabled != nil {
+            // Listing tools or groups only makes sense in manual mode.
+            agent.toolSelectionMode = .manual
+        }
+        guard agent.toolSelectionMode == .manual else { return }
+        let registry = ToolRegistry.shared
+        let groups = registry.portableToolGroups()
+        var enabled: [PortableToolGroup] = []
+        var disabled: [PortableToolGroup] = []
+        for name in entry.mcpServers?.enabled ?? [] { enabled.append(.mcpServer(name)) }
+        for name in entry.mcpServers?.disabled ?? [] { disabled.append(.mcpServer(name)) }
+        for id in entry.plugins?.enabled ?? [] { enabled.append(.plugin(id)) }
+        for id in entry.plugins?.disabled ?? [] { disabled.append(.plugin(id)) }
+        let applied = AgentToolSelectionResolver.apply(
+            current: agent.manualToolNames ?? [],
+            baseToolNames: entry.tools?.enabled,
+            enabledGroups: enabled,
+            disabledGroups: disabled,
+            registered: Set(registry.listTools().map(\.name)),
+            groups: groups,
+            keepUnregistered: options.keepUnregisteredTools
+        )
+        agent.manualToolNames = applied.manualToolNames
+        if !applied.missingTools.isEmpty {
+            outcome.notes.append(
+                "Skipped tools not installed here: \(applied.missingTools.joined(separator: ", ")).")
+        }
+        if !applied.keptUnregistered.isEmpty {
+            outcome.notes.append(
+                "Kept tools no server provides yet (they work once their server connects): "
+                    + applied.keptUnregistered.joined(separator: ", ") + ".")
+        }
+        // A configured server only has a tool group once it has connected.
+        let configuredServers = Set(MCPProviderManager.shared.configuration.providers.map { $0.name.lowercased() })
+        let offline = Set(
+            enabled.compactMap { group -> String? in
+                guard case .mcpServer(let name) = group, groups[group] == nil,
+                    configuredServers.contains(name.lowercased())
+                else { return nil }
+                return name
+            })
+        let absent = applied.missingGroups.filter { !offline.contains($0) }
+        let notConnected = applied.missingGroups.filter { offline.contains($0) }
+        if !notConnected.isEmpty {
+            outcome.notes.append(
+                "Not connected yet, so none of their tools were added (re-apply once connected): "
+                    + notConnected.joined(separator: ", ") + ".")
+            outcome.needsUserAction = true
+        }
+        if !absent.isEmpty {
+            outcome.notes.append(
+                "Not set up on this Mac (add them in Settings, then re-apply): "
+                    + absent.joined(separator: ", ") + ".")
+            outcome.needsUserAction = true
+        }
+    }
+
+    @MainActor
+    private static func patchSandbox(_ agent: inout Agent, from section: AgentSandboxEntry) {
+        var exec =
+            agent.autonomousExec
+            ?? AgentManager.shared.effectiveAutonomousExec(for: agent.id)
+            ?? AutonomousExecConfig.default
+        if let v = section.enabled { exec.enabled = v }
+        if let v = section.maxCommandsPerTurn { exec.maxCommandsPerTurn = max(1, v) }
+        if let v = section.pluginCreate { exec.pluginCreate = v }
+        agent.autonomousExec = exec
+    }
+
+    @MainActor
+    private static func patchSubagents(
+        _ agent: inout Agent, from section: AgentSubagentsEntry, outcome: inout AgentPatchOutcome
+    ) {
+        if let v = section.enabled { agent.settings.spawnDelegationEnabled = v }
+        if let names = section.agents {
+            var ids: [UUID] = []
+            var missing: [String] = []
+            for name in names {
+                let key = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if let target = AgentManager.shared.agents.first(where: {
+                    !$0.isBuiltIn && $0.name.lowercased() == key
+                }) {
+                    ids.append(target.id)
+                } else {
+                    missing.append(name)
+                }
+            }
+            agent.settings.spawnableAgentIDs = ids
+            if !missing.isEmpty {
+                outcome.notes.append(
+                    "subagents.agents: no agent named \(missing.map { "`\($0)`" }.joined(separator: ", ")) here.")
+            }
+        }
+        if let models = section.models, !models.isEmpty {
+            outcome.notes.append(
+                "subagents.models was removed: create an agent with that model "
+                    + "(agents[].model) and list it in subagents.agents.")
+        }
+    }
+
+    /// A folder path is only a hint. The bookmark is minted here when the
+    /// folder exists and the process may access it; otherwise nothing is
+    /// attached and the result tells the user to pick the folder, so an
+    /// agent never carries a path it cannot actually read (the classic
+    /// "orchestrator said it has folder access but it loops forever").
+    /// Disk-touching half of `patchWorkingFolder`: tilde expansion, the
+    /// directory probe and the bookmark mint. Nonisolated so `applyAgents`
+    /// can run it before hopping onto the main actor.
+    struct PreparedWorkingFolder: Sendable {
+        let expandedPath: String
+        /// Intel is not sandboxed (no security-scoped bookmark exists or is
+        /// needed): the path is attached directly, like
+        /// `AgentManager.setWorkingFolder`. `accessible` replaces upstream's
+        /// "a bookmark could be minted".
+        let accessible: Bool
+    }
+
+    nonisolated private static func prepareWorkingFolder(
+        _ field: ConfigField<String>
+    ) -> PreparedWorkingFolder? {
+        guard case .value(let raw) = field else { return nil }
+        let expanded = (raw.trimmingCharacters(in: .whitespacesAndNewlines) as NSString)
+            .expandingTildeInPath
+        guard !expanded.isEmpty else { return nil }
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory)
+        let accessible =
+            exists && isDirectory.boolValue
+            && FileManager.default.isReadableFile(atPath: expanded)
+        return PreparedWorkingFolder(expandedPath: expanded, accessible: accessible)
+    }
+
+    @MainActor
+    private static func patchWorkingFolder(
+        _ agent: inout Agent, from field: ConfigField<String>, prepared: PreparedWorkingFolder?,
+        outcome: inout AgentPatchOutcome
+    ) {
+        switch field {
+        case .absent:
+            return
+        case .null:
+            agent.workingFolderBookmark = nil
+            agent.workingFolderPath = nil
+        case .value(let raw):
+            guard let prepared else { return }
+            let expanded = prepared.expandedPath
+            let currentPath = agent.workingFolderPath.map { ($0 as NSString).expandingTildeInPath }
+            if currentPath == expanded, agent.workingFolderBookmark == nil, prepared.accessible { return }
+            if prepared.accessible {
+                agent.workingFolderBookmark = nil
+                agent.workingFolderPath = expanded
+            } else {
+                // Record the path rather than dropping it, so the gap stays
+                // visible on the agent record (upstream: it is what the Needs
+                // Setup badge reads; Intel has no badge, the result status
+                // `needs_user_action` carries it).
+                agent.workingFolderPath = expanded
+                agent.workingFolderBookmark = nil
+                outcome.notes.append(
+                    "working_folder: `\(raw)` is not accessible here. Pick the agent's folder "
+                        + "in the Agents pane (Working folder) to grant access.")
+                outcome.needsUserAction = true
+            }
+        }
+    }
+
+    @MainActor
+    private static func patchCapabilities(_ agent: inout Agent, from caps: AgentCapabilitiesEntry) {
+        if let v = caps.toolsEnabled { agent.toolsEnabled = v }
+        if let v = caps.memoryEnabled { agent.memoryEnabled = v }
+        if let v = caps.searchMemoryEnabled { agent.settings.searchMemoryEnabled = v }
+        if let v = caps.webSearchEnabled { agent.settings.webSearchEnabled = v }
+        if let v = caps.dbEnabled { agent.settings.dbEnabled = v }
+        if let v = caps.selfSchedulingEnabled { agent.settings.selfSchedulingEnabled = v }
+        if let v = caps.computerUseEnabled { agent.settings.computerUseEnabled = v }
+        if let v = caps.browserUseEnabled { agent.settings.browserUseEnabled = v }
+        if let apps = ConfigPlanner.appleApps(from: caps) { agent.settings.enabledAppleApps = apps }
+        if let v = caps.imageEnabled { agent.settings.imageEnabled = v }
+        if let v = caps.applescriptEnabled { agent.settings.appleScriptEnabled = v }
+        if let v = caps.speakEnabled { agent.settings.speakEnabled = v }
+        if let v = caps.renderChartEnabled { agent.settings.renderChartEnabled = v }
+        if let v = caps.calculatorEnabled { agent.settings.calculatorEnabled = v }
+        if let v = caps.taskChecklistEnabled { agent.settings.taskChecklistEnabled = v }
+        if let v = caps.clarifyEnabled { agent.settings.clarifyEnabled = v }
+        if let v = caps.artifactsEnabled { agent.settings.artifactsEnabled = v }
+    }
+
+    /// Relay enablement lives outside the Agent record. Route through the
+    /// tunnel manager — the same path as the Agents pane toggle — so turning
+    /// it on also connects (and off also disconnects) the live tunnel.
+    @MainActor
+    private static func applyRelay(_ desired: Bool?, to agentId: UUID) {
+        guard let desired else { return }
+        guard RelayConfigurationStore.load().isEnabled(for: agentId) != desired else { return }
+        RelayTunnelManager.shared.setTunnelEnabled(desired, for: agentId)
+    }
+
+    // MARK: - Tools
+
+    @MainActor
+    private static func applyTools(_ desired: ToolsSection) -> [ConfigApplyResult] {
+        let registry = ToolRegistry.shared
+        var changed = 0
+        var skipped: [String] = []
+        for (tool, enabled) in desired.enabled ?? [:] {
+            guard registry.isRegistered(tool) else {
+                skipped.append(tool)
+                continue
+            }
+            if registry.isGlobalEnabled(tool) != enabled {
+                registry.setEnabled(enabled, for: tool)
+                changed += 1
+            }
+        }
+        for (tool, raw) in desired.policies ?? [:] {
+            guard let policy = ToolPermissionPolicy(rawValue: raw.lowercased()) else { continue }
+            guard registry.isRegistered(tool) else {
+                skipped.append(tool)
+                continue
+            }
+            if (registry.configuredPolicy(for: tool) ?? .ask) != policy {
+                registry.setPolicy(policy, for: tool)
+                changed += 1
+            }
+        }
+        var message = "\(changed) tool setting(s) changed."
+        if !skipped.isEmpty {
+            message += " Skipped unregistered: \(skipped.sorted().joined(separator: ", "))."
+        }
+        if changed > 0 {
+            // `setEnabled`/`setPolicy` persist but do not broadcast; an open
+            // Tools pane refreshes on this signal.
+            NotificationCenter.default.post(name: .toolsListChanged, object: nil)
+        }
+        return [ConfigApplyResult(section: "tools", target: "tools", status: .done, message: message)]
+    }
+
+    // MARK: - App behavior (Wave 3b)
+
+    @MainActor
+    private static func applyDelegation(_ desired: DelegationSection) -> ConfigApplyResult {
+        // Resolve spawn-pool names first; an unresolvable name fails the
+        // section before any partial pool replacement.
+        var resolvedAgentIDs: [UUID]?
+        if let names = desired.spawnableAgents {
+            var ids: [UUID] = []
+            for name in names {
+                guard
+                    let agent = AgentManager.shared.agents.first(where: {
+                        $0.name.lowercased()
+                            == name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    })
+                else {
+                    return ConfigApplyResult(
+                        section: "delegation", target: "delegation", status: .failed,
+                        message: "spawnable_agents: no agent named `\(name)`.")
+                }
+                ids.append(agent.id)
+            }
+            resolvedAgentIDs = ids
+        }
+        var resolvedWorkspaceRefs: [WorkspaceAgentRef]?
+        if let keys = desired.spawnableWorkspaceAgents {
+            var refs: [WorkspaceAgentRef] = []
+            for key in keys {
+                switch resolveWorkspaceAgentKey(key) {
+                case .success(let ref):
+                    refs.append(ref)
+                case .failure(let message):
+                    return ConfigApplyResult(
+                        section: "delegation", target: "delegation", status: .failed,
+                        message: "spawnable_workspace_agents: " + message)
+                }
+            }
+            resolvedWorkspaceRefs = refs
+        }
+        // Per-workspace auto-join: accept the workspace id or its name.
+        var workspaceAutoJoin: [(id: String, enabled: Bool)] = []
+        for (key, enabled) in desired.workspaceAutoJoin ?? [:] {
+            guard let id = resolveWorkspaceId(key) else {
+                return ConfigApplyResult(
+                    section: "delegation", target: "delegation", status: .failed,
+                    message: "workspace_auto_join: no workspace named or identified by `\(key)`.")
+            }
+            workspaceAutoJoin.append((id, enabled))
+        }
+        let hints = desired.removedKeyHints
+        _ = SubagentConfigurationStore.mutate { config in
+            if let v = desired.localTextEnabled { config.localTextDelegationEnabled = v }
+            if let raw = desired.applescriptExecutionMode,
+                let mode = ConfigAppBehaviorEnums.applescriptMode(forKey: raw)
+            {
+                config.defaultAppleScriptExecutionMode = mode
+            }
+            if let ids = resolvedAgentIDs { config.spawnableAgentIDs = ids }
+            if let refs = resolvedWorkspaceRefs {
+                config.spawnableWorkspaceAgents = refs
+                // Listing a shared agent explicitly clears its removal
+                // tombstone; the remaining pool members that were dropped
+                // stay removed (and stop auto-joining).
+                for ref in refs { config.removedWorkspaceAgents.removeAll { $0 == ref } }
+            }
+            for (id, enabled) in workspaceAutoJoin {
+                config.setWorkspaceAutoJoin(enabled, workspaceId: id)
+            }
+            for (kind, raw) in desired.permissionDefaults ?? [:] {
+                guard let policy = SubagentPermissionPolicy(rawValue: raw.lowercased()) else {
+                    continue
+                }
+                config.permissionDefaults.setPolicy(policy, for: kind.lowercased())
+            }
+            if let v = desired.budgetMaxTokens { config.budgets.maxDelegateTokens = v }
+            if let v = desired.budgetMaxTurns { config.budgets.maxDelegateTurns = v }
+            if let v = desired.budgetMaxSeconds { config.budgets.maxElapsedSeconds = v }
+            if let v = desired.budgetMaxParallelSpawns { config.budgets.maxParallelSpawns = v }
+            if let v = desired.budgetMaxRemoteParallelSpawns {
+                config.budgets.maxRemoteParallelSpawns = v
+            }
+            if let v = desired.ramSafetyPreflight { config.ramSafetyPreflightEnabled = v }
+            if let v = desired.coexistenceEnabled { config.subagentCoexistenceEnabled = v }
+        }
+        return ConfigApplyResult(
+            section: "delegation", target: "delegation", status: .done,
+            message: hints.isEmpty ? nil : hints.joined(separator: " "))
+    }
+
+    /// Resolve one `spawnable_workspace_agents` entry: the durable
+    /// `<workspace_id>:<0x-address>` key, a `Name@Workspace` form, a bare
+    /// `0x…` address, or a unique shared-agent display name.
+    enum WorkspaceKeyResolution {
+        case success(WorkspaceAgentRef)
+        case failure(String)
+    }
+
+    @MainActor
+    static func resolveWorkspaceAgentKey(_ raw: String) -> WorkspaceKeyResolution {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let ref = WorkspaceAgentRef(key: trimmed) { return .success(ref) }
+        switch AgentTargetResolver.resolve(trimmed, scope: .localAndWorkspace) {
+        case .success(.workspace(let ref)):
+            return .success(ref)
+        case .success(.local):
+            return .failure(
+                "`\(raw)` is one of this Osaurus's own agents; list it under spawnable_agents.")
+        case .failure(.ambiguous(let forms)):
+            return .failure(
+                "`\(raw)` matches more than one shared agent; use one of: "
+                    + forms.map { "`\($0)`" }.joined(separator: ", ") + ".")
+        case .failure(.notFound):
+            return .failure(
+                "`\(raw)` is not a shared agent on any workspace you belong to. Use "
+                    + "`Name@Workspace` or `<workspace_id>:<0x-address>`.")
+        }
+    }
+
+    /// Workspace id for a `delegation.workspace_auto_join` key (id or display name).
+    @MainActor
+    static func resolveWorkspaceId(_ raw: String) -> String? {
+        let folded = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !folded.isEmpty else { return nil }
+        for roster in WorkspaceRosterStore.shared.rosters {
+            if roster.id.lowercased() == folded { return roster.id }
+            if roster.workspace.name.trimmingCharacters(in: .whitespaces).lowercased() == folded {
+                return roster.id
+            }
+        }
+        // Unknown to the roster right now (cold start / offline): accept an
+        // id-shaped key verbatim so a document applied before the first
+        // roster poll still records the user's choice.
+        return folded.contains(" ") ? nil : folded
+    }
+
+    // MARK: - Commands (Wave 3c)
+
+    @MainActor
+    private static func applyCommands(
+        _ entries: [CommandEntry], prune: Bool
+    ) -> [ConfigApplyResult] {
+        var results: [ConfigApplyResult] = []
+        let registry = SlashCommandRegistry.shared
+        var matched = Set<UUID>()
+
+        for entry in entries {
+            let existing = ConfigExporter.manageableCommands().first {
+                $0.name.lowercased() == entry.name.lowercased()
+            }
+            if var command = existing {
+                matched.insert(command.id)
+                if let v = entry.description { command.description = v }
+                if let v = entry.icon { command.icon = v }
+                if let v = entry.template { command.template = v }
+                registry.update(command)
+                results.append(
+                    ConfigApplyResult(section: "commands", target: entry.name, status: .done))
+            } else {
+                // Validation guarantees `template` for new commands.
+                let command = registry.create(
+                    name: entry.name,
+                    description: entry.description ?? "",
+                    icon: entry.icon ?? "text.bubble",
+                    template: entry.template ?? ""
+                )
+                matched.insert(command.id)
+                results.append(
+                    ConfigApplyResult(section: "commands", target: entry.name, status: .done))
+            }
+        }
+
+        if prune {
+            for command in ConfigExporter.manageableCommands()
+            where !matched.contains(command.id) {
+                registry.delete(id: command.id)
+                results.append(
+                    ConfigApplyResult(section: "commands", target: command.name, status: .done))
+            }
+        }
+        return results
+    }
+
+    // MARK: - Knowledge collections (Wave 3c)
+
+    @MainActor
+    private static func applyKnowledgeCollections(
+        _ entries: [KnowledgeCollectionEntry], prune: Bool
+    ) async -> [ConfigApplyResult] {
+        var results: [ConfigApplyResult] = []
+        let manager = KnowledgeManager.shared
+        await manager.ensureLoaded()
+        var matched = Set<UUID>()
+
+        for entry in entries {
+            let existing = manager.collections.first {
+                $0.name.lowercased() == entry.name.lowercased()
+            }
+            if var collection = existing {
+                matched.insert(collection.id)
+                if let v = entry.summary { collection.summary = v }
+                if let v = entry.enabled { collection.isEnabled = v }
+                if let v = entry.includeGlobs { collection.includeGlobs = v }
+                if let v = entry.excludeGlobs { collection.excludeGlobs = v }
+                // `update` persists and schedules a re-index of the folder.
+                do {
+                    try manager.update(collection)
+                } catch {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "knowledge_collections", target: entry.name, status: .failed,
+                            message: error.localizedDescription))
+                    continue
+                }
+                results.append(
+                    ConfigApplyResult(
+                        section: "knowledge_collections", target: entry.name, status: .done))
+            } else {
+                guard let folderPath = entry.folderPath else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "knowledge_collections", target: entry.name, status: .failed,
+                            message: "`folder_path` is required to create a collection."))
+                    continue
+                }
+                var collection: KnowledgeCollection
+                do {
+                    collection = try await manager.create(
+                        name: entry.name,
+                        summary: entry.summary ?? "",
+                        folderPath: folderPath,
+                        includeGlobs: entry.includeGlobs ?? [],
+                        excludeGlobs: entry.excludeGlobs ?? []
+                    )
+                    if entry.enabled == false {
+                        collection.isEnabled = false
+                        try manager.update(collection)
+                    }
+                } catch {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "knowledge_collections", target: entry.name, status: .failed,
+                            message: error.localizedDescription))
+                    continue
+                }
+                matched.insert(collection.id)
+                results.append(
+                    ConfigApplyResult(
+                        section: "knowledge_collections", target: entry.name, status: .done,
+                        message: "Registered; indexing runs in the background."))
+            }
+        }
+
+        if prune {
+            for collection in manager.collections where !matched.contains(collection.id) {
+                manager.delete(id: collection.id)
+                results.append(
+                    ConfigApplyResult(
+                        section: "knowledge_collections", target: collection.name, status: .done,
+                        message: "Deregistered. Documents in the folder were not touched."))
+            }
+        }
+        return results
+    }
+
+    // MARK: - Channels (Wave 3c)
+
+    @MainActor
+
+    // MARK: - MCP servers
+
+    /// One `secret_env_refs` / `secret_header_refs` entry after resolution.
+    private struct ResolvedSecretRef {
+        var key: String
+        var secret: String?
+        var display: String
+    }
+
+    private static func resolveSecretMap(_ refs: [String: String]?) async -> [ResolvedSecretRef] {
+        var out: [ResolvedSecretRef] = []
+        for (key, raw) in (refs ?? [:]).sorted(by: { $0.key < $1.key }) {
+            let (secret, display) = await resolveSecretRef(raw)
+            out.append(ResolvedSecretRef(key: key, secret: secret, display: display))
+        }
+        return out
+    }
+
+    /// Stores resolved header secrets for an HTTP server and marks every
+    /// referenced header secret, pending ones included, so Settings shows
+    /// the slot to fill. Returns the headers whose Keychain write failed.
+    @MainActor
+    private static func storeHeaderSecrets(
+        _ refs: [ResolvedSecretRef], in provider: inout MCPProvider
+    ) -> [String] {
+        var failures: [String] = []
+        for ref in refs {
+            if !provider.secretHeaderKeys.contains(ref.key) { provider.secretHeaderKeys.append(ref.key) }
+            provider.customHeaders.removeValue(forKey: ref.key)
+            if let secret = ref.secret,
+                !MCPProviderKeychain.saveHeaderSecret(secret, key: ref.key, for: provider.id)
+            {
+                failures.append(ref.key)
+            }
+        }
+        return failures
+    }
+
+    @MainActor
+    private static func applyMCPServers(
+        _ entries: [MCPServerEntry], prune: Bool, options: ConfigApplyOptions = .default
+    ) async -> [ConfigApplyResult] {
+        var results: [ConfigApplyResult] = []
+        let manager = MCPProviderManager.shared
+        var matched = Set<UUID>()
+
+        for entry in entries {
+            // Resolve every secret reference up front. `resolveSecretRef`
+            // suspends (a detached Keychain read that can take seconds), and
+            // the existing-provider branch below copies the live provider,
+            // mutates the copy, and writes the whole struct back — a
+            // suspension inside that window would silently revert any edit
+            // Settings saved meanwhile. With the awaits hoisted here, the
+            // read-mutate-write below is synchronous on the main actor again.
+            var resolvedToken: (secret: String?, display: String)?
+            if let raw = entry.tokenRef {
+                resolvedToken = await resolveSecretRef(raw)
+            }
+            let resolvedEnvRefs = await resolveSecretMap(entry.secretEnvRefs)
+            let resolvedHeaderRefs = await resolveSecretMap(entry.secretHeaderRefs)
+
+            let existing = ConfigExporter.manageableMCPProviders().first {
+                $0.name.lowercased() == entry.name.lowercased()
+            }
+            if var provider = existing {
+                matched.insert(provider.id)
+                var authChangedToKeyed = false
+                var secretMessages: [String] = []
+                var secretFailure = false
+                var unresolvedRefs: [String] = []
+                switch provider.transport {
+                case .http:
+                    if let url = entry.url { provider.url = url }
+                    if let raw = entry.auth, let auth = ConfigMCPAuth.auth(forKey: raw) {
+                        authChangedToKeyed = auth != .none && provider.authType == .none
+                        provider.authType = auth
+                    }
+                    // A token reference stores the bearer token directly —
+                    // no Settings visit needed when it resolves and lands.
+                    if case let (secret, display)? = resolvedToken {
+                        if let secret {
+                            provider.authType = .bearerToken
+                            if MCPProviderKeychain.saveToken(secret, for: provider.id) {
+                                authChangedToKeyed = false
+                                secretMessages.append("Stored the bearer token from \(display).")
+                            } else {
+                                secretFailure = true
+                                secretMessages.append(
+                                    "Could not store the token from \(display) — Keychain "
+                                        + "unavailable.")
+                            }
+                        } else {
+                            secretFailure = true
+                            unresolvedRefs.append(display)
+                            secretMessages.append(
+                                "Could not resolve \(display) — no token was stored.")
+                        }
+                    }
+                    let failures = storeHeaderSecrets(resolvedHeaderRefs, in: &provider)
+                    for ref in resolvedHeaderRefs {
+                        if ref.secret == nil {
+                            secretFailure = true
+                            unresolvedRefs.append(ref.display)
+                            secretMessages.append(
+                                "Could not resolve \(ref.display) for header \(ref.key) — nothing "
+                                    + "was stored.")
+                        } else if failures.contains(ref.key) {
+                            secretFailure = true
+                            secretMessages.append(
+                                "Could not store header \(ref.key) — Keychain unavailable.")
+                        } else {
+                            secretMessages.append("Stored secret header \(ref.key) from \(ref.display).")
+                        }
+                    }
+                case .stdio:
+                    if let command = entry.command { provider.command = command }
+                    if let args = entry.args { provider.args = args }
+                    // Merge-map: plain env only. Keys marked secret keep
+                    // their Keychain values; the document never carries one.
+                    if let env = entry.env {
+                        provider.env.merge(env) { _, new in new }
+                    }
+                    if let wd = entry.workingDirectory {
+                        provider.workingDirectory = wd.isEmpty ? nil : wd
+                    }
+                    if let raw = entry.executionHost,
+                        let host = MCPProviderExecutionHost(rawValue: raw.lowercased())
+                    {
+                        provider.executionHost = host
+                    }
+                    for ref in resolvedEnvRefs {
+                        guard let secret = ref.secret else {
+                            secretFailure = true
+                            unresolvedRefs.append(ref.display)
+                            secretMessages.append(
+                                "Could not resolve \(ref.display) for env \(ref.key) — nothing "
+                                    + "was stored.")
+                            if options.registerWithUnresolvedSecrets,
+                                !provider.secretEnvKeys.contains(ref.key)
+                            {
+                                provider.secretEnvKeys.append(ref.key)
+                                provider.env.removeValue(forKey: ref.key)
+                            }
+                            continue
+                        }
+                        if MCPProviderKeychain.saveEnvSecret(secret, key: ref.key, for: provider.id) {
+                            if !provider.secretEnvKeys.contains(ref.key) {
+                                provider.secretEnvKeys.append(ref.key)
+                            }
+                            // The secret slot supersedes any plain copy.
+                            provider.env.removeValue(forKey: ref.key)
+                            secretMessages.append("Stored secret env \(ref.key) from \(ref.display).")
+                        } else {
+                            secretFailure = true
+                            secretMessages.append(
+                                "Could not store env \(ref.key) — Keychain unavailable.")
+                        }
+                    }
+                }
+                // Secrets never travel through the document — `token: nil`
+                // preserves any stored credential (refs above already saved
+                // theirs directly).
+                manager.updateProvider(provider, token: nil)
+                if let enabled = entry.enabled, provider.enabled != enabled {
+                    manager.setEnabled(enabled, for: provider.id)
+                }
+                if secretFailure {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "mcp_servers", target: entry.name, status: .needsUserAction,
+                            message: secretMessages.joined(separator: " "),
+                            unresolvedSecretRefs: unresolvedRefs))
+                } else if authChangedToKeyed {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "mcp_servers", target: entry.name, status: .needsUserAction,
+                            message: "Finish sign-in / token entry in Settings → Tools & MCP → Services."))
+                } else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "mcp_servers", target: entry.name, status: .done,
+                            message: secretMessages.isEmpty
+                                ? nil : secretMessages.joined(separator: " ")))
+                }
+            } else if entry.transport?.lowercased() == "stdio" {
+                guard let command = entry.command,
+                    !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "mcp_servers", target: entry.name, status: .failed,
+                            message: "`command` is required to add a stdio server."))
+                    continue
+                }
+                // Secret env refs resolve BEFORE the server is registered so
+                // a bad reference never leaves a half-configured server —
+                // unless the caller registers with pending secrets.
+                let unresolved = resolvedEnvRefs.filter { $0.secret == nil }
+                guard unresolved.isEmpty || options.registerWithUnresolvedSecrets else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "mcp_servers", target: entry.name, status: .failed,
+                            message: "secret_env_refs: could not resolve "
+                                + unresolved.map { "\($0.display) (env \($0.key))" }.joined(separator: ", ")
+                                + " — the server was not added.",
+                            unresolvedSecretRefs: unresolved.map(\.display)))
+                    continue
+                }
+                var provider = MCPProvider(
+                    name: entry.name,
+                    url: "",
+                    enabled: entry.enabled ?? true,
+                    authType: .none,
+                    transport: .stdio
+                )
+                provider.command = command
+                provider.args = entry.args ?? []
+                provider.env = entry.env ?? [:]
+                provider.workingDirectory =
+                    (entry.workingDirectory?.isEmpty ?? true) ? nil : entry.workingDirectory
+                provider.executionHost =
+                    entry.executionHost.flatMap {
+                        MCPProviderExecutionHost(rawValue: $0.lowercased())
+                    } ?? .sandbox
+                provider.secretEnvKeys = resolvedEnvRefs.map(\.key)
+                for ref in resolvedEnvRefs {
+                    provider.env.removeValue(forKey: ref.key)
+                }
+                manager.addProvider(provider, token: nil)
+                matched.insert(provider.id)
+                var storeFailures: [String] = []
+                for ref in resolvedEnvRefs {
+                    guard let secret = ref.secret else { continue }
+                    if !MCPProviderKeychain.saveEnvSecret(secret, key: ref.key, for: provider.id) {
+                        storeFailures.append(ref.key)
+                    }
+                }
+                var notes: [String] = []
+                if !unresolved.isEmpty {
+                    notes.append(
+                        "Registered without secret env "
+                            + unresolved.map { "\($0.key) (\($0.display) not found)" }.joined(separator: ", ")
+                            + ". Add the Keychain item and import again, or set it in Settings → Tools & MCP → Services.")
+                }
+                if !storeFailures.isEmpty {
+                    notes.append(
+                        "Registered, but could not store secret env "
+                            + storeFailures.joined(separator: ", ")
+                            + " — Keychain unavailable; set them in Settings → Tools & MCP → Services.")
+                }
+                results.append(
+                    ConfigApplyResult(
+                        section: "mcp_servers", target: entry.name,
+                        status: notes.isEmpty ? .done : .needsUserAction,
+                        message: notes.isEmpty ? nil : notes.joined(separator: " "),
+                        unresolvedSecretRefs: unresolved.map(\.display)))
+            } else {
+                guard let url = entry.url else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "mcp_servers", target: entry.name, status: .failed,
+                            message: "`url` is required to add a new server."))
+                    continue
+                }
+                var auth = entry.auth.flatMap(ConfigMCPAuth.auth(forKey:)) ?? MCPProviderAuthType.none
+                var token: String? = nil
+                var tokenDisplay: String? = nil
+                var unresolvedRefs: [String] = []
+                if case let (secret, display)? = resolvedToken {
+                    if let secret {
+                        auth = .bearerToken
+                        token = secret
+                        tokenDisplay = display
+                    } else if options.registerWithUnresolvedSecrets {
+                        auth = .bearerToken
+                        unresolvedRefs.append(display)
+                    } else {
+                        results.append(
+                            ConfigApplyResult(
+                                section: "mcp_servers", target: entry.name, status: .failed,
+                                message: "token_ref: could not resolve \(display) — the server "
+                                    + "was not added.",
+                                unresolvedSecretRefs: [display]))
+                        continue
+                    }
+                }
+                let unresolvedHeaders = resolvedHeaderRefs.filter { $0.secret == nil }
+                guard unresolvedHeaders.isEmpty || options.registerWithUnresolvedSecrets else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "mcp_servers", target: entry.name, status: .failed,
+                            message: "secret_header_refs: could not resolve "
+                                + unresolvedHeaders.map { "\($0.display) (header \($0.key))" }
+                                .joined(separator: ", ")
+                                + " — the server was not added.",
+                            unresolvedSecretRefs: unresolvedHeaders.map(\.display)))
+                    continue
+                }
+                unresolvedRefs += unresolvedHeaders.map(\.display)
+                var provider = MCPProvider(
+                    name: entry.name,
+                    url: url,
+                    enabled: entry.enabled ?? true,
+                    authType: auth,
+                    transport: .http
+                )
+                provider.secretHeaderKeys = resolvedHeaderRefs.map(\.key)
+                manager.addProvider(provider, token: token)
+                matched.insert(provider.id)
+                let headerFailures = storeHeaderSecrets(resolvedHeaderRefs, in: &provider)
+                var notes: [String] = []
+                if let tokenDisplay { notes.append("Registered with the bearer token from \(tokenDisplay).") }
+                let storedHeaders = resolvedHeaderRefs.filter { $0.secret != nil && !headerFailures.contains($0.key) }
+                if !storedHeaders.isEmpty {
+                    notes.append(
+                        "Stored secret header " + storedHeaders.map(\.key).joined(separator: ", ") + ".")
+                }
+                var needsUser = false
+                if !unresolvedRefs.isEmpty {
+                    needsUser = true
+                    notes.append(
+                        "Registered without " + unresolvedRefs.joined(separator: ", ")
+                            + " (not found). Add the Keychain item and import again, or enter it in "
+                            + "Settings → Tools & MCP → Services.")
+                }
+                if !headerFailures.isEmpty {
+                    needsUser = true
+                    notes.append(
+                        "Could not store header " + headerFailures.joined(separator: ", ")
+                            + " — Keychain unavailable; set it in Settings → Tools & MCP → Services.")
+                }
+                if tokenDisplay == nil, unresolvedRefs.isEmpty, auth != .none {
+                    needsUser = true
+                    notes.append(
+                        "Registered. Finish "
+                            + (auth == .oauth ? "sign-in" : "token entry")
+                            + " in Settings → Tools & MCP → Services.")
+                }
+                results.append(
+                    ConfigApplyResult(
+                        section: "mcp_servers", target: entry.name,
+                        status: needsUser ? .needsUserAction : .done,
+                        message: notes.isEmpty ? nil : notes.joined(separator: " "),
+                        unresolvedSecretRefs: unresolvedRefs))
+            }
+        }
+
+        if prune {
+            for provider in ConfigExporter.manageableMCPProviders()
+            where !matched.contains(provider.id) {
+                manager.removeProvider(id: provider.id)
+                results.append(
+                    ConfigApplyResult(section: "mcp_servers", target: provider.name, status: .done))
+            }
+        }
+        return results
+    }
+
+    // MARK: - Plugins
+
+    private static func applyPlugins(_ desired: [String], prune: Bool) async -> [ConfigApplyResult] {
+        var results: [ConfigApplyResult] = []
+        let installed = await MainActor.run { Set(PluginManager.shared.plugins.map { $0.plugin.id }) }
+
+        for pluginId in desired where !installed.contains(pluginId) {
+            do {
+                try await PluginRepositoryService.shared.install(pluginId: pluginId)
+            } catch {
+                results.append(
+                    ConfigApplyResult(
+                        section: "plugins", target: pluginId, status: .failed,
+                        message: "Install failed: \(error.localizedDescription)"))
+                continue
+            }
+            // Required secrets never travel through the document — surface
+            // the missing ones so the user finishes in the Secrets sheet.
+            let missingSecretLabels: [String] = await MainActor.run {
+                guard
+                    let loaded = PluginManager.shared.plugins.first(where: { $0.plugin.id == pluginId }),
+                    let secrets = loaded.plugin.manifest.secrets
+                else { return [] }
+                return secrets
+                    .filter { spec in
+                        spec.required
+                            && !ToolSecretsKeychain.hasSecret(
+                                id: spec.id, for: pluginId, agentId: Agent.defaultId)
+                    }
+                    .map { $0.label }
+            }
+            if missingSecretLabels.isEmpty {
+                results.append(ConfigApplyResult(section: "plugins", target: pluginId, status: .done))
+            } else {
+                results.append(
+                    ConfigApplyResult(
+                        section: "plugins", target: pluginId, status: .needsUserAction,
+                        message: "Installed. Needs secrets in Settings… (⌘,) → Tools & MCP → Plugins (Configure Secrets on the plugin card): "
+                            + missingSecretLabels.joined(separator: ", ")))
+            }
+        }
+
+        if prune {
+            let wanted = Set(desired)
+            for pluginId in installed.subtracting(wanted).sorted() {
+                do {
+                    try await PluginRepositoryService.shared.uninstall(pluginId: pluginId)
+                    results.append(
+                        ConfigApplyResult(section: "plugins", target: pluginId, status: .done))
+                } catch {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "plugins", target: pluginId, status: .failed,
+                            message: "Uninstall failed: \(error.localizedDescription)"))
+                }
+            }
+        }
+        return results
+    }
+
+    // MARK: - Models
+
+    // MARK: - Cloud providers
+
+    private static func applyProviders(
+        _ entries: [ProviderEntry], prune: Bool
+    ) async -> [ConfigApplyResult] {
+        var results: [ConfigApplyResult] = []
+        var matched = Set<UUID>()
+
+        for entry in entries {
+            let existing: RemoteProvider? = await MainActor.run {
+                ConfigProviderPresets.manageableProviders().first {
+                    $0.name.lowercased() == entry.name.lowercased()
+                }
+            }
+            if var provider = existing {
+                matched.insert(provider.id)
+                let changed =
+                    (entry.enabled != nil && entry.enabled != provider.enabled)
+                    || (entry.autoConnect != nil && entry.autoConnect != provider.autoConnect)
+                    || (entry.timeoutSeconds != nil && entry.timeoutSeconds != provider.timeout)
+                    || (entry.disableTimeout != nil
+                        && entry.disableTimeout != provider.disableTimeout)
+                    || (entry.manualModelIds != nil
+                        && entry.manualModelIds != provider.manualModelIds)
+                if changed {
+                    if let v = entry.enabled { provider.enabled = v }
+                    if let v = entry.autoConnect { provider.autoConnect = v }
+                    // Endpoint fields (host/protocol/port/base_path) are
+                    // create-only — the planner refuses a mismatch before
+                    // apply ever runs. Connection settings are mutable.
+                    if let v = entry.timeoutSeconds { provider.timeout = v }
+                    if let v = entry.disableTimeout { provider.disableTimeout = v }
+                    if let v = entry.manualModelIds { provider.manualModelIds = v }
+                    let updated = provider
+                    await MainActor.run {
+                        RemoteProviderManager.shared.updateProvider(
+                            updated, apiKey: nil, oauthTokens: nil)
+                    }
+                }
+                // The old short-circuit reported `done` here even when the
+                // provider had NO stored secret — the case behind "the sheet
+                // never opened": an earlier Settings visit or cancelled apply
+                // left the entry registered but keyless, so "set up xAI"
+                // silently succeeded without ever asking for the key. Verify
+                // the declared auth actually has its credential and open the
+                // same secure sheet a new provider gets when it doesn't.
+                let frozen = provider
+                // A secret reference stores/rotates the key without the
+                // sheet. Mirrors the interactive path: entering a key flips
+                // the provider to API-key auth.
+                if let raw = entry.apiKeyRef {
+                    let (secret, display) = await resolveSecretRef(raw)
+                    guard let secret else {
+                        results.append(
+                            ConfigApplyResult(
+                                section: "providers", target: entry.name, status: .failed,
+                                message: "api_key_ref: could not resolve \(display) — "
+                                    + "nothing was stored."))
+                        continue
+                    }
+                    // Re-read the provider after the suspension: `frozen` is a
+                    // pre-await copy, and writing it back would revert any
+                    // Settings edit that landed while the Keychain read ran.
+                    // Only the auth flip is ours to write.
+                    let providerId = frozen.id
+                    await MainActor.run {
+                        guard
+                            var current = RemoteProviderManager.shared.configuration.providers
+                                .first(where: { $0.id == providerId })
+                        else { return }
+                        current.authType = .apiKey
+                        RemoteProviderManager.shared.updateProvider(
+                            current, apiKey: secret, oauthTokens: nil)
+                    }
+                    results.append(
+                        ConfigApplyResult(
+                            section: "providers", target: entry.name, status: .done,
+                            message: "Stored the API key from \(display)."))
+                    continue
+                }
+                // `set_api_key: true` is an explicit request to open the
+                // sheet regardless of what's stored — the user wants to set
+                // or rotate the key even when OAuth/an old key still works.
+                if entry.setApiKey == true {
+                    results.append(await requestCredentials(forExisting: frozen, entryName: entry.name))
+                    continue
+                }
+                let availability = await RemoteProviderKeychain.runOffCooperativeExecutor {
+                    Self.credentialAvailability(for: frozen)
+                }
+                switch availability {
+                case .present:
+                    results.append(
+                        ConfigApplyResult(section: "providers", target: entry.name, status: .done))
+                case .absent, .corrupt:
+                    results.append(await requestCredentials(forExisting: frozen, entryName: entry.name))
+                case .unavailable:
+                    results.append(
+                        ConfigApplyResult(
+                            section: "providers", target: entry.name, status: .needsUserAction,
+                            message: "Could not verify stored credentials (Keychain unavailable "
+                                + "right now) — check Settings → Providers."))
+                }
+            } else {
+                let result = await addProvider(entry)
+                if case .done = result.status, let id = result.createdProviderId {
+                    matched.insert(id)
+                }
+                results.append(result.result)
+            }
+        }
+
+        if prune {
+            // Prune only the manageable slice: an ephemeral provider absent
+            // from the document must survive a prune apply.
+            let toRemove: [(UUID, String)] = await MainActor.run {
+                ConfigProviderPresets.manageableProviders()
+                    .filter { !matched.contains($0.id) }
+                    .map { ($0.id, $0.name) }
+            }
+            for (id, name) in toRemove {
+                await MainActor.run { RemoteProviderManager.shared.removeProvider(id: id) }
+                results.append(ConfigApplyResult(section: "providers", target: name, status: .done))
+            }
+        }
+        return results
+    }
+
+    private struct ProviderAddOutcome {
+        var result: ConfigApplyResult
+        var createdProviderId: UUID?
+        var status: ConfigApplyResult.Status { result.status }
+    }
+
+    /// Resolve a `*_ref` document value into (secret, safe display name).
+    /// `nil` secret means malformed / missing / empty — callers report by
+    /// display only; the value itself never reaches a result or a log.
+    static func resolveSecretRef(_ raw: String) async -> (secret: String?, display: String) {
+        switch ConfigSecretRef.parse(raw) {
+        case .failure:
+            return (nil, raw)
+        case .success(let ref):
+            // Keychain refs reach securityd through a synchronous
+            // SecItemCopyMatching; resolved on the main actor, that IPC
+            // round-trip has stalled the app for seconds when securityd was
+            // slow. Hop off the cooperative executor for the read. Env refs
+            // are a dictionary lookup and stay inline.
+            if case .keychain = ref.source {
+                let secret = await Task.detached(priority: .userInitiated) {
+                    ref.resolve()
+                }.value
+                return (secret, ref.display)
+            }
+            return (ref.resolve(), ref.display)
+        }
+    }
+
+    /// Whether the provider's declared auth has its secret in the Keychain.
+    /// `.none` providers (e.g. a keyless local endpoint) need nothing, so
+    /// they always count as present. Synchronous so the planner can call it
+    /// too; the applier hops off the cooperative executor around it.
+    static func credentialAvailability(for provider: RemoteProvider) -> SecretAvailability {
+        switch provider.authType {
+        case .none:
+            return .present
+        case .apiKey:
+            return RemoteProviderKeychain.apiKeyAvailability(for: provider.id)
+        case .openAICodexOAuth, .xaiOAuth:
+            return RemoteProviderKeychain.oauthTokensAvailability(for: provider.id)
+        }
+    }
+
+    /// What a phone run is told for an existing provider whose key only the
+    /// Mac can take: the model relays it, so it names where to go.
+    static func credentialsNeedTheMac(providerName: String) -> String {
+        "The API key for '\(providerName)' has to be entered on the Mac: Osaurus → Settings → "
+            + "Providers. It was not requested from the phone and nothing was stored; tell the user "
+            + "to add it there, then this provider will work."
+    }
+
+    /// Existing provider whose secret is missing. Upstream opens its native
+    /// credential sheet (`ProviderCredentialPromptService`); Intel has no such
+    /// sheet until the provider-preset UI lands (`W-declarative-config` stage
+    /// 3), so the key is never taken through this path: the result names the
+    /// Settings pane and nothing is stored. A `api_key_ref` in the document
+    /// is the only way to hand over a key without the UI.
+    private static func requestCredentials(
+        forExisting provider: RemoteProvider, entryName: String
+    ) async -> ConfigApplyResult {
+        ConfigApplyResult(
+            section: "providers", target: entryName, status: .needsUserAction,
+            message: Self.credentialsNeedTheMac(providerName: provider.name))
+    }
+
+    /// Interactive provider creation: opens the native credential sheet so
+    /// the user pastes / signs in. Mirrors the old `osaurus_provider` add
+    /// path — no secret ever appears in the document or the result.
+    private static func addProvider(_ entry: ProviderEntry) async -> ProviderAddOutcome {
+        guard let resolution = ConfigProviderPresets.resolve(entry.provider) else {
+            return ProviderAddOutcome(
+                result: ConfigApplyResult(
+                    section: "providers", target: entry.name, status: .failed,
+                    message: "`provider` must be one of: \(ConfigProviderPresets.canonicalIdsList)."))
+        }
+
+        // A secret reference creates the provider without the sheet: the key
+        // is read from env/keychain and stored exactly like an entered one.
+        // Validation refuses api_key_ref for the OAuth/pairing resolutions.
+        if let raw = entry.apiKeyRef, case .preset = resolution {
+            let (secret, display) = await resolveSecretRef(raw)
+            guard let secret else {
+                return ProviderAddOutcome(
+                    result: ConfigApplyResult(
+                        section: "providers", target: entry.name, status: .failed,
+                        message: "api_key_ref: could not resolve \(display) — the provider "
+                            + "was not created."))
+            }
+            let id = await MainActor.run {
+                buildAndAddProvider(
+                    entry: entry,
+                    resolution: resolution,
+                    storageAuthType: .apiKey,
+                    extraFields: nil,
+                    apiKey: secret,
+                    oauthTokens: nil)
+            }
+            return ProviderAddOutcome(
+                result: ConfigApplyResult(
+                    section: "providers", target: entry.name, status: .done,
+                    message: "Created with the API key from \(display)."),
+                createdProviderId: id)
+        }
+
+        // No native credential sheet on Intel yet (stage 3): a keyless local
+        // endpoint (Ollama) needs nothing from the user and is created here;
+        // everything that needs a key, sign-in or pairing is left for the
+        // Settings pane (or an `api_key_ref`) and nothing is stored.
+        if case .preset(let preset) = resolution, preset == .ollama {
+            let id = await MainActor.run {
+                buildAndAddProvider(
+                    entry: entry,
+                    resolution: resolution,
+                    storageAuthType: .none,
+                    extraFields: nil,
+                    apiKey: nil,
+                    oauthTokens: nil)
+            }
+            return ProviderAddOutcome(
+                result: ConfigApplyResult(section: "providers", target: entry.name, status: .done),
+                createdProviderId: id)
+        }
+        let step: String
+        switch resolution {
+        case .preset: step = "its API key has to be entered (or given as `api_key_ref`)"
+        case .codexOAuth: step = "it needs a sign-in"
+        case .osaurusAgent: step = "it needs pairing"
+        }
+        return ProviderAddOutcome(
+            result: ConfigApplyResult(
+                section: "providers", target: entry.name, status: .needsUserAction,
+                message: "'\(entry.name)' was not added: \(step) in Osaurus → Settings → Providers on "
+                    + "the Mac. Nothing was stored; tell the user to add it there."))
+    }
+
+    /// Extra-field keys that map to explicit `RemoteProvider` columns rather
+    /// than free-form `customHeaders`. Internal so the test suite can pin
+    /// that Azure's endpoint never leaks into the headers map.
+    static let reservedExtraKeys: Set<String> = ["host", "deployment"]
+
+    /// Comma/newline-separated Azure deployment names → `manualModelIds`,
+    /// deduped case-insensitively keeping the first spelling — identical to
+    /// `RemoteProviderEditSheet.parseManualModelIds` so chat-driven Azure
+    /// providers persist the same way as Settings-configured ones.
+    static func parseManualModelIds(_ text: String) -> [String] {
+        var seen = Set<String>()
+        var values: [String] = []
+        for part in text.split(whereSeparator: { $0 == "\n" || $0 == "," }) {
+            let value = String(part).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            let key = value.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            values.append(value)
+        }
+        return values
+    }
+
+    @MainActor
+    private static func buildAndAddProvider(
+        entry: ProviderEntry,
+        resolution: ProviderToolResolution,
+        storageAuthType: RemoteProviderAuthType,
+        extraFields: [String: String]?,
+        apiKey: String?,
+        oauthTokens: RemoteProviderOAuthTokens?
+    ) -> UUID {
+        if case .codexOAuth = resolution {
+            var provider = OpenAICodexOAuthService.makeProvider()
+            provider.name = entry.name
+            if let v = entry.enabled { provider.enabled = v }
+            if let v = entry.autoConnect { provider.autoConnect = v }
+            RemoteProviderManager.shared.addProvider(provider, apiKey: apiKey, oauthTokens: oauthTokens)
+            return provider.id
+        }
+
+        let defaults: (host: String, providerProtocol: RemoteProviderProtocol, port: Int?, basePath: String)
+        switch resolution {
+        case .preset(let preset):
+            let cfg = preset.configuration
+            defaults = (cfg.host, cfg.providerProtocol, cfg.port, cfg.basePath)
+        case .codexOAuth:
+            defaults = ("chatgpt.com", .https, nil, "/backend-api")
+        case .osaurusAgent:
+            defaults = ("localhost", .http, 8080, "/v1")
+        }
+        let providerType = resolution.providerType
+        let extras = extraFields ?? [:]
+
+        // Endpoint precedence on create: what the user saw, edited, and
+        // tested in the credential sheet wins; then the document's endpoint
+        // fields (how a `custom` provider declares its host); then the
+        // preset defaults. Existing providers never take endpoint changes.
+        let sheetHost = extras["host"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let documentHost = entry.host?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let host =
+            !sheetHost.isEmpty ? sheetHost : (!documentHost.isEmpty ? documentHost : defaults.host)
+        let providerProtocol =
+            entry.providerProtocol.flatMap { RemoteProviderProtocol(rawValue: $0.lowercased()) }
+            ?? defaults.providerProtocol
+        let port = entry.port.isSpecified ? entry.port.valueOrNil : defaults.port
+        let basePath = entry.basePath ?? defaults.basePath
+
+        var headers: [String: String] = [:]
+        if providerType == .openaiLegacy {
+            for (k, v) in extras where !reservedExtraKeys.contains(k) {
+                headers[k] = v
+            }
+        }
+        // Azure routes requests through deployment names rather than model
+        // names, so the Settings UI persists the deployment list in
+        // `manualModelIds`. Mirror that here; an explicit document list wins.
+        var manualModelIds: [String] = entry.manualModelIds ?? []
+        if manualModelIds.isEmpty, providerType == .azureOpenAI {
+            manualModelIds = parseManualModelIds(extras["deployment"] ?? "")
+        }
+
+        var provider = RemoteProvider(
+            name: entry.name,
+            host: host,
+            providerProtocol: providerProtocol,
+            port: port,
+            basePath: basePath,
+            customHeaders: headers,
+            authType: storageAuthType,
+            providerType: providerType,
+            enabled: entry.enabled ?? true,
+            autoConnect: entry.autoConnect ?? true,
+            timeout: entry.timeoutSeconds ?? 60,
+            manualModelIds: manualModelIds
+        )
+        if let v = entry.disableTimeout { provider.disableTimeout = v }
+        RemoteProviderManager.shared.addProvider(provider, apiKey: apiKey, oauthTokens: oauthTokens)
+        return provider.id
+    }
+
+    // MARK: - Search providers
+
+    @MainActor
+    private static func applySearchProviders(
+        _ desired: SearchProvidersSection, prune: Bool
+    ) -> [ConfigApplyResult] {
+        var results: [ConfigApplyResult] = []
+        let manager = SearchProviderManager.shared
+
+        for entry in desired.providers ?? [] {
+            guard let def = manager.definition(id: entry.id) else {
+                results.append(
+                    ConfigApplyResult(
+                        section: "search_providers", target: entry.id, status: .failed,
+                        message: "Unknown provider id."))
+                continue
+            }
+            let alreadyConfigured = manager.configuration.provider(id: entry.id) != nil
+            if !alreadyConfigured {
+                manager.addProvider(definitionId: entry.id, enabled: entry.enabled ?? true)
+                let needsKey = !def.isKeyless && !manager.configuredProviderIds.contains(def.id)
+                results.append(
+                    ConfigApplyResult(
+                        section: "search_providers", target: entry.id,
+                        status: needsKey ? .needsUserAction : .done,
+                        message: needsKey
+                            ? "Added. Paste the API key in Settings → Search." : nil))
+            } else {
+                if let enabled = entry.enabled {
+                    manager.setEnabled(enabled, for: entry.id)
+                }
+                results.append(
+                    ConfigApplyResult(section: "search_providers", target: entry.id, status: .done))
+            }
+        }
+
+        if prune, let listed = desired.providers {
+            let wanted = Set(listed.map { $0.id })
+            let configured = manager.rankedProviders.map { $0.definition.id }
+            for id in configured where !wanted.contains(id) {
+                manager.removeProvider(definitionId: id)
+                results.append(
+                    ConfigApplyResult(section: "search_providers", target: id, status: .done))
+            }
+        }
+
+        if let ranking = desired.ranking {
+            manager.setDefaultRanking(ranking)
+            results.append(
+                ConfigApplyResult(section: "search_providers", target: "ranking", status: .done))
+        }
+        return results
+    }
+
+    // MARK: - Schedules
+
+    @MainActor
+    private static func customAgentId(named name: String) -> UUID? {
+        AgentManager.shared.agents.first {
+            !$0.isBuiltIn && $0.name.lowercased() == name.lowercased()
+        }?.id
+    }
+
+    @MainActor
+    private static func applySchedules(
+        _ entries: [ScheduleEntry], prune: Bool
+    ) -> [ConfigApplyResult] {
+        var results: [ConfigApplyResult] = []
+        let manager = ScheduleManager.shared
+        var matched = Set<UUID>()
+
+        for entry in entries {
+            let existing = manager.schedules.first {
+                $0.name.lowercased() == entry.name.lowercased()
+            }
+
+            var frequency: ScheduleFrequency?
+            if let raw = entry.frequency {
+                switch ConfigScheduleFrequency.parse(
+                    frequency: raw, value: entry.frequencyValue, timeOfDay: entry.frequencyTimeOfDay)
+                {
+                case .success(let f): frequency = f
+                case .failure(let error):
+                    results.append(
+                        ConfigApplyResult(
+                            section: "schedules", target: entry.name, status: .failed,
+                            message: error.message))
+                    continue
+                }
+            }
+
+            var target: AgentDispatchTarget?
+            if let agentName = entry.agent {
+                if let ref = ConfigAgentTargetReference.workspaceRef(agentName) {
+                    target = .workspace(ref)
+                } else if let id = customAgentId(named: agentName) {
+                    target = .local(id)
+                } else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "schedules", target: entry.name, status: .failed,
+                            message: "No custom agent named `\(agentName)`."))
+                    continue
+                }
+            }
+
+            if var schedule = existing {
+                matched.insert(schedule.id)
+                if let target { schedule.target = target }
+                if let v = entry.instructions { schedule.instructions = v }
+                if let frequency { schedule.frequency = frequency }
+                if let v = entry.enabled { schedule.isEnabled = v }
+                manager.update(schedule)
+                results.append(
+                    ConfigApplyResult(section: "schedules", target: entry.name, status: .done))
+            } else {
+                guard let target, let instructions = entry.instructions, let frequency else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "schedules", target: entry.name, status: .failed,
+                            message: "Creating a schedule needs `agent`, `instructions`, and `frequency`."))
+                    continue
+                }
+                // Chat/document-created schedules attach no security-scoped
+                // folder context; the Schedules tab is the place for that.
+                let schedule = manager.create(
+                    name: entry.name,
+                    instructions: instructions,
+                    target: target,
+                    parameters: [:],
+                    folderPath: nil,
+                    folderBookmark: nil,
+                    frequency: frequency,
+                    isEnabled: entry.enabled ?? true
+                )
+                matched.insert(schedule.id)
+                results.append(
+                    ConfigApplyResult(section: "schedules", target: entry.name, status: .done))
+            }
+        }
+
+        if prune {
+            for schedule in manager.schedules where !matched.contains(schedule.id) {
+                _ = manager.delete(id: schedule.id)
+                results.append(
+                    ConfigApplyResult(section: "schedules", target: schedule.name, status: .done))
+            }
+        }
+        return results
+    }
+
+    // MARK: - Watchers
+
+    @MainActor
+    private static func applyWatchers(_ entries: [WatcherEntry], prune: Bool) -> [ConfigApplyResult] {
+        var results: [ConfigApplyResult] = []
+        let manager = WatcherManager.shared
+        var matched = Set<UUID>()
+
+        for entry in entries {
+            let existing = manager.watchers.first { $0.name.lowercased() == entry.name.lowercased() }
+
+            var target: UUID?
+            if let agentName = entry.agent {
+                if ConfigAgentTargetReference.workspaceRef(agentName) != nil {
+                    // Intel has no shared workspace agents yet (W-channels /
+                    // workspaces are deferred), so a watcher cannot target one.
+                    results.append(
+                        ConfigApplyResult(
+                            section: "watchers", target: entry.name, status: .failed,
+                            message: "`\(agentName)` is a shared workspace agent; workspaces are not "
+                                + "available in this build. Use a custom agent."))
+                    continue
+                } else if let id = customAgentId(named: agentName) {
+                    target = id
+                } else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "watchers", target: entry.name, status: .failed,
+                            message: "No custom agent named `\(agentName)`."))
+                    continue
+                }
+            }
+
+            var path: String?
+            if let raw = entry.path {
+                let expanded = (raw as NSString).expandingTildeInPath
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory),
+                    isDirectory.boolValue
+                else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "watchers", target: entry.name, status: .failed,
+                            message: "`\(expanded)` is not an existing directory."))
+                    continue
+                }
+                path = expanded
+            }
+
+            let responsiveness = entry.responsiveness.flatMap {
+                Responsiveness(rawValue: $0.lowercased())
+            }
+
+            if var watcher = existing {
+                matched.insert(watcher.id)
+                if let target { watcher.agentId = target }
+                if let v = entry.instructions { watcher.instructions = v }
+                if let path {
+                    // A document-supplied path replaces any picker-granted
+                    // bookmark; the old bookmark points at the old folder and
+                    // must not win over the new path in resolveWatchPath.
+                    watcher.watchPath = path
+                    watcher.watchBookmark = nil
+                }
+                if let v = entry.recursive { watcher.recursive = v }
+                if let responsiveness { watcher.responsiveness = responsiveness }
+                if let v = entry.enabled { watcher.isEnabled = v }
+                manager.update(watcher)
+                results.append(
+                    ConfigApplyResult(section: "watchers", target: entry.name, status: .done))
+            } else {
+                guard let target, let instructions = entry.instructions, let path else {
+                    results.append(
+                        ConfigApplyResult(
+                            section: "watchers", target: entry.name, status: .failed,
+                            message: "Creating a watcher needs `agent`, `instructions`, and `path`."))
+                    continue
+                }
+                let watcher = manager.create(
+                    name: entry.name,
+                    instructions: instructions,
+                    agentId: target,
+                    watchPath: path,
+                    watchBookmark: nil,
+                    isEnabled: entry.enabled ?? true,
+                    recursive: entry.recursive ?? false,
+                    responsiveness: responsiveness ?? .balanced
+                )
+                matched.insert(watcher.id)
+                results.append(
+                    ConfigApplyResult(
+                        section: "watchers", target: entry.name, status: .done,
+                        message: "Uses a plain folder path — if macOS blocks access, re-pick the "
+                            + "folder in the Watchers tab."))
+            }
+        }
+
+        if prune {
+            for watcher in manager.watchers where !matched.contains(watcher.id) {
+                _ = manager.delete(id: watcher.id)
+                results.append(
+                    ConfigApplyResult(section: "watchers", target: watcher.name, status: .done))
+            }
+        }
+        return results
+    }
+}

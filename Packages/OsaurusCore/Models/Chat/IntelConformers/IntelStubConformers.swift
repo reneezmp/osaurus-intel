@@ -1627,6 +1627,15 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             || (toolsByName[name] as? MCPProviderTool)?.hints.requiresApprovalEveryCall == true
     }
 
+    /// Whether the registered tool asks on every call for SOME arguments
+    /// (`ArgumentAwarePerCallApprovalTool`, e.g. `mail_compose` with
+    /// `send: true`): `auto` still covers the other calls, so the planner adds
+    /// a caveat instead of hiding the option (upstream).
+    func mayRequirePerCallApproval(_ name: String) -> Bool {
+        if toolsByName[name] is MCPProviderTool { return false }
+        return toolsByName[name] is ArgumentAwarePerCallApprovalTool
+    }
+
     /// O(1) single-tool lookup as a `ToolEntry` (upstream API; the Tools
     /// catalog patches one row after a toggle instead of relisting).
     func entry(named name: String) -> ToolEntry? {
@@ -2156,6 +2165,12 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             }
         cachedListTools = entries
         return entries
+    }
+
+    /// Whether a tool with this name is registered (upstream API; the
+    /// declarative config applier skips names nothing provides).
+    func isRegistered(_ name: String) -> Bool {
+        toolsByName[name] != nil
     }
 
     /// Whether a tool is switched on globally (upstream API; Intel keeps the

@@ -71,6 +71,10 @@ enum ConfigRisk {
             + "agent\(customAgents == 1 ? "" : "s") exist) — the Orchestrator loses `spawn_agent` "
             + "and cannot delegate until an agent is listed again."
     }
+    static func emptiesWorkspaceSpawnPool(removed: Int) -> String {
+        "Removes every teammate agent from the Orchestrator's pool (`spawnable_workspace_agents` "
+            + "replaces the whole list; \(removed) removed)."
+    }
     static let ramPreflightDisabled =
         "Turns off \"Check memory before delegating\" for subagent tasks."
     static func mcpEndpoint(_ name: String, _ url: String) -> String {
