@@ -55,6 +55,8 @@ struct ChatContentView: View {
     @ObservedObject private var projectManager = ProjectManager.shared
     @State private var measuredHeaderHeight: CGFloat = 44
     @State private var showCreditsTopUp = false
+    /// Upstream Classic: balance for the out-of-credits / credits-added notices.
+    @ObservedObject private var accountService = OsaurusRouterAccountService.shared
     @State private var measuredComposerHeight: CGFloat = 100
 
     /// User-adjustable width of the History sidebar, persisted across launches
@@ -289,6 +291,27 @@ struct ChatContentView: View {
             )
             .padding(.bottom, 8)
             .transition(.opacity.combined(with: .scale(scale: 0.96)))
+    }
+
+    private var insufficientFundsMessage: String {
+        String(
+            localized:
+                "Your balance is \(accountService.formattedBalance). Add credits to keep chatting.",
+            bundle: .module,
+            comment:
+                "Message in the out-of-credits modal shown in chat; the placeholder is the current balance."
+        )
+    }
+
+    /// Balance-aware copy for the post-top-up retry notice.
+    private var creditsAddedRetryMessage: String {
+        String(
+            localized:
+                "Your balance is now \(accountService.formattedBalance). Retry your last message to continue.",
+            bundle: .module,
+            comment:
+                "Message in the credits-added retry modal shown in chat after a top-up; the placeholder is the new balance."
+        )
     }
 
     var body: some View {
@@ -670,6 +693,25 @@ struct ChatContentView: View {
         .tint(theme.accentColor)
         .sheet(isPresented: $showCreditsTopUp) {
             CreditsTopUpSheet()
+        }
+        // Upstream Classic (stage 5c row 14): a Router 402 shows this notice;
+        // "Add credits" only opens the existing top-up sheet (no purchase).
+        .themedAlert(
+            L("You're out of credits"),
+            isPresented: $observedSession.insufficientFundsAlert,
+            message: insufficientFundsMessage,
+            primaryButton: .primary(L("Add credits")) { showCreditsTopUp = true },
+            secondaryButton: .cancel(L("Not now"))
+        )
+        .themedAlert(
+            L("Credits added"),
+            isPresented: $observedSession.topUpRetryAlert,
+            message: creditsAddedRetryMessage,
+            primaryButton: .primary(L("Retry")) { session.retryInsufficientFundsTurn() },
+            secondaryButton: .cancel(L("Later")) { session.clearInsufficientFundsRetryState() }
+        )
+        .onChange(of: accountService.balanceMicroValue) { _ in
+            session.handleBalanceChangeForRetry()
         }
         .sheet(item: $pendingWhatsNew) { release in
             whatsNewContent(release)

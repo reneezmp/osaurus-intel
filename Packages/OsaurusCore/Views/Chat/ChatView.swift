@@ -68,6 +68,36 @@ final class ChatSession: ObservableObject {
     /// Upstream: Router prompt-cache telemetry for this session.
     var sessionRouterCacheStats: (cachedInputTokens: Int, inputTokens: Int) { _cachedRouterCacheStats }
 
+    // MARK: - Insufficient funds + post-top-up retry (upstream Classic, row 14)
+
+    /// Set when an Osaurus Router send fails because the account is out of
+    /// credits (HTTP 402 INSUFFICIENT_FUNDS). Drives the "out of credits"
+    /// notice in `ChatContentView`. Cleared when the user dismisses it.
+    @Published var insufficientFundsAlert = false
+
+    /// The assistant turn blocked by an insufficient-funds failure, so a
+    /// post-top-up retry regenerates exactly that turn. Nil: nothing to retry.
+    var insufficientFundsTurnId: UUID?
+
+    /// Balance (micro-USD) captured at the moment of the failure. A retry is
+    /// offered only once the balance rises above it, so a stale refresh does
+    /// not prompt.
+    var balanceMicroAtInsufficientFunds: Int64?
+
+    /// Set when the balance is restored while the blocked turn is still last.
+    /// Drives the "Credits added" retry notice in `ChatContentView`.
+    @Published var topUpRetryAlert = false
+
+    /// Intel: injectable so tests never reach the Router (the live one
+    /// refreshes through the account service). Returns the balance in micro-USD.
+    var routerBalanceRefresh: @MainActor () async -> Int64 = {
+        await OsaurusRouterAccountService.shared.refreshBalance()
+        return OsaurusRouterAccountService.shared.balanceMicroValue
+    }
+    var routerBalanceMicro: @MainActor () -> Int64 = { OsaurusRouterAccountService.shared.balanceMicroValue }
+    /// Intel: tests stand in for "the selected model is the Router".
+    var isRouterBilledForInsufficientFunds: () -> Bool = { false }
+
     /// Upstream: the selected model is served by the Osaurus Router.
     var isOsaurusRouterSession: Bool {
         if case .remote(_, let providerId)? = selectedPickerItem?.source {
@@ -4511,17 +4541,79 @@ final class ChatSession: ObservableObject {
                 // error below it; with nothing streamed the error stands alone.
                 assistantTurn = liveAssistantTurn(fallback: assistantTurn)
                 assistantTurn.content = Self.streamErrorContent(
-                    streamed: assistantTurn.content, message: error.localizedDescription)
+                    streamed: assistantTurn.content, line: ChatErrorMessages.assistantMessage(for: error))
                 lastStreamError = error.localizedDescription
+                // Upstream Classic: an out-of-credits failure on a Router
+                // send opens the "out of credits" notice (Add credits / Not
+                // now) and remembers the blocked turn for a retry after top-up.
+                noteInsufficientFundsIfNeeded(error: error, blockedTurn: assistantTurn)
             }
         }
+    }
+
+    /// When a send fails because the router account is out of credits, surface
+    /// the "out of credits" notice and remember the blocked turn so a
+    /// post-top-up retry can resume. No-op for non-router sessions or other
+    /// errors. Never starts a purchase: the notice only opens the existing
+    /// Credits top-up sheet.
+    func noteInsufficientFundsIfNeeded(error: Error, blockedTurn: ChatTurn) {
+        guard isOsaurusRouterSession || isRouterBilledForInsufficientFunds(),
+            OsaurusRouter.isInsufficientFundsError(error.localizedDescription)
+        else { return }
+        insufficientFundsAlert = true
+        insufficientFundsTurnId = blockedTurn.id
+        // Baseline from the authoritative balance (no charge happened, so it
+        // is the true shortfall). Left nil until the refresh lands so the
+        // refresh's own change does not read as a top-up.
+        balanceMicroAtInsufficientFunds = nil
+        let refresh = routerBalanceRefresh
+        Task { [weak self] in
+            let micro = await refresh()
+            self?.balanceMicroAtInsufficientFunds = micro
+        }
+    }
+
+    /// Offer a one-tap retry once the balance is restored after an
+    /// insufficient-funds failure (called when the account balance changes;
+    /// it auto-refreshes on app activation when returning from the browser).
+    /// Only while the blocked turn is still last: `regenerate` truncates
+    /// everything from that turn onward.
+    func handleBalanceChangeForRetry() {
+        guard let blockedId = insufficientFundsTurnId,
+            let baseline = balanceMicroAtInsufficientFunds
+        else { return }
+        guard turns.last?.id == blockedId else {
+            clearInsufficientFundsRetryState()
+            return
+        }
+        let currentMicro = routerBalanceMicro()
+        guard currentMicro > baseline, currentMicro > 0 else { return }
+        topUpRetryAlert = true
+    }
+
+    /// Retry the blocked message by regenerating that turn (a fresh run that
+    /// re-bills by design); only while it is still the last turn.
+    func retryInsufficientFundsTurn() {
+        defer { clearInsufficientFundsRetryState() }
+        guard let blockedId = insufficientFundsTurnId, turns.last?.id == blockedId else { return }
+        regenerate(turnId: blockedId)
+    }
+
+    func clearInsufficientFundsRetryState() {
+        insufficientFundsTurnId = nil
+        balanceMicroAtInsufficientFunds = nil
+        topUpRetryAlert = false
     }
 
     /// Upstream Classic's catch: text the model already streamed stays, and
     /// the error goes below it after a blank line; with nothing streamed the
     /// error stands alone (Intel keeps its `Error: ` prefix).
     nonisolated static func streamErrorContent(streamed: String, message: String) -> String {
-        let line = "Error: \(message)"
+        streamErrorContent(streamed: streamed, line: "Error: \(message)")
+    }
+
+    /// Same, for a line already classified by `ChatErrorMessages`.
+    nonisolated static func streamErrorContent(streamed: String, line: String) -> String {
         let hasText = streamed.contains { !$0.isWhitespace }
         return hasText ? streamed + "\n\n" + line : line
     }
