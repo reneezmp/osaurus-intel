@@ -36168,6 +36168,74 @@
         }
       }
     },
+    "Retry in about %llds." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Retry in about %llds."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Retry in about %llds."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Retry in about %llds."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大约 %lld 秒后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大約 %lld 秒後重試。"
+          }
+        }
+      }
+    },
+    "Retry shortly." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Retry shortly."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Retry shortly."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Retry shortly."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "稍后重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "稍後重試。"
+          }
+        }
+      }
+    },
     "Reusable workflows, automatically available to every custom agent" : {
       "comment" : "Subtitle for the Skills view.",
       "extractionState" : "stale",
@@ -43775,6 +43843,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "模型從少量工具開始，按需載入更多你分配的工具。"
+          }
+        }
+      }
+    },
+    "The provider is temporarily unavailable (HTTP 503)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The provider is temporarily unavailable (HTTP 503)."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The provider is temporarily unavailable (HTTP 503)."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The provider is temporarily unavailable (HTTP 503)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提供商暂时不可用（HTTP 503）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提供者暫時無法使用（HTTP 503）。"
+          }
+        }
+      }
+    },
+    "The provider rate-limited this request (HTTP %lld)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The provider rate-limited this request (HTTP %lld)."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The provider rate-limited this request (HTTP %lld)."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The provider rate-limited this request (HTTP %lld)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提供商对此请求进行了速率限制（HTTP %lld）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提供者對此請求進行了速率限制（HTTP %lld）。"
           }
         }
       }

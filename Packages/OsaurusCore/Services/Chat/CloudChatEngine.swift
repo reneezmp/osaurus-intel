@@ -115,9 +115,31 @@ enum CloudChatError: LocalizedError {
     case httpError(provider: String, status: Int, message: String)
     case outputLimit(provider: String, diagnostic: String)
     case responseDecoding(provider: String, message: String, diagnostic: String)
+    /// Upstream `RemoteProviderServiceError.rateLimited`: 429, or 503 with a
+    /// `Retry-After` hint. `retryAfter` is the parsed header in seconds.
+    case rateLimited(retryAfter: TimeInterval?, statusCode: Int)
+    /// Upstream's `streamingError` for a tool call whose arguments were cut
+    /// off mid-stream (the call is quarantined, never run).
+    case truncatedToolCall(toolName: String, finishMarker: String)
 
     var errorDescription: String? {
         switch self {
+        case let .rateLimited(retryAfter, statusCode):
+            let condition =
+                statusCode == 503
+                ? L("The provider is temporarily unavailable (HTTP 503).")
+                : L("The provider rate-limited this request (HTTP \(statusCode)).")
+            if let retryAfter, retryAfter > 0 {
+                return condition + " " + L("Retry in about \(Int(retryAfter.rounded(.up)))s.")
+            }
+            return condition + " " + L("Retry shortly.")
+        case let .truncatedToolCall(toolName, finishMarker):
+            // Upstream's `streamingError` text, localized through its own key.
+            let message =
+                "Stream ended before tool call '\(toolName)' arguments were complete "
+                + "(finish marker: \(finishMarker)). The provider closed the connection "
+                + "mid-argument; retry the request."
+            return L("Streaming error: \(message)")
         case let .httpError(provider, status, message):
             let detail = message.isEmpty ? "no details returned" : message
             return "\(provider) API error \(status): \(detail)"
@@ -1346,6 +1368,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         wireMessages = IntelImageInputFallback.strippingImages(wireMessages)
                     }
                     var retriedWithoutImages = false
+                    // Upstream `ChatView.maxTransientRetries`: a round cut off before
+                    // anything was shown is re-asked up to twice, uncharged. Reset
+                    // whenever a round finishes, so a later failure gets a fresh budget.
+                    var transientRetries = 0
                     // One Insights row covers the run, so only the first
                     // accepted round's body replaces the first-built one.
                     var acceptedAttemptRecorded = false
@@ -1476,6 +1502,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         pendingHarnessNotices.removeAll()
                         // This round's visible text, for the grounded checks.
                         let roundTextStart = responseText.utf8.count
+                        // Nothing of this round reached the screen yet (text and
+                        // reasoning both count as chunks): the only time a transient
+                        // retry cannot duplicate visible output.
+                        let roundChunkStart = totalChunks
+                        func mayRetryTransient() -> Bool {
+                            interactiveChatRun && transientRetries < IntelTransportRetry.maxTransientRetries
+                                && totalChunks == roundChunkStart
+                        }
                         func roundVisibleText() -> String {
                             String(decoding: responseText.utf8.dropFirst(roundTextStart), as: UTF8.self)
                         }
@@ -1775,7 +1809,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             wireProbe.recordRequestBody(httpBody, endpointURL: urlRequest.url)
                         }
 
-                        let (asyncBytes, response) = try await self.session.bytes(for: urlRequest)
+                        // Upstream `connectWithRetry`: transient connect failures are
+                        // retried (200 / 800 ms) before any byte arrives; the same signed
+                        // request, Router `idempotency_key` included, is re-sent.
+                        let (asyncBytes, response) = try await IntelTransportRetry.connectWithRetry(
+                            session: self.session, urlRequest: urlRequest)
                         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
                         if response is HTTPURLResponse {
                             let accepted = (200...299).contains(statusCode)
@@ -1807,6 +1845,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 pendingHarnessNotices = roundNotices
                                 round -= 1
                                 continue
+                            }
+                            // Upstream: 429 (or 503 + Retry-After) is a rate limit with a
+                            // "Retry in about Ns" message, not a raw error body.
+                            if let http = response as? HTTPURLResponse,
+                                let rateLimited = IntelTransportRetry.rateLimited(from: http)
+                            {
+                                NSLog("[CloudChatEngine] HTTP \(statusCode) rate limited")
+                                logInference(error: rateLimited)
+                                continuation.finish(throwing: rateLimited)
+                                return
                             }
                             let message = extractAPIErrorMessage(errorBody)
                             NSLog("[CloudChatEngine] HTTP \(statusCode) error body: \(message)")
@@ -1874,12 +1922,24 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 }
                             }
                             finalized = try decoder.finish()
+                            transientRetries = 0
                             for emission in finalized.emissions {
                                 totalChunks += 1
                                 captureResponseText(emission)
                                 if let reasoning = StreamingReasoningHint.decode(emission) { noteReasoning(reasoning) }
                                 continuation.yield(emission)
                             }
+                            } catch let error as URLError
+                                where IntelTransportRetry.isTransientStreamDrop(error) && mayRetryTransient()
+                            {
+                                // Upstream transient retry (row 11): the link dropped before
+                                // anything was shown; ask again, same Router key.
+                                transientRetries += 1
+                                NSLog("[CloudChatEngine] Transient stream drop (retry \(transientRetries)/\(IntelTransportRetry.maxTransientRetries)): \(error.code.rawValue)")
+                                continuation.yield(StreamingToolHint.encode(""))
+                                pendingHarnessNotices = roundNotices
+                                round -= 1
+                                continue
                             } catch IntelCodexResponsesAdapter.Error.outputLimitDuringToolCall where agentRunRecovery {
                                 // Upstream's HTTP / plugin loops: a cut call is a `length` stop.
                                 throw AgentRunRecoveryExhausted(message: AgentToolLoop.lengthExhaustedFallback)
@@ -2222,6 +2282,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             endpoint.usesAnthropicWire ? IntelAnthropicSSETranslator() : nil
                         var geminiTranslator: IntelGeminiSSETranslator? =
                             endpoint.usesGeminiWire ? IntelGeminiSSETranslator() : nil
+                        do {  // upstream transient retry (row 11); not re-indented, to keep the diff small
                         lineLoop: for try await rawLine in asyncBytes.lines {
                             try Task.checkCancellation()
                             wireProbe.appendResponseChunk(Data((rawLine + "\n").utf8))
@@ -2347,6 +2408,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 }
                             }
                         }
+                        } catch let error as URLError
+                            where IntelTransportRetry.isTransientStreamDrop(error) && mayRetryTransient()
+                        {
+                            // The link dropped before anything was shown (possibly while
+                            // a tool call's arguments were streaming): ask again, uncharged.
+                            // A Router retry re-sends the same `idempotency_key`.
+                            transientRetries += 1
+                            NSLog("[CloudChatEngine] Transient stream drop (retry \(transientRetries)/\(IntelTransportRetry.maxTransientRetries)): \(error.code.rawValue)")
+                            continuation.yield(StreamingToolHint.encode(""))
+                            pendingHarnessNotices = roundNotices
+                            round -= 1
+                            continue
+                        }
 
                         // Upstream #2108: the output cap ended the round while
                         // tool arguments were still streaming. Running the call
@@ -2391,6 +2465,27 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     (name: $0.name, argumentBytes: $0.arguments.utf8.count)
                                 }))
                         }
+
+                        // Upstream `RemoteProviderService.resolveAccumulatedToolCall`: a call
+                        // whose arguments are not valid JSON was cut off mid-stream. It is
+                        // quarantined (never run, never put in history); the chat re-asks the
+                        // round twice, uncharged, while nothing was shown, then reports it.
+                        if let cut = partials.sorted(by: { $0.key < $1.key }).map(\.value)
+                            .first(where: { IntelTransportRetry.argumentsAreMalformed($0.arguments) })
+                        {
+                            NSLog("[CloudChatEngine] Discarding truncated tool call '\(cut.name)' (\(cut.arguments.utf8.count) bytes)")
+                            continuation.yield(StreamingToolHint.encode(""))
+                            if mayRetryTransient() {
+                                transientRetries += 1
+                                NSLog("[CloudChatEngine] Transient truncated call (retry \(transientRetries)/\(IntelTransportRetry.maxTransientRetries))")
+                                pendingHarnessNotices = roundNotices
+                                round -= 1
+                                continue
+                            }
+                            throw CloudChatError.truncatedToolCall(
+                                toolName: cut.name, finishMarker: roundFinishReason ?? "none")
+                        }
+                        transientRetries = 0
 
                         // No tools requested this round → the assistant's final
                         // answer has streamed; we're done.
@@ -2862,6 +2957,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         }
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
         if !(200...299).contains(statusCode) {
+            // Upstream: 429 / 503 + Retry-After read as a rate limit.
+            if let http = response as? HTTPURLResponse,
+                let rateLimited = IntelTransportRetry.rateLimited(from: http)
+            {
+                activity.finish(response: nil, wireResponse: data, error: rateLimited)
+                throw rateLimited
+            }
             let message = extractAPIErrorMessage(String(data: data, encoding: .utf8) ?? "")
             NSLog("[CloudChatEngine] completeChat HTTP \(statusCode) error body: \(message)")
             let error = CloudChatError.httpError(
