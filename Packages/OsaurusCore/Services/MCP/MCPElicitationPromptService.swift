@@ -231,12 +231,3 @@ extension MCPElicitationPromptService {
         )
     }
 }
-
-/// Borderless panels refuse key status by default (`canBecomeKey` is only
-/// true for windows with a title or resize bar), which silently breaks
-/// keyboard focus for the form's text fields. Opt in explicitly (upstream's
-/// `CredentialPromptPanel`).
-final class CredentialPromptPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
-}

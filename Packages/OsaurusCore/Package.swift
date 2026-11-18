@@ -341,7 +341,6 @@ let package = Package(
                 "Chat/DefaultAgentSystemPromptBuilderTests.swift",
                 "Folder/FolderToolsResilienceTests.swift",
                 
-                "Tool/ProviderPresetCredentialSheetTests.swift",
                 "Tool/ResolveExecutionModeTests.swift",
                 
                 

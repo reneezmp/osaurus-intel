@@ -1559,18 +1559,78 @@ enum ConfigApplier {
             + "to add it there, then this provider will work."
     }
 
-    /// Existing provider whose secret is missing. Upstream opens its native
-    /// credential sheet (`ProviderCredentialPromptService`); Intel has no such
-    /// sheet until the provider-preset UI lands (`W-declarative-config` stage
-    /// 3), so the key is never taken through this path: the result names the
-    /// Settings pane and nothing is stored. A `api_key_ref` in the document
-    /// is the only way to hand over a key without the UI.
+    /// Existing provider whose secret is missing: open the credential sheet
+    /// in rotate mode (same preset card and fields Settings' "rotate key"
+    /// shows) and persist the outcome through the manager. Secrets never
+    /// touch the document or the result payload.
     private static func requestCredentials(
         forExisting provider: RemoteProvider, entryName: String
     ) async -> ConfigApplyResult {
-        ConfigApplyResult(
-            section: "providers", target: entryName, status: .needsUserAction,
-            message: Self.credentialsNeedTheMac(providerName: provider.name))
+        let request = ProviderCredentialRequest(
+            provider: provider, providerName: provider.name,
+            mode: .rotate(existingId: provider.id))
+        // From the paired phone there is nobody at this Mac to type the key:
+        // the panel would hold the run with nothing on the phone saying why.
+        // Leave it for the Mac and say so.
+        if ChatExecutionContext.hasRemoteReviewer {
+            return ConfigApplyResult(
+                section: "providers", target: entryName, status: .needsUserAction,
+                message: Self.credentialsNeedTheMac(providerName: provider.name))
+        }
+        let outcome = await ProviderCredentialPromptService.requestCredentials(request)
+        if Task.isCancelled {
+            return ConfigApplyResult(
+                section: "providers", target: entryName, status: .cancelled,
+                message: "Cancelled before credential entry completed.")
+        }
+        switch outcome {
+        case .cancelled:
+            // Accurate in both modes: a first-key sheet leaves the provider
+            // keyless; a rotate sheet leaves the OLD key in place. Either
+            // way nothing was stored — never describe this as a rotation.
+            return ConfigApplyResult(
+                section: "providers", target: entryName, status: .cancelled,
+                message: "Credential entry was dismissed before a key was entered — nothing "
+                    + "was stored: the provider's credentials are unchanged and no key was "
+                    + "set or rotated.")
+        case .apiKey(let key, _):
+            let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return ConfigApplyResult(
+                    section: "providers", target: entryName, status: .needsUserAction,
+                    message: "No key was entered — finish credential entry in Settings → Providers.")
+            }
+            // The credential the user entered decides the auth mode. Without
+            // this, entering an API key on an OAuth-connected provider stored
+            // a key that requests never used (authType stayed OAuth) — the
+            // switch looked successful but changed nothing. Mirrors the
+            // Settings edit sheet, where picking "API Key" flips authType.
+            var updated = provider
+            updated.authType = .apiKey
+            let toSave = updated
+            await MainActor.run {
+                RemoteProviderManager.shared.updateProvider(toSave, apiKey: trimmed, oauthTokens: nil)
+            }
+            let switched = provider.authType != .apiKey
+            return ConfigApplyResult(
+                section: "providers", target: entryName, status: .done,
+                message: switched
+                    ? "Stored the API key and switched the provider to API-key auth."
+                    : "Stored the credentials.")
+        case .oauthTokens(let tokens):
+            var updated = provider
+            if updated.authType != .openAICodexOAuth, updated.authType != .xaiOAuth {
+                updated.authType =
+                    updated.providerType == .openAICodex ? .openAICodexOAuth : .xaiOAuth
+            }
+            let toSave = updated
+            await MainActor.run {
+                RemoteProviderManager.shared.updateProvider(toSave, apiKey: nil, oauthTokens: tokens)
+            }
+            return ConfigApplyResult(
+                section: "providers", target: entryName, status: .done,
+                message: "Signed in via OAuth.")
+        }
     }
 
     /// Interactive provider creation: opens the native credential sheet so
@@ -1612,35 +1672,96 @@ enum ConfigApplier {
                 createdProviderId: id)
         }
 
-        // No native credential sheet on Intel yet (stage 3): a keyless local
-        // endpoint (Ollama) needs nothing from the user and is created here;
-        // everything that needs a key, sign-in or pairing is left for the
-        // Settings pane (or an `api_key_ref`) and nothing is stored.
-        if case .preset(let preset) = resolution, preset == .ollama {
+        let request: ProviderCredentialRequest
+        switch resolution {
+        case .preset(let preset):
+            request = ProviderCredentialRequest(preset: preset, providerName: entry.name, mode: .addNew)
+        case .codexOAuth:
+            request = ProviderCredentialRequest(
+                providerType: .openAICodex, providerName: entry.name, mode: .addNew)
+        case .osaurusAgent:
+            request = ProviderCredentialRequest(
+                providerType: .osaurus, providerName: entry.name, mode: .addNew)
+        }
+
+        // See `requestCredentials(forExisting:)`: no Mac panel for a phone run.
+        // A preset that takes no key (e.g. Ollama) needs nothing from the
+        // panel, so it is created here as the panel path would with a blank
+        // key. Everything else names the step the Mac has to do.
+        if ChatExecutionContext.hasRemoteReviewer {
+            if case .preset = resolution, request.instructions.storageAuthType == .none {
+                let id = await MainActor.run {
+                    buildAndAddProvider(
+                        entry: entry,
+                        resolution: resolution,
+                        storageAuthType: .none,
+                        extraFields: nil,
+                        apiKey: nil,
+                        oauthTokens: nil)
+                }
+                return ProviderAddOutcome(
+                    result: ConfigApplyResult(section: "providers", target: entry.name, status: .done),
+                    createdProviderId: id)
+            }
+            let step: String
+            switch resolution {
+            case .preset: step = "its API key has to be entered"
+            case .codexOAuth: step = "it needs a sign-in"
+            case .osaurusAgent: step = "it needs pairing"
+            }
+            return ProviderAddOutcome(
+                result: ConfigApplyResult(
+                    section: "providers", target: entry.name, status: .needsUserAction,
+                    message: "'\(entry.name)' was not added: \(step) on the Mac, which can't be done "
+                        + "from the phone. Tell the user to add it in Osaurus → Settings → Providers "
+                        + "on their Mac, or to run this setup from the Mac."))
+        }
+        let outcome = await ProviderCredentialPromptService.requestCredentials(request)
+        if Task.isCancelled {
+            return ProviderAddOutcome(
+                result: ConfigApplyResult(
+                    section: "providers", target: entry.name, status: .cancelled,
+                    message: "Cancelled before credential entry completed."))
+        }
+
+        switch outcome {
+        case .cancelled:
+            return ProviderAddOutcome(
+                result: ConfigApplyResult(
+                    section: "providers", target: entry.name, status: .cancelled,
+                    message: "User cancelled credential entry."))
+        case .apiKey(let key, let headers):
+            let storageAuthType = request.instructions.storageAuthType
+            let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolvedKey: String? =
+                (storageAuthType == .none || trimmedKey.isEmpty) ? nil : trimmedKey
             let id = await MainActor.run {
                 buildAndAddProvider(
                     entry: entry,
                     resolution: resolution,
-                    storageAuthType: .none,
-                    extraFields: nil,
-                    apiKey: nil,
+                    storageAuthType: storageAuthType,
+                    extraFields: headers,
+                    apiKey: resolvedKey,
                     oauthTokens: nil)
             }
             return ProviderAddOutcome(
                 result: ConfigApplyResult(section: "providers", target: entry.name, status: .done),
                 createdProviderId: id)
+        case .oauthTokens(let tokens):
+            let id = await MainActor.run {
+                buildAndAddProvider(
+                    entry: entry,
+                    resolution: resolution,
+                    storageAuthType: request.instructions.storageAuthType,
+                    extraFields: nil,
+                    apiKey: nil,
+                    oauthTokens: tokens)
+            }
+            return ProviderAddOutcome(
+                result: ConfigApplyResult(
+                    section: "providers", target: entry.name, status: .done, message: "Signed in via OAuth."),
+                createdProviderId: id)
         }
-        let step: String
-        switch resolution {
-        case .preset: step = "its API key has to be entered (or given as `api_key_ref`)"
-        case .codexOAuth: step = "it needs a sign-in"
-        case .osaurusAgent: step = "it needs pairing"
-        }
-        return ProviderAddOutcome(
-            result: ConfigApplyResult(
-                section: "providers", target: entry.name, status: .needsUserAction,
-                message: "'\(entry.name)' was not added: \(step) in Osaurus → Settings → Providers on "
-                    + "the Mac. Nothing was stored; tell the user to add it there."))
     }
 
     /// Extra-field keys that map to explicit `RemoteProvider` columns rather
