@@ -143,6 +143,11 @@ final class ChatSession: ObservableObject {
         }
     }
     @Published var lastStreamError: String?
+    /// Engine hints at the end of a run (`StreamingRunEndHint`), read by `send`
+    /// once the stream is done: a refused tool call ended the run, or the run
+    /// ended on incomplete work and wants one tool-free status step.
+    private var runEndToolRejected = false
+    private var runEndWrapUpNotice: String?
 
     // MARK: - Run progress (slow / stalled surfacing, upstream)
 
@@ -3208,6 +3213,22 @@ final class ChatSession: ObservableObject {
                     rebuildVisibleBlocks()
                     continue
                 }
+                // Upstream `emitToolRejectionText`: a refused tool call ended the
+                // run; close the turn visibly instead of leaving a blank bubble.
+                if let rejectionText = StreamingRunEndHint.decodeToolRejected(delta) {
+                    await processor.finalize()
+                    currentTurn.pendingToolName = nil
+                    currentTurn.clearPendingToolArgs()
+                    let separator = currentTurn.contentIsEmpty ? "" : "\n\n"
+                    currentTurn.appendContentAndNotify(separator + rejectionText)
+                    runEndToolRejected = true
+                    rebuildVisibleBlocks()
+                    continue
+                }
+                if let notice = StreamingRunEndHint.decodeWrapUp(delta) {
+                    runEndWrapUpNotice = notice
+                    continue
+                }
                 if let toolName = StreamingToolHint.decode(delta) {
                     currentTurn.pendingToolName = toolName.isEmpty ? nil : toolName
                     // An empty name drops a half-built card (a tool call the
@@ -3802,6 +3823,8 @@ final class ChatSession: ObservableObject {
 
                 ttftTrace?.mark("pre_ttft_done")
 
+                runEndToolRejected = false
+                runEndWrapUpNotice = nil
                 outer: while attempts < maxAttempts {
                     attempts += 1
                     // Upstream's mid-run steer at this loop's own boundary
@@ -4320,22 +4343,12 @@ final class ChatSession: ObservableObject {
                     continue
                 }
 
-                if reachedToolLimit && isRunActive(runId) {
-                    // Upstream (#2167, #2175): a todo this run wrote that still
-                    // has unchecked items gets the honest step-limit message,
-                    // not a tool-free wrap-up that can only guess at the
-                    // unfinished work.
-                    let todoKey = sessionId?.uuidString ?? "draft-\(effectiveAgentId.uuidString)"
-                    var unfinishedTodoItems = 0
-                    if todoRunScope.hasCurrentRunTodo, let todo = await AgentTodoStore.shared.todo(for: todoKey) {
-                        unfinishedTodoItems = todo.totalCount - todo.doneCount
-                    }
-                    if unfinishedTodoItems > 0 {
-                        let message = AgentToolLoop.unfinishedTodoCapFallback(pending: unfinishedTodoItems)
-                        assistantTurn.content = message
-                        lastStreamError = message
-                        rebuildVisibleBlocks()
-                    } else {
+                // One tool-free status step: the request carries no tool schema and the
+                // notice explains the boundary. Used after the hard iteration cap (#2235)
+                // and, with a different notice, after announce-only recovery or a repeated
+                // retrieval failure ended the run on incomplete work (upstream
+                // `streamToolFreeWrapUp`).
+                @MainActor func streamToolFreeWrapUp(notice: String, emptyText: String, failurePrefix: String) async {
                         do {
                             var finalReq = ChatCompletionRequest(
                                 model: selectedModel ?? "default",
@@ -4435,7 +4448,52 @@ final class ChatSession: ObservableObject {
                             lastStreamError = message
                             rebuildVisibleBlocks()
                         }
+                }
+
+                if runEndToolRejected {
+                    // Upstream: a refused tool call ended the run. Classify it as
+                    // errored for lifecycle cleanup, and stamp the turn that closed on
+                    // the rejection (never the empty placeholder after a tool result).
+                    lastStreamError = "Tool call failed."
+                    if let closing = turns.last(where: {
+                        $0.role == .assistant && !Self.isEmptyAssistantPlaceholder($0)
+                    }), closing.terminalStopReason == nil {
+                        closing.terminalStopReason = "tool_rejected"
                     }
+                }
+
+                if reachedToolLimit && isRunActive(runId) {
+                    // Upstream (#2167, #2175): a todo this run wrote that still
+                    // has unchecked items gets the honest step-limit message,
+                    // not a tool-free wrap-up that can only guess at the
+                    // unfinished work.
+                    let todoKey = sessionId?.uuidString ?? "draft-\(effectiveAgentId.uuidString)"
+                    var unfinishedTodoItems = 0
+                    if todoRunScope.hasCurrentRunTodo, let todo = await AgentTodoStore.shared.todo(for: todoKey) {
+                        unfinishedTodoItems = todo.totalCount - todo.doneCount
+                    }
+                    if unfinishedTodoItems > 0 {
+                        let message = AgentToolLoop.unfinishedTodoCapFallback(pending: unfinishedTodoItems)
+                        assistantTurn.content = message
+                        lastStreamError = message
+                        rebuildVisibleBlocks()
+                    } else {
+                        await streamToolFreeWrapUp(
+                            notice: AgentToolLoop.iterationCapWrapUpNotice,
+                            emptyText: AgentToolLoop.iterationCapEmptyWrapUpText,
+                            failurePrefix: "The agent reached the configured step limit, and its final wrap-up failed: "
+                        )
+                    }
+                }
+                if let wrapUpNotice = runEndWrapUpNotice, isRunActive(runId) {
+                    // The run stopped on a promise or a replayed failure: the text on
+                    // screen is not an answer. Stream the truthful status step instead
+                    // of leaving it there (upstream `RunResult.wrapUpNotice`).
+                    await streamToolFreeWrapUp(
+                        notice: wrapUpNotice,
+                        emptyText: AgentToolLoop.incompleteWorkEmptyWrapUpText,
+                        failurePrefix: "The run stopped before the work was complete, and its final status call failed: "
+                    )
                 }
             } catch is CancellationError {
                 // Upstream Classic: a Stop is not an error. `stop()` finalises

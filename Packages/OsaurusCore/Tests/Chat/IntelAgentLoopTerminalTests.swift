@@ -56,7 +56,8 @@ struct IntelTerminalRecoveryTests {
         var recovery = IntelTerminalRecovery()
         #expect(recovery.action(for: .lengthExhausted, completedToolWork: false) == .finishWithText(AgentToolLoop.lengthExhaustedFallback))
         #expect(recovery.action(for: .finalResponse, completedToolWork: false) == .finish)
-        #expect(recovery.action(for: .announcedToolCall, completedToolWork: false) == .finish)
+        // Announce-only and continuation turns are recovered since stage 5c slice 3 (IntelAnnounceAndStopTests).
+        #expect(recovery.action(for: .continuationRequest, completedToolWork: false) == .finish)
     }
 
     @Test func aTruncatedToolCallIsRetriedOnceThenGetsTheFallback() {

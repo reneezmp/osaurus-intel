@@ -19,9 +19,14 @@
 //      model history (#2167, #2344), then a visible fallback;
 //    * output-token limit without a tool call: the honest limit notice;
 //    * anything else: a finished answer.
-//  The engine passes no visible content, so upstream's announce-only and
-//  continuation-request recoveries (#2480) are skipped, which upstream
-//  documents as unchanged behaviour (left for stage 5).
+//    * announce-only turn ("Let me write the file:") with tools offered, or
+//      "would you like me to continue?" with a todo unfinished: re-ask with
+//      the nudge, keeping the text in history (#2480), then, for an
+//      announcement, one tool-free status step (`wrapsUpIncompleteWork`);
+//    * a denied or `rejected` tool call (`shouldStopAfterToolOutcome`) ends
+//      the run instead of re-asking the model; a replayed retrieval failure
+//      ends it with one tool-free status step.
+//  (`W-cov-reaudit` stage 5c slice 3, rows 5 to 9.)
 //
 
 import Foundation
@@ -351,6 +356,123 @@ extension AgentToolLoop {
     static let emptyTurnFallback =
         "I wasn't able to generate a response to that. Please try rephrasing your request."
 
+    /// Max consecutive announce-only turns to nudge-and-retry. Lower than the
+    /// empty-turn budget: each retry leaves the announcement visible in the
+    /// transcript, so repeated attempts read as the model talking to itself.
+    /// If two nudges don't produce a call, the model is not going to make one
+    /// and the announcement is accepted as the (poor) final answer.
+    static let maxAnnouncedToolCallRetries = 2
+
+    /// Staged before an announce-only retry. Names the specific failure — the
+    /// model believes it already issued the call — because the generic
+    /// "produced no output" nudge does not fit a turn that produced text.
+    static let announcedToolCallNotice =
+        "[System Notice] Your previous turn described a tool call but did not actually emit one, so nothing ran. "
+        + "No file was written and no command executed. Emit the tool call itself now, as a real call — "
+        + "do not describe it, narrate it, or claim it already ran."
+
+    /// What the announce-only nudge may truthfully say about tools the model
+    /// cannot call right now (upstream `AnnouncedToolCallRecovery`):
+    /// - `exposed`: callable now, as-is.
+    /// - `loadable`: registered, and `loaderName` would actually grant it.
+    /// - `workspaceBlocked`: the file/shell tools that need a workspace
+    ///   attached to THIS chat; no loader helps, only the user can.
+    struct AnnouncedToolCallRecovery: Equatable, Sendable {
+        var exposed: Set<String> = []
+        var loadable: Set<String> = []
+        var loaderName: String = "capabilities"
+        var workspaceBlocked: Set<String> = []
+
+        var isEmpty: Bool { exposed.isEmpty && loadable.isEmpty && workspaceBlocked.isEmpty }
+    }
+
+    /// The announce-only nudge, naming what the model can do about the tool
+    /// it described (upstream `announcedToolCallNotice(recovery:)`).
+    static func announcedToolCallNotice(recovery: AnnouncedToolCallRecovery?) -> String {
+        guard let recovery, !recovery.isEmpty else { return announcedToolCallNotice }
+        var text = announcedToolCallNotice
+        if !recovery.exposed.isEmpty {
+            text += " The tools you can call right now in this chat are: "
+                + recovery.exposed.sorted().joined(separator: ", ") + "."
+        }
+        if !recovery.loadable.isEmpty {
+            text += " These tools exist but are not loaded yet; call \(recovery.loaderName) with ids "
+                + "[\"tool/<name>\"] first, then emit the call: "
+                + recovery.loadable.sorted().joined(separator: ", ") + "."
+        }
+        if !recovery.workspaceBlocked.isEmpty {
+            text += " " + recovery.workspaceBlocked.sorted().joined(separator: ", ")
+                + " need a workspace attached to THIS chat and there is none, so no call can write, read or run "
+                + "files here; do not announce that again. "
+            // The picker-backed ask is the one actionable step when it is in
+            // the schema; otherwise the user has to reach for the chip.
+            if recovery.exposed.contains(PromptWorkingFolderTool.toolName) {
+                text += "Call prompt_working_folder now to open a folder picker for the user — the run "
+                    + "continues with the file tools once they pick; if they cancel, the turn ends "
+                    + "with a notice and the content can go directly in your next answer"
+            } else {
+                text += "Tell the user to attach a folder via the Folder chip "
+                    + "(or enable Autonomous execution) and give them the content directly in your answer"
+            }
+            text += recovery.exposed.contains("share_artifact") ? " (share_artifact can carry it)." : "."
+        }
+        text += " If what you described needs a tool in none of these groups, say plainly that you cannot do it "
+            + "in this chat and give the user the result you have."
+        return text
+    }
+
+    /// How many times a run will push back on "shall I continue?" before
+    /// letting the question stand.
+    static let maxContinuationRequestRetries = 2
+
+    /// Staged before a continuation-request retry. States the standing
+    /// authorization explicitly and names the pending count so "continue"
+    /// has a concrete referent.
+    static func continuationRequestNotice(pending: Int) -> String {
+        let items = pending == 1 ? "1 item remains" : "\(pending) items remain"
+        return
+            "[System Notice] You asked whether to continue. Yes — continue. The user's request "
+            + "already authorized this work and \(items) unchecked on your todo. Do not ask "
+            + "again: proceed with the next pending item now. If you are genuinely blocked on "
+            + "something only the user can decide, call `clarify` with the specific question "
+            + "instead of asking in prose."
+    }
+
+    /// Visible text when the truthful-status step after incomplete work
+    /// produced no visible content. Not a summary — just the honest state.
+    static let incompleteWorkEmptyWrapUpText =
+        "The run stopped before the requested work was complete. "
+        + "The tool results above are the state of the work; send a message to continue."
+
+    /// The one tool-free status step after announce-only recovery ran out:
+    /// the model described its next action `announcements` times without
+    /// calling a tool.
+    static func announceExhaustedWrapUpNotice(announcements: Int) -> String {
+        "[System Notice] You described the next action \(announcements) times without making a tool call, "
+            + "so nothing further ran. No more tools are available in this response. Report truthfully: "
+            + "what was completed (keep every result already above), what remains undone, and what blocked "
+            + "the step you kept announcing. Do not promise to do it next, and do not claim it was done. "
+            + "This response ends the turn: do not promise any further action (fetching, writing, verifying) — "
+            + "the user decides what happens next."
+    }
+
+    /// The one tool-free status step after the same retrieval failed and was
+    /// replayed until the run had to stop. Distinguishes the cached replay
+    /// from the real network attempts so the model does not report the replay
+    /// as a retry.
+    static func repeatedRetrievalWrapUpNotice(tool: String, failures: Int) -> String {
+        "[System Notice] The identical `\(tool)` retrieval has failed \(failures) times. "
+            + "The last result was a cached replay of the earlier failure, not a new network request, "
+            + "and this response cannot retry it. No more tools are available in this response. "
+            + "Report truthfully: what was completed (keep every successful result already above), "
+            + "what remains undone, and that this source is blocked. Do not promise to try again, "
+            + "and do not claim the failed page was read. This response ends the turn: do not promise any "
+            + "further action (fetching, writing, verifying) — the user decides what happens next."
+    }
+
+    /// Chat's visible close for a stopped turn (`emitToolRejectionText`).
+    static let toolRejectionPrefix = "The requested action was not completed."
+
     static let emptyToolTaskFallback =
         "The model returned empty output after tool execution. The agent task may be incomplete; retry with less context or continue from the latest tool result."
 
@@ -461,6 +583,129 @@ extension AgentToolLoop {
         + "identify any requested step that remains unfinished."
 }
 
+// MARK: - Intel: stop policy after a tool outcome (upstream `shouldStopAfterToolOutcome`)
+
+/// One executed (or refused, or replayed) call of a tool round, as the stop
+/// policy sees it (upstream `AgentLoopToolOutcome`).
+struct IntelToolOutcome {
+    var toolName: String
+    var argumentsJSON: String
+    var result: String
+    /// A held / replayed result instead of a run.
+    var wasDeduped: Bool
+    var wasError: Bool
+}
+
+extension AgentToolLoop {
+    /// Upstream's chat stop policy: malformed arguments, missing paths,
+    /// timeouts, and retryable execution failures go back to the model for one
+    /// correction. Explicit user denials and policy/security refusals stop
+    /// immediately. Repeating an identical failing call also stops.
+    ///
+    /// Intel adaptation: the engine's own denial text (`⛔️ "x" was not run`)
+    /// is an untyped failure; upstream's denial is a typed `user_denied`
+    /// envelope, so both stop. Upstream's terminal desktop-subagent failure
+    /// rule (row 30) is not ported here.
+    static func shouldStopAfterToolOutcome(_ outcome: IntelToolOutcome, heldErrorReplays: Int = 0) -> Bool {
+        guard outcome.wasError || ToolEnvelope.isError(outcome.result) || outcome.result.hasPrefix("⛔️") else {
+            return false
+        }
+        if outcome.wasDeduped {
+            // A replayed retrieval failure is not a side effect, and the
+            // escalation notice staged with the replay tells the model to
+            // change the source: let it land once; the same call replayed
+            // AGAIN ends the run.
+            if AgentTaskState.isRetrievalAsIsFailureTool(outcome.toolName), heldErrorReplays <= 1 {
+                return false
+            }
+            return true
+        }
+        if isRecoverableTodoContractResult(outcome.result) { return false }
+        guard let data = outcome.result.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let kind = object["kind"] as? String
+        else {
+            // Legacy/untyped failures are hard to correct safely.
+            return outcome.wasError || outcome.result.hasPrefix("⛔️")
+        }
+        if kind == ToolEnvelope.Kind.userDenied.rawValue || kind == ToolEnvelope.Kind.rejected.rawValue {
+            return true
+        }
+        return false
+    }
+
+    /// Upstream's todo-contract rejections (the model is expected to correct
+    /// these; they never end the run).
+    static func isRecoverableTodoContractResult(_ result: String) -> Bool {
+        guard ToolEnvelope.isError(result),
+            let data = result.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let reason = object["reason"] as? String
+        else { return false }
+        return
+            [
+                "task_tracking_required", "todo_progress_update_required", "todo_no_progress",
+                CompleteTool.staleSessionTodoReason,
+            ].contains(reason)
+    }
+
+    /// Upstream `repeatedRetrievalWrapUp`: a stop caused by a replayed
+    /// retrieval failure becomes a truthful status step instead of the error
+    /// sentence. Nil for every other stop.
+    static func repeatedRetrievalWrapUpNotice(for outcome: IntelToolOutcome, replays: Int) -> String? {
+        guard outcome.wasDeduped, AgentTaskState.isRetrievalAsIsFailureTool(outcome.toolName) else { return nil }
+        return repeatedRetrievalWrapUpNotice(tool: outcome.toolName, failures: replays + 1)
+    }
+
+    /// What the stopped turn shows (`emitToolRejectionText`): the canonical
+    /// message after the fixed sentence.
+    static func toolRejectionText(for result: String) -> String {
+        var message = ToolEnvelope.failureMessage(result)
+        if message.hasPrefix("⛔️") {
+            message = String(message.dropFirst("⛔️".count)).trimmingCharacters(in: .whitespaces)
+        }
+        let prefix = L("The requested action was not completed.")
+        return message.isEmpty ? prefix : prefix + " " + message
+    }
+}
+
+/// Engine to chat, in-band: how the run ended when the chat must react
+/// (`\u{FFFE}` family, so text-only consumers drop it).
+enum StreamingRunEndHint {
+    private static let rejectedPrefix = "\u{FFFE}run-rejected:"
+    private static let wrapUpPrefix = "\u{FFFE}run-wrapup:"
+
+    /// A denied or `rejected` tool call ended the run; `text` is what the
+    /// closing line shows.
+    static func encodeToolRejected(text: String) -> String { rejectedPrefix + text }
+    static func decodeToolRejected(_ delta: String) -> String? {
+        delta.hasPrefix(rejectedPrefix) ? String(delta.dropFirst(rejectedPrefix.count)) : nil
+    }
+
+    /// The run ended on incomplete work: stream one tool-free status step
+    /// with this notice (upstream `RunResult.wrapUpNotice`).
+    static func encodeWrapUp(notice: String) -> String { wrapUpPrefix + notice }
+    static func decodeWrapUp(_ delta: String) -> String? {
+        delta.hasPrefix(wrapUpPrefix) ? String(delta.dropFirst(wrapUpPrefix.count)) : nil
+    }
+}
+
+/// Upstream `ToolRegistry.announcedToolCallRecovery`, from Intel's catalog:
+/// the same rules as the scope gate's `tool_not_found` envelope, so the
+/// nudge never promises a load the gate would refuse.
+enum IntelAnnouncedRecovery {
+    static func make(exposed: Set<String>, catalog: CapabilityCatalog) -> AgentToolLoop.AnnouncedToolCallRecovery {
+        var recovery = AgentToolLoop.AnnouncedToolCallRecovery(exposed: exposed)
+        recovery.workspaceBlocked = IntelToolScopeGate.coreWorkspaceToolNames.subtracting(exposed)
+        // A load needs the loader in the request (the envelope's `canLoad`).
+        if exposed.contains(CapabilitiesTool.toolName) {
+            recovery.loadable = Set(catalog.tools.map(\.name))
+                .subtracting(exposed).subtracting(IntelToolScopeGate.coreWorkspaceToolNames)
+        }
+        return recovery
+    }
+}
+
 // MARK: - Intel: the driver's terminal recovery
 
 /// Upstream `AgentToolLoop.run`'s handling of a step that ended without a
@@ -478,19 +723,40 @@ struct IntelTerminalRecovery: Equatable {
         case retryInFreshTurn
         /// End the run with this text after what is already on screen.
         case finishWithText(String)
+        /// Re-send with this notice, keeping the round's visible text in
+        /// model history (announce-only, continuation request): the model
+        /// must see what it said to be told it did not do it.
+        case retryKeepingText(notice: String)
+        /// End the run on incomplete work; the chat streams one tool-free
+        /// status step with this notice (upstream `wrapUpNotice`).
+        case wrapUp(notice: String)
     }
 
     private(set) var consecutiveEmptyTurns = 0
     private(set) var incompleteReasoningRetries = 0
     private(set) var truncatedToolCallRetries = 0
+    private(set) var consecutiveAnnouncedToolCalls = 0
+    private(set) var consecutiveContinuationRequests = 0
 
-    /// A round with tool calls resets the empty-turn budget (upstream resets
-    /// it on every productive step).
+    /// A round with tool calls resets the empty-turn, announce and
+    /// continuation budgets (upstream resets them on every productive step).
     mutating func noteToolRound() {
         consecutiveEmptyTurns = 0
+        consecutiveAnnouncedToolCalls = 0
+        consecutiveContinuationRequests = 0
     }
 
-    mutating func action(for step: AgentLoopModelStep, completedToolWork: Bool) -> Action {
+    /// - Parameters:
+    ///   - pendingTodo: unfinished items of the session's todo (a
+    ///     continuation request is a stall only when this is above zero).
+    ///   - announcedRecovery: what the announce nudge may say is callable or
+    ///     loadable; read only for an announce-only step.
+    mutating func action(
+        for step: AgentLoopModelStep,
+        completedToolWork: Bool,
+        pendingTodo: Int = 0,
+        announcedRecovery: AgentToolLoop.AnnouncedToolCallRecovery? = nil
+    ) -> Action {
         switch step {
         case .emptyResponse:
             consecutiveEmptyTurns += 1
@@ -520,7 +786,24 @@ struct IntelTerminalRecovery: Equatable {
                         toolName: toolName, argumentCharacters: argumentCharacters))
             }
             return .finishWithText(AgentToolLoop.truncatedToolCallFallback)
-        case .finalResponse, .announcedToolCall, .continuationRequest, .toolCalls, .retryWithoutCharge:
+        case .announcedToolCall:
+            // Upstream: nudge twice (not charged), then the announcement is
+            // not an answer, so one tool-free status step reports the truth.
+            consecutiveAnnouncedToolCalls += 1
+            if consecutiveAnnouncedToolCalls <= AgentToolLoop.maxAnnouncedToolCallRetries {
+                return .retryKeepingText(notice: AgentToolLoop.announcedToolCallNotice(recovery: announcedRecovery))
+            }
+            return .wrapUp(
+                notice: AgentToolLoop.announceExhaustedWrapUpNotice(announcements: consecutiveAnnouncedToolCalls))
+        case .continuationRequest:
+            // With nothing pending it is a real question: the user gets it.
+            guard pendingTodo > 0 else { return .finish }
+            consecutiveContinuationRequests += 1
+            if consecutiveContinuationRequests <= AgentToolLoop.maxContinuationRequestRetries {
+                return .retryKeepingText(notice: AgentToolLoop.continuationRequestNotice(pending: pendingTodo))
+            }
+            return .finish
+        case .finalResponse, .toolCalls, .retryWithoutCharge:
             return .finish
         }
     }

@@ -383,8 +383,17 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     static func harnessResult(
         _ state: AgentTaskState, name: String, arguments: String, notices: inout [String]
     ) -> String? {
+        harnessOutcome(state, name: name, arguments: arguments, notices: &notices)?.result
+    }
+
+    /// `harnessResult` that also says whether the result is a replay of an
+    /// earlier one (upstream `wasDeduped`), which the stop policy needs: a
+    /// guard refusal is a new result, a held replay is not.
+    static func harnessOutcome(
+        _ state: AgentTaskState, name: String, arguments: String, notices: inout [String]
+    ) -> (result: String, wasDeduped: Bool)? {
         if let guarded = state.guardedResult(name: name, argsJSON: arguments) {
-            return guarded
+            return (guarded, false)
         }
         guard let held = state.heldResult(name: name, argsJSON: arguments) else { return nil }
         if let escalation = state.lastReplayNotice {
@@ -392,7 +401,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         } else {
             notices = [dedupeNotice]
         }
-        return held
+        return (held, true)
     }
 
     /// Upstream `AgentToolLoop.contextNearLimitNotice(spawnAvailable: false)`:
@@ -1489,8 +1498,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 if !pendingHarnessNotices.contains(notice) { pendingHarnessNotices.append(notice) }
                             }
                         }
-                        func terminalAction(visible: String, finishReason: String?) -> IntelTerminalRecovery.Action {
+                        func terminalAction(
+                            visible: String, finishReason: String?, toolsOffered: Bool, exposed: Set<String>
+                        ) async -> IntelTerminalRecovery.Action {
                             guard interactiveChatRun, !request.isToolFreeWrapUp else { return .finish }
+                            // The visible text is passed so announce-only and
+                            // continuation-request turns are recognised (#2480).
                             let step = AgentLoopModelStep.classifyTerminal(
                                 contentIsBlank: !visible.contains(where: { !$0.isWhitespace }),
                                 thinkingIsBlank: !roundHasReasoning,
@@ -1498,9 +1511,78 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 requiresVisibleFinalResponse:
                                     AgentLoopVisibleResponsePolicy.requiresVisibleFinalResponse(
                                         hasStructuredToolWork: toolWorkThisRun, isRemoteAgentTarget: false),
-                                toolsWereOffered: !(liveToolSpecs?.isEmpty ?? true)
+                                toolsWereOffered: toolsOffered,
+                                content: visible
                             )
-                            return terminalRecovery.action(for: step, completedToolWork: toolWorkThisRun)
+                            var pendingTodo = 0
+                            var announcedRecovery: AgentToolLoop.AnnouncedToolCallRecovery?
+                            switch step {
+                            case .continuationRequest:
+                                // Upstream `pendingTodoCount`: the session's unfinished todo items.
+                                if let sessionId = ChatExecutionContext.currentSessionId,
+                                    let todo = await AgentTodoStore.shared.todo(for: sessionId)
+                                {
+                                    pendingTodo = todo.totalCount - todo.doneCount
+                                }
+                            case .announcedToolCall:
+                                let agentId = ChatExecutionContext.currentAgentId
+                                let catalog: CapabilityCatalog =
+                                    exposed.contains(CapabilitiesTool.toolName)
+                                    ? await MainActor.run {
+                                        agentId.map { CapabilityCatalog.build(agentId: $0) } ?? .empty
+                                    } : .empty
+                                announcedRecovery = IntelAnnouncedRecovery.make(exposed: exposed, catalog: catalog)
+                            default:
+                                break
+                            }
+                            return terminalRecovery.action(
+                                for: step, completedToolWork: toolWorkThisRun,
+                                pendingTodo: pendingTodo, announcedRecovery: announcedRecovery)
+                        }
+                        // Announce / continuation retries keep what the model
+                        // said in its history (it is told it did not act), on
+                        // whichever wire this endpoint speaks.
+                        func keepRoundTextInHistory(_ text: String) {
+                            guard text.contains(where: { !$0.isWhitespace }) else { return }
+                            if endpoint.usesResponsesWire {
+                                codexReplayItems.append([
+                                    "type": "message", "role": "assistant",
+                                    "content": [["type": "output_text", "text": text]],
+                                ])
+                            } else {
+                                wireMessages.append(["role": "assistant", "content": text])
+                            }
+                        }
+                        // Upstream chat policy `stopOnToolRejection`: a denied or
+                        // `rejected` call (or a replayed failure) ends the run
+                        // instead of asking the model again, so it cannot retry
+                        // a refused side effect and the user is not re-prompted.
+                        // A replayed retrieval failure becomes one tool-free
+                        // status step instead. Returns true when the run ended.
+                        func endRunAfterToolStop(_ outcomes: [IntelToolOutcome]) -> Bool {
+                            guard interactiveChatRun, !request.isToolFreeWrapUp else { return false }
+                            func replays(_ outcome: IntelToolOutcome) -> Int {
+                                taskState.heldErrorReplayCount(name: outcome.toolName, argsJSON: outcome.argumentsJSON)
+                            }
+                            guard
+                                let stop = outcomes.first(where: {
+                                    AgentToolLoop.shouldStopAfterToolOutcome($0, heldErrorReplays: replays($0))
+                                })
+                            else { return false }
+                            if let notice = AgentToolLoop.repeatedRetrievalWrapUpNotice(
+                                for: stop, replays: replays(stop))
+                            {
+                                continuation.yield(StreamingRunEndHint.encodeWrapUp(notice: notice))
+                                NSLog("[CloudChatEngine] Repeated retrieval failure; status step follows")
+                            } else {
+                                continuation.yield(
+                                    StreamingRunEndHint.encodeToolRejected(
+                                        text: AgentToolLoop.toolRejectionText(for: stop.result)))
+                                NSLog("[CloudChatEngine] Run ended by a refused or failed '\(stop.toolName)' call")
+                            }
+                            logInference()
+                            continuation.finish()
+                            return true
                         }
                         // Explicit sampling (the agent's saved generation
                         // settings, upstream #3233): only what this provider
@@ -1786,7 +1868,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     logInference()
                                     continuation.finish()
                                     return
-                                case .finish, .retryInFreshTurn:
+                                case .finish, .retryInFreshTurn, .retryKeepingText, .wrapUp:
                                     throw IntelCodexResponsesAdapter.Error.outputLimitDuringToolCall(
                                         toolName: toolName, argumentCharacters: characters)
                                 }
@@ -1794,13 +1876,28 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             if finalized.completion.toolCalls.isEmpty {
                                 // An incomplete response already failed the
                                 // stream, so this path has no `length` stop.
-                                switch terminalAction(visible: roundVisibleText(), finishReason: nil) {
+                                switch await terminalAction(
+                                    visible: roundVisibleText(), finishReason: nil,
+                                    toolsOffered: !(liveToolSpecs?.isEmpty ?? true),
+                                    exposed: Set(activeTools?.map { $0.function.name } ?? [])) {
                                 case .finish:
                                     break
                                 case .retry(let notice):
                                     pendingHarnessNotices = [notice]
                                     round -= 1
                                     continue
+                                case .retryKeepingText(let notice):
+                                    keepRoundTextInHistory(roundVisibleText())
+                                    pendingHarnessNotices = [notice]
+                                    round -= 1
+                                    continue
+                                case .wrapUp(let notice):
+                                    continuation.yield(StreamingRunEndHint.encodeWrapUp(notice: notice))
+                                    NSLog("[CloudChatEngine] Codex stream ended on announcements; status step follows")
+                                    yieldUsageIfRequested()
+                                    logInference()
+                                    continuation.finish()
+                                    return
                                 case .retryInFreshTurn:
                                     continuation.yield(StreamingGroundedRetryHint.sentinel)
                                     recoveryOrdinal += 1
@@ -1857,6 +1954,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             var resultImages: [Data] = []
                             var runEndedByTool = false
                             var roundDataMovement: [Bool] = []
+                            var roundOutcomes: [IntelToolOutcome] = []
                             var rejectedInBatch = false  // Classic: a refusal skips the rest of the batch
                             for rawCall in finalized.completion.toolCalls {
                                 try Task.checkCancellation()
@@ -1874,6 +1972,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 }
                                 var result: String
                                 var wasHeld = false
+                                var wasDeduped = false
                                 if rejectedInBatch {
                                     result = Self.skippedAfterRejectionResult(toolName: call.name)
                                 } else if !isOffered {
@@ -1884,12 +1983,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                             forUnofferedCall: call.name, offered: offered,
                                             agentId: ChatExecutionContext.currentAgentId)
                                     }
-                                } else if let harnessResult = Self.harnessResult(
+                                } else if let harness = Self.harnessOutcome(
                                     taskState, name: call.name, arguments: call.arguments,
                                     notices: &pendingHarnessNotices)
                                 {
-                                    result = harnessResult
+                                    result = harness.result
                                     wasHeld = true
+                                    wasDeduped = harness.wasDeduped
                                 } else {
                                     // Upstream checks arguments before its permission gate: a call
                                     // that cannot run is never put in front of the user. Treated
@@ -2017,6 +2117,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     )
                                 )
                                 results.append(.init(callID: call.callID, output: result))
+                                roundOutcomes.append(
+                                    IntelToolOutcome(
+                                        toolName: call.name, argumentsJSON: call.arguments, result: result,
+                                        wasDeduped: wasDeduped, wasError: ToolEnvelope.isError(result)))
                                 taskState.record(name: call.name, argsJSON: call.arguments, result: result)
                                 grounded.record(toolName: call.name, argumentsJSON: call.arguments, result: result)
                                 roundDataMovement.append(
@@ -2040,6 +2144,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 continuation.finish()
                                 return
                             }
+                            if endRunAfterToolStop(roundOutcomes) { return }
                             codexReplayItems.append(
                                 contentsOf: try finalized.completion.replayInputItems(toolResults: results)
                             )
@@ -2231,7 +2336,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     logInference()
                                     continuation.finish()
                                     return
-                                case .finish, .retryInFreshTurn:
+                                case .finish, .retryInFreshTurn, .retryKeepingText, .wrapUp:
                                     break
                                 }
                             }
@@ -2244,7 +2349,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // No tools requested this round → the assistant's final
                         // answer has streamed; we're done.
                         if partials.isEmpty {
-                            switch terminalAction(visible: assistantContent, finishReason: roundFinishReason) {
+                            switch await terminalAction(
+                                visible: assistantContent, finishReason: roundFinishReason,
+                                toolsOffered: !(liveToolSpecs?.isEmpty ?? true),
+                                exposed: Set(activeTools?.map { $0.function.name } ?? [])) {
                             case .finish:
                                 break
                             case .retry(let notice):
@@ -2253,6 +2361,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 pendingHarnessNotices = [notice]
                                 round -= 1
                                 continue
+                            case .retryKeepingText(let notice):
+                                keepRoundTextInHistory(assistantContent)
+                                pendingHarnessNotices = [notice]
+                                round -= 1
+                                continue
+                            case .wrapUp(let notice):
+                                continuation.yield(StreamingRunEndHint.encodeWrapUp(notice: notice))
+                                NSLog("[CloudChatEngine] Round ended on announcements; status step follows")
+                                yieldUsageIfRequested()
+                                logInference()
+                                continuation.finish()
+                                return
                             case .retryInFreshTurn:
                                 // The reasoning-only attempt stays on screen
                                 // but out of the next request (upstream
@@ -2341,6 +2461,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // the result back as a tool message.
                         var runEndedByTool = false
                         var roundDataMovement: [Bool] = []
+                        var roundOutcomes: [IntelToolOutcome] = []
                         var rejectedInBatch = false  // Classic: a refusal skips the rest of the batch
                         for call in orderedCalls {
                             try Task.checkCancellation()
@@ -2357,6 +2478,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             }
                             var result: String
                             var wasHeld = false
+                            var wasDeduped = false
                             let toolStart = Date()
 
                             if rejectedInBatch {
@@ -2369,12 +2491,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         forUnofferedCall: call.name, offered: offered,
                                         agentId: ChatExecutionContext.currentAgentId)
                                 }
-                            } else if let harnessResult = Self.harnessResult(
+                            } else if let harness = Self.harnessOutcome(
                                 taskState, name: call.name, arguments: call.arguments,
                                 notices: &pendingHarnessNotices)
                             {
-                                result = harnessResult
+                                result = harness.result
                                 wasHeld = true
+                                wasDeduped = harness.wasDeduped
                             } else {
                                 // Enforce the user's per-tool permission policy
                                 // (Tools / Permissions tab). Deny blocks the tool;
@@ -2516,6 +2639,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 IntelToolImageWire.toolMessage(
                                     callId: callId, toolName: call.name, result: result,
                                     imagesEnabled: ChatExecutionContext.toolResultImagesEnabled))
+                            roundOutcomes.append(
+                                IntelToolOutcome(
+                                    toolName: call.name, argumentsJSON: call.arguments, result: result,
+                                    wasDeduped: wasDeduped, wasError: ToolEnvelope.isError(result)))
                             taskState.record(name: call.name, argsJSON: call.arguments, result: result)
                             grounded.record(toolName: call.name, argumentsJSON: call.arguments, result: result)
                             roundDataMovement.append(
@@ -2546,6 +2673,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             continuation.finish()
                             return
                         }
+                        if endRunAfterToolStop(roundOutcomes) { return }
                         // Loop: send the continuation request with tool results.
                     }
 
