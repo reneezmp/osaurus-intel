@@ -555,7 +555,11 @@ extension HTTPHandler {
                             try await ChatExecutionContext.$currentSessionId.withValue(sessionKey) {
                                 try await ChatExecutionContext.$agentTodoRunScope.withValue(AgentTodoRunScope()) {
                                     try await ChatExecutionContext.$currentExecutionMode.withValue(executionMode) {
-                                        try await engine.streamChat(request: engineRequest)
+                                        // Upstream's `AgentToolLoop.run` recovery and history
+                                        // trim for this surface (stage 5c rows 40-41).
+                                        try await ChatExecutionContext.$agentRunRecovery.withValue(true) {
+                                            try await engine.streamChat(request: engineRequest)
+                                        }
                                     }
                                 }
                             }
@@ -628,6 +632,18 @@ extension HTTPHandler {
                             break
                         }
                     }
+                } catch let exhausted as ChatEngine.AgentRunRecoveryExhausted {
+                    // Upstream maps an exhausted empty-after-tool-work or
+                    // output-limit run to an error event (`writeError`) and
+                    // ends the stream without a finish chunk.
+                    onLoop { ctx in
+                        writer.writeError(exhausted.message, context: ctx)
+                        writer.writeEnd(ctx)
+                    }
+                    log(
+                        model: model, response: loggedResponseText, toolCalls: loggedToolCalls,
+                        error: exhausted.message)
+                    return
                 } catch is ChatEngine.ToolRoundLimitReached {
                     // Upstream ends a capped run with a notice, not an error.
                     let notice = Self.toolLoopBudgetNotice(maxIterations)

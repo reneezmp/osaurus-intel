@@ -58,6 +58,7 @@ struct IntelHTTPAgentRunTests {
         #expect(captured.request.reportsUsage)
         #expect(captured.request.maxToolRounds != nil)
         #expect(captured.external)
+        #expect(captured.recovery)
     }
 
     @Test func run_toolRoundLimitEndsWithUpstreamNotice() async throws {
@@ -67,6 +68,18 @@ struct IntelHTTPAgentRunTests {
         let result = try await server.post("/agents/default/run", #"{"messages":[{"role":"user","content":"hi"}]}"#)
         #expect(result.body.contains("Tool-loop budget of"))
         #expect(!result.body.contains(#""error""#))
+    }
+
+    @Test func run_exhaustedRecoveryIsAnErrorEventWithoutAFinishChunk() async throws {
+        let engine = ScriptedRunEngine(
+            deltas: ["partial"],
+            failure: ChatEngine.AgentRunRecoveryExhausted(message: AgentToolLoop.emptyToolTaskFallback))
+        let server = try await startRunTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+        let result = try await server.post("/agents/default/run", #"{"messages":[{"role":"user","content":"hi"}]}"#)
+        #expect(result.body.contains(#""error""#))
+        #expect(result.body.contains("may be incomplete") || result.body.contains(AgentToolLoop.emptyToolTaskFallback.prefix(20)))
+        #expect(!result.body.contains(#""finish_reason":"stop""#))
     }
 
     @Test func run_rejectsBadBodiesAndUnknownAgents() async throws {
@@ -104,7 +117,7 @@ struct IntelHTTPAgentRunTests {
 // MARK: - Fixtures
 
 private actor ScriptedRunEngine: ChatEngineProtocol {
-    struct Captured { let request: ChatCompletionRequest; let external: Bool }
+    struct Captured { let request: ChatCompletionRequest; let external: Bool; let recovery: Bool }
     let deltas: [String]
     let failure: Error?
     private(set) var captured: Captured?
@@ -115,7 +128,7 @@ private actor ScriptedRunEngine: ChatEngineProtocol {
     }
 
     func streamChat(request: ChatCompletionRequest) async throws -> AsyncThrowingStream<String, Error> {
-        captured = Captured(request: request, external: ChatExecutionContext.isExternalSurface)
+        captured = Captured(request: request, external: ChatExecutionContext.isExternalSurface, recovery: ChatExecutionContext.agentRunRecovery)
         let deltas = deltas
         let failure = failure
         return AsyncThrowingStream { continuation in

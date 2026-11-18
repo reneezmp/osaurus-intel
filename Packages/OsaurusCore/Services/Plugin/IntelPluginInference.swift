@@ -445,6 +445,33 @@ extension PluginHostContext {
         return request
     }
 
+    /// Upstream's plugin envelopes for an exhausted recovery
+    /// (`PluginHostAPI` `empty_tool_task_completion`, `output_token_limit`,
+    /// `incomplete_response`). A tool call cut twice has no upstream envelope;
+    /// it reports as `output_token_limit` with its own message.
+    static func recoveryEnvelope(
+        _ exhausted: ChatEngine.AgentRunRecoveryExhausted, state: RunState
+    ) -> String {
+        let code: String
+        let message: String
+        switch exhausted.kind {
+        case .emptyAfterToolWork:
+            code = "empty_tool_task_completion"
+            message = exhausted.message
+        case .outputLimit:
+            code = "output_token_limit"
+            message = exhausted.message
+        case .incompleteReasoning:
+            code = "incomplete_response"
+            message = "The model did not complete a visible response with closed reasoning."
+        }
+        return jsonString([
+            "error": code, "message": message,
+            "tool_calls_executed": state.toolCallsExecuted,
+            "shared_artifacts": state.sharedArtifacts,
+        ])
+    }
+
     // MARK: Engine Run (Intel)
 
     /// What a plugin run streams, decoded from the engine's markers.
@@ -468,6 +495,9 @@ extension PluginHostContext {
         case cancelled
         /// The output token limit cut the answer off.
         case lengthExhausted
+        /// Upstream's empty-turn / reasoning-only / output-limit recovery ran
+        /// out (stage 5c row 40); see `recoveryEnvelope`.
+        case recoveryExhausted(ChatEngine.AgentRunRecoveryExhausted)
         case failed(Error)
     }
 
@@ -517,7 +547,11 @@ extension PluginHostContext {
             let stream = try await ChatExecutionContext.$currentAgentId.withValue(prep.agentId) {
                 try await ChatExecutionContext.$currentSessionId.withValue(prep.contextId) {
                     try await ChatExecutionContext.$currentExecutionMode.withValue(prep.executionMode) {
-                        try await prep.engine.streamChat(request: request)
+                        // Upstream's `AgentToolLoop.run` recovery and history
+                        // trim for this surface (stage 5c rows 40-41).
+                        try await ChatExecutionContext.$agentRunRecovery.withValue(true) {
+                            try await prep.engine.streamChat(request: request)
+                        }
                     }
                 }
             }
@@ -581,6 +615,8 @@ extension PluginHostContext {
             }
         } catch is ChatEngine.ToolRoundLimitReached {
             return .iterationCapReached
+        } catch let exhausted as ChatEngine.AgentRunRecoveryExhausted {
+            return .recoveryExhausted(exhausted)
         } catch {
             if isCancelled() || error is CancellationError { return .cancelled }
             return .failed(error)
@@ -657,6 +693,8 @@ extension PluginHostContext {
                     "tool_calls_executed": state.toolCallsExecuted,
                     "shared_artifacts": state.sharedArtifacts,
                 ])
+            case .recoveryExhausted(let exhausted):
+                return Self.recoveryEnvelope(exhausted, state: state)
             case .iterationCapReached:
                 // The final iteration's tool calls executed, but the model
                 // never produced a final text answer. Surface what ran so
@@ -870,6 +908,10 @@ extension PluginHostContext {
                     "tool_calls_executed": state.toolCallsExecuted,
                     "shared_artifacts": state.sharedArtifacts,
                 ])
+            case .recoveryExhausted(let exhausted):
+                emit(Self.chunkPayload(
+                    id: cid, delta: [:], finishReason: exhausted.kind == .outputLimit ? "length" : "error"))
+                return Self.recoveryEnvelope(exhausted, state: state)
             case .cancelled:
                 emit(Self.chunkPayload(id: cid, delta: [:], finishReason: "cancelled"))
                 return Self.cancelledStreamEnvelope(

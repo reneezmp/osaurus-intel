@@ -211,6 +211,25 @@ struct IntelPluginInferenceTests {
         await MainActor.run { removeChats(for: ctx.pluginId) }
     }
 
+    @Test func exhaustedRecoveryUsesUpstreamsEnvelopes() async throws {
+        let cases: [(String, String)] = [
+            (AgentToolLoop.emptyToolTaskFallback, "empty_tool_task_completion"),
+            (AgentToolLoop.lengthExhaustedFallback, "output_token_limit"),
+            (AgentToolLoop.truncatedToolCallFallback, "output_token_limit"),
+            (AgentToolLoop.incompleteReasoningFallback, "incomplete_response"),
+        ]
+        for (message, code) in cases {
+            let engine = ScriptedEngine(
+                [], ending: .throwing(ChatEngine.AgentRunRecoveryExhausted(message: message)))
+            let ctx = try makeContext(engine)
+            defer { ctx.teardown() }
+            let reply = parse(ctx.complete(requestJSON: #"{"model":"m","messages":[{"role":"user","content":"go"}]}"#))
+            #expect(reply["error"] as? String == code)
+            #expect(reply["tool_calls_executed"] != nil)
+            await MainActor.run { removeChats(for: ctx.pluginId) }
+        }
+    }
+
     @Test func clarifyEndsWithTheQuestion() async throws {
         let args = #"{"question":"Which file?"}"#
         let engine = ScriptedEngine([doneMarker("c1", "clarify", args, ToolEnvelope.success(tool: "clarify", text: "ok"))])

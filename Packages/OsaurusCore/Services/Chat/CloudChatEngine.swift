@@ -1362,6 +1362,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     // loop hooks: the grounded-claim checks (the chat splits a
                     // corrected answer into its own turn) and the history trim.
                     let interactiveChatRun = ChatExecutionContext.interactiveChatRun
+                    // Upstream's `AgentToolLoop.run` also drives HTTP / plugin
+                    // runs: same terminal recovery and history trim, none of the
+                    // chat-only policies (stage 5c rows 40-41).
+                    let agentRunRecovery = !interactiveChatRun && ChatExecutionContext.agentRunRecovery
+                    let recoversTerminals = interactiveChatRun || agentRunRecovery
                     var grounded = IntelGroundedClaimGuard()
                     // Upstream's terminal recovery (IntelAgentLoopTerminal.swift):
                     // a round with no tool call that is empty, reasoning only,
@@ -1379,8 +1384,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     // dropped, stickily (`CompactionWatermark`). Window: the
                     // model catalog, else Settings' Context Length, else
                     // upstream's 128k fallback.
+                    // Headless runs trim when they can loop (upstream
+                    // `guard maxIterations > 1`).
                     let trimWindow: Int? =
-                        interactiveChatRun
+                        (interactiveChatRun || (agentRunRecovery && (request.maxToolRounds ?? 12) > 1))
                         ? await MainActor.run {
                             IntelContextBudget.resolveWindow(modelId: resolvedModel)?.tokens
                         } ?? IntelWireHistoryTrim.fallbackContextWindow
@@ -1501,30 +1508,35 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         func terminalAction(
                             visible: String, finishReason: String?, toolsOffered: Bool, exposed: Set<String>
                         ) async -> IntelTerminalRecovery.Action {
-                            guard interactiveChatRun, !request.isToolFreeWrapUp else { return .finish }
+                            guard recoversTerminals, !request.isToolFreeWrapUp else { return .finish }
                             // The visible text is passed so announce-only and
                             // continuation-request turns are recognised (#2480).
                             let step = AgentLoopModelStep.classifyTerminal(
                                 contentIsBlank: !visible.contains(where: { !$0.isWhitespace }),
                                 thinkingIsBlank: !roundHasReasoning,
                                 stopReason: finishReason,
-                                requiresVisibleFinalResponse:
-                                    AgentLoopVisibleResponsePolicy.requiresVisibleFinalResponse(
+                                // Upstream's HTTP and plugin loops pass `true`.
+                                requiresVisibleFinalResponse: agentRunRecovery
+                                    ? true
+                                    : AgentLoopVisibleResponsePolicy.requiresVisibleFinalResponse(
                                         hasStructuredToolWork: toolWorkThisRun, isRemoteAgentTarget: false),
                                 toolsWereOffered: toolsOffered,
                                 content: visible
                             )
                             var pendingTodo = 0
                             var announcedRecovery: AgentToolLoop.AnnouncedToolCallRecovery?
+                            // Upstream's HTTP / plugin hooks supply neither the
+                            // todo count nor the announce buckets: a question
+                            // with no tracked work stands, and the nudge is generic.
                             switch step {
-                            case .continuationRequest:
+                            case .continuationRequest where interactiveChatRun:
                                 // Upstream `pendingTodoCount`: the session's unfinished todo items.
                                 if let sessionId = ChatExecutionContext.currentSessionId,
                                     let todo = await AgentTodoStore.shared.todo(for: sessionId)
                                 {
                                     pendingTodo = todo.totalCount - todo.doneCount
                                 }
-                            case .announcedToolCall:
+                            case .announcedToolCall where interactiveChatRun:
                                 let agentId = ChatExecutionContext.currentAgentId
                                 let catalog: CapabilityCatalog =
                                     exposed.contains(CapabilitiesTool.toolName)
@@ -1535,9 +1547,22 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             default:
                                 break
                             }
-                            return terminalRecovery.action(
+                            let action = terminalRecovery.action(
                                 for: step, completedToolWork: toolWorkThisRun,
                                 pendingTodo: pendingTodo, announcedRecovery: announcedRecovery)
+                            // Upstream's HTTP / plugin policy has no
+                            // `wrapsUpIncompleteWork`: exhausted announce
+                            // nudges accept the text as the answer.
+                            if case .wrapUp = action, !interactiveChatRun { return .finish }
+                            return action
+                        }
+                        // Headless runs surface an exhausted recovery as an error
+                        // the surface maps (HTTP error event, plugin envelope);
+                        // only an empty turn with no tool work shows its visible
+                        // fallback, as upstream's HTTP `emitFallbackText` does.
+                        func exhaustedRecoveryError(_ text: String) -> AgentRunRecoveryExhausted? {
+                            guard agentRunRecovery, text != AgentToolLoop.emptyTurnFallback else { return nil }
+                            return AgentRunRecoveryExhausted(message: text)
                         }
                         // Announce / continuation retries keep what the model
                         // said in its history (it is told it did not act), on
@@ -1846,7 +1871,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 continuation.yield(emission)
                             }
                             } catch IntelCodexResponsesAdapter.Error.outputLimitDuringToolCall(let toolName, let characters)
-                                where interactiveChatRun && !request.isToolFreeWrapUp
+                                where recoversTerminals && !request.isToolFreeWrapUp
                             {
                                 // Upstream `.truncatedToolCall` on the Responses wire:
                                 // one smaller-chunks retry, then the honest fallback.
@@ -1860,6 +1885,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     round -= 1
                                     continue
                                 case .finishWithText(let text):
+                                    if let exhausted = exhaustedRecoveryError(text) { throw exhausted }
                                     let tail = IntelTerminalRecovery.appendedText(text, afterVisible: roundVisibleText())
                                     responseText += tail
                                     continuation.yield(tail)
@@ -1904,6 +1930,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     round -= 1
                                     continue
                                 case .finishWithText(let text):
+                                    if let exhausted = exhaustedRecoveryError(text) { throw exhausted }
                                     let tail = IntelTerminalRecovery.appendedText(text, afterVisible: roundVisibleText())
                                     responseText += tail
                                     continuation.yield(tail)
@@ -2314,7 +2341,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         if roundFinishReason == "length", !partials.isEmpty {
                             // Upstream `.truncatedToolCall`: the chat retries once
                             // with a smaller-chunks notice, then ends honestly.
-                            if interactiveChatRun, !request.isToolFreeWrapUp {
+                            if recoversTerminals, !request.isToolFreeWrapUp {
                                 let named = partials.sorted { $0.key < $1.key }.map(\.value.name).first { !$0.isEmpty }
                                 let characters = partials.values.reduce(0) { $0 + $1.arguments.count }
                                 // Drop the half-built tool card from the screen.
@@ -2328,6 +2355,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     round -= 1
                                     continue
                                 case .finishWithText(let text):
+                                    if let exhausted = exhaustedRecoveryError(text) { throw exhausted }
                                     let tail = IntelTerminalRecovery.appendedText(text, afterVisible: assistantContent)
                                     responseText += tail
                                     continuation.yield(tail)
@@ -2382,6 +2410,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 round -= 1
                                 continue
                             case .finishWithText(let text):
+                                if let exhausted = exhaustedRecoveryError(text) { throw exhausted }
                                 let tail = IntelTerminalRecovery.appendedText(text, afterVisible: assistantContent)
                                 responseText += tail
                                 continuation.yield(tail)
@@ -3214,6 +3243,23 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// The run used every tool round it was allowed without a final answer.
     /// The chat shows the message; `/agents/{id}/run` streams upstream's
     /// iteration-cap notice instead.
+    /// Headless runs only (`ChatExecutionContext.agentRunRecovery`): the
+    /// empty-turn (after tool work), output-limit, truncated-call or
+    /// reasoning-only recovery ran out. `message` is upstream's fallback text.
+    struct AgentRunRecoveryExhausted: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+
+        enum Kind: Equatable { case emptyAfterToolWork, outputLimit, incompleteReasoning }
+        var kind: Kind {
+            switch message {
+            case AgentToolLoop.emptyToolTaskFallback: return .emptyAfterToolWork
+            case AgentToolLoop.incompleteReasoningFallback: return .incompleteReasoning
+            default: return .outputLimit
+            }
+        }
+    }
+
     struct ToolRoundLimitReached: LocalizedError {
         let rounds: Int
         var errorDescription: String? { "Tool-call limit reached before the response completed." }

@@ -171,7 +171,9 @@ struct IntelTerminalRecoveryEngineTests {
         tools: [Tool]? = nil,
         interactive: Bool = true,
         wrapUp: Bool = false,
-        notices: [String] = []
+        notices: [String] = [],
+        agentRun: Bool = false,
+        history: [ChatMessage]? = nil
     ) async throws -> (deltas: [String], bodies: [String]) {
         TerminalFixtureProtocol.configure(responses: responses)
         let configuration = URLSessionConfiguration.ephemeral
@@ -182,12 +184,14 @@ struct IntelTerminalRecoveryEngineTests {
             providerType: .openaiLegacy, enabled: true, autoConnect: false, timeout: 5)
         let engine = ChatEngine(provider: provider, session: URLSession(configuration: configuration))
         var request = ChatCompletionRequest(
-            model: "fixture-model", messages: [ChatMessage(role: "user", content: "What time is it?")],
+            model: "fixture-model", messages: history ?? [ChatMessage(role: "user", content: "What time is it?")],
             tools: tools)
         request.isToolFreeWrapUp = wrapUp
         request.transientNotices = notices
         let stream = try await ChatExecutionContext.$interactiveChatRun.withValue(interactive) {
-            try await engine.streamChat(request: request)
+            try await ChatExecutionContext.$agentRunRecovery.withValue(agentRun) {
+                try await engine.streamChat(request: request)
+            }
         }
         var deltas: [String] = []
         for try await delta in stream { deltas.append(delta) }
@@ -255,6 +259,98 @@ struct IntelTerminalRecoveryEngineTests {
         let (deltas, bodies) = try await run([Self.cutToolCall, Self.cutToolCall], tools: [Self.offeredTool])
         #expect(bodies.count == 2)
         #expect(deltas.last == AgentToolLoop.truncatedToolCallFallback)
+    }
+
+    // MARK: Headless agent runs (stage 5c slice 5, rows 40-41)
+
+    @Test("A headless run re-asks an empty turn with upstream's notice")
+    func agentRunEmptyTurnIsReasked() async throws {
+        let (deltas, bodies) = try await run([Self.empty, Self.answer("It is noon.")], interactive: false, agentRun: true)
+        #expect(bodies.count == 2)
+        #expect(bodies[1].contains("Your previous turn produced no output."))
+        #expect(deltas.last == "It is noon.")
+    }
+
+    @Test("A headless run with no tool work shows the empty-turn fallback after three blanks")
+    func agentRunEmptyTurnFallback() async throws {
+        let (deltas, bodies) = try await run(
+            [Self.empty, Self.empty, Self.empty], interactive: false, agentRun: true)
+        #expect(bodies.count == 3)
+        #expect(deltas.last == AgentToolLoop.emptyTurnFallback)
+    }
+
+    @Test("A headless run retries reasoning only once, then reports an incomplete response")
+    func agentRunReasoningOnly() async throws {
+        let (deltas, bodies) = try await run(
+            [Self.reasoningOnly("Thinking."), Self.answer("It is noon.")],
+            tools: [Self.offeredTool], interactive: false, agentRun: true)
+        #expect(bodies.count == 2)
+        #expect(deltas.last == "It is noon.")
+        do {
+            _ = try await run(
+                [Self.reasoningOnly("a"), Self.reasoningOnly("b")],
+                tools: [Self.offeredTool], interactive: false, agentRun: true)
+            Issue.record("expected the recovery to be exhausted")
+        } catch let error as ChatEngine.AgentRunRecoveryExhausted {
+            #expect(error.kind == .incompleteReasoning)
+        }
+    }
+
+    @Test("A headless run cut at the output limit ends with an error, not appended text")
+    func agentRunLengthIsAnError() async throws {
+        do {
+            _ = try await run([Self.cut("Partial")], interactive: false, agentRun: true)
+            Issue.record("expected the recovery to be exhausted")
+        } catch let error as ChatEngine.AgentRunRecoveryExhausted {
+            #expect(error.kind == .outputLimit)
+            #expect(error.message == AgentToolLoop.lengthExhaustedFallback)
+        }
+    }
+
+    @Test("A headless run retries a cut tool call once, then errors")
+    func agentRunTruncatedToolCall() async throws {
+        let (deltas, bodies) = try await run(
+            [Self.cutToolCall, Self.answer("Done.")], tools: [Self.offeredTool], interactive: false, agentRun: true)
+        #expect(bodies.count == 2)
+        #expect(deltas.last == "Done.")
+        do {
+            _ = try await run(
+                [Self.cutToolCall, Self.cutToolCall], tools: [Self.offeredTool], interactive: false, agentRun: true)
+            Issue.record("expected the recovery to be exhausted")
+        } catch let error as ChatEngine.AgentRunRecoveryExhausted {
+            #expect(error.message == AgentToolLoop.truncatedToolCallFallback)
+        }
+    }
+
+    @Test("A headless run nudges an announce-only turn twice, then accepts it without a wrap-up step")
+    func agentRunAnnounceKeepsLooping() async throws {
+        let announce = Self.answer("Let me write the file:")
+        let (deltas, bodies) = try await run(
+            [announce, announce, announce], tools: [Self.offeredTool], interactive: false, agentRun: true)
+        #expect(bodies.count == 3)
+        #expect(!deltas.contains { StreamingRunEndHint.decodeWrapUp($0) != nil })
+        #expect(deltas.last == "Let me write the file:")
+    }
+
+    @Test("A headless run trims an oversized history; a plain run sends all of it")
+    func agentRunTrimsHistory() async throws {
+        let filler = String(repeating: "word ", count: 4_000)
+        var history = [ChatMessage(role: "system", content: "You are a test agent.")]
+        for index in 0..<80 {
+            history.append(ChatMessage(role: index % 2 == 0 ? "user" : "assistant", content: filler))
+        }
+        history.append(ChatMessage(role: "user", content: "What time is it?"))
+        let trimmed = try await run([Self.answer("ok")], interactive: false, agentRun: true, history: history)
+        let untrimmed = try await run([Self.answer("ok")], interactive: false, history: history)
+        #expect(trimmed.bodies[0].utf8.count < untrimmed.bodies[0].utf8.count / 2)
+    }
+
+    @Test("Chat-only grounded retries stay off for a headless run")
+    func agentRunHasNoGroundedRetry() async throws {
+        let (deltas, bodies) = try await run(
+            [Self.answer("I have saved the file to disk.")], interactive: false, agentRun: true)
+        #expect(bodies.count == 1)
+        #expect(!deltas.contains(StreamingGroundedRetryHint.sentinel))
     }
 
     @Test("Outside the chat a cut tool call still fails as before")

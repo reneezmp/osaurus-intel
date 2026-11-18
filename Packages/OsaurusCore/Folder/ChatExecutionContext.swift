@@ -137,6 +137,17 @@ public enum ChatExecutionContext {
     /// window every round. Other callers (HTTP API, schedules) are unchanged.
     @TaskLocal public static var interactiveChatRun: Bool = false
 
+    /// Intel: a headless agent run (HTTP `/agents/{id}/run`, plugin inference)
+    /// gets what upstream's `AgentToolLoop.run` gives those surfaces: the
+    /// empty-turn, reasoning-only and announce-only recovery, the bounded
+    /// retry of a tool call cut by the output limit, and the per-round history
+    /// trim. An exhausted recovery ends the run with
+    /// `ChatEngine.AgentRunRecoveryExhausted` for the surface to map to its
+    /// error event. Chat-only policies (grounded-claim checks, stopping after a
+    /// denied call, status wrap-ups) stay on `interactiveChatRun`: upstream's
+    /// HTTP / plugin policy is `stopOnToolRejection: false`.
+    @TaskLocal public static var agentRunRecovery: Bool = false
+
     /// Intel: upstream's mid-run steering (#1433). Chat binds a closure that
     /// hands over a text-only message the user queued during the run;
     /// `CloudChatEngine` calls it at each tool-round boundary
