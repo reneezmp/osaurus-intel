@@ -68,10 +68,28 @@ extension HTTPHandler {
         }
         let eventLoop = context.eventLoop
         runRequestTask {
-            let data = await MainActor.run { IntelConfigApprovalQueue.shared.pairedPhoneListJSON() }
+            let data = await MainActor.run {
+                Self.mergedPairedPhoneApprovals(
+                    IntelConfigApprovalQueue.shared.pairedPhoneListJSON(),
+                    ConfigApprovalQueue.shared.pairedPhoneListJSON())
+            }
             self.respondOnLoop(
                 eventLoop, status: .ok, headers: self.jsonHeaders(), body: String(decoding: data, as: UTF8.self))
         }
+    }
+
+    /// One `{"approvals":[...]}` body from several queues' bodies.
+    static func mergedPairedPhoneApprovals(_ bodies: Data...) -> Data {
+        var rows: [[String: Any]] = []
+        for body in bodies {
+            if let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
+                let list = object["approvals"] as? [[String: Any]]
+            {
+                rows.append(contentsOf: list)
+            }
+        }
+        return (try? JSONSerialization.data(withJSONObject: ["approvals": rows], options: [.sortedKeys]))
+            ?? Data(#"{"approvals":[]}"#.utf8)
     }
 
     /// POST /config/approvals/{id} — `{"decision":"apply" | "cancel"}` (§16.3).
@@ -100,7 +118,11 @@ extension HTTPHandler {
         let eventLoop = context.eventLoop
         runRequestTask {
             let answered = await MainActor.run {
-                IntelConfigApprovalQueue.shared.resolveFromPairedPhone(id: approvalId, apply: apply)
+                // The declarative planner's queue (stage 2) and Intel's own
+                // `orchestrator_config` queue share these endpoints; ids are
+                // random UUIDs, so at most one of them holds the plan.
+                ConfigApprovalQueue.shared.resolveFromPairedPhone(id: approvalId, apply: apply)
+                    || IntelConfigApprovalQueue.shared.resolveFromPairedPhone(id: approvalId, apply: apply)
             }
             self.respondOnLoop(
                 eventLoop, status: answered ? .ok : .notFound, headers: self.jsonHeaders(),

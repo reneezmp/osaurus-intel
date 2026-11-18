@@ -239,6 +239,42 @@ struct IntelHTTPApprovalsTests {
         #expect(await review.value == .cancelled)
     }
 
+    /// Stage 2 of `W-declarative-config`: the declarative planner's own queue
+    /// (`ConfigApprovalQueue`) answers on the same two routes as Intel's.
+    @Test func declarativePlan_fromAPhoneRun_isListedAndApplied() async throws {
+        let server = try await startApprovalsTestServer()
+        defer { Task { await server.shutdown() } }
+        let plan = ConfigPlan(
+            actions: [
+                ConfigPlanAction(
+                    section: "memory", target: "memory", kind: .update,
+                    changes: ["enabled: true -> false"], risks: [])
+            ], notes: [])
+        let review = Task { @MainActor in
+            await ConfigApprovalQueue.shared.requestApproval(
+                plan: plan, prune: false, fromPairedPhone: true, timeout: .seconds(30))
+        }
+        let id = try await waitFor { await MainActor.run { ConfigApprovalQueue.shared.pending.first?.id } }
+
+        let list = try await server.send("GET", "/config/approvals")
+        let rows = try #require(try list.object()["approvals"] as? [[String: Any]])
+        #expect(rows.count == 1)
+        #expect(rows.first?["id"] as? String == id.uuidString)
+        #expect(rows.first?["prune"] as? Bool == false)
+
+        let apply = try await server.send("POST", "/config/approvals/\(id.uuidString)", json: #"{"decision":"apply"}"#)
+        #expect(apply.status == 200)
+        #expect(await review.value == .approved)
+    }
+
+    @Test func mergedApprovalBodies_concatenateRowsAndSurviveGarbage() {
+        let a = Data(#"{"approvals":[{"id":"1"}]}"#.utf8)
+        let b = Data(#"{"approvals":[{"id":"2"},{"id":"3"}]}"#.utf8)
+        let merged = HTTPHandler.mergedPairedPhoneApprovals(a, Data("not json".utf8), b)
+        let rows = (try? JSONSerialization.jsonObject(with: merged) as? [String: Any])?["approvals"] as? [[String: Any]]
+        #expect(rows?.compactMap { $0["id"] as? String } == ["1", "2", "3"])
+    }
+
     // MARK: - The remote reviewer outside the routes
 
     /// A phone run with no Mac chat open still parks its plan for the phone
