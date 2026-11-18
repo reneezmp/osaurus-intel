@@ -3499,3 +3499,13 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] POST `/agents/default/run` with a model that returns an empty reply (or Max Tokens very low): a retry happens, then an error event with upstream's wording, no `finish_reason: stop`.
 - [ ] A long conversation on a small-context model through the same endpoint answers instead of failing with the provider's context error (history trim).
 - [ ] A plugin `complete` call with tiny Max Tokens returns `{"error":"output_token_limit"…}`.
+
+## Credential sheet and network retries (2026-11-18)
+
+Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in candidate 68.
+
+- [ ] Turn Wi-Fi off, send a chat message, turn Wi-Fi back on within about a second: the reply still arrives. With Wi-Fi off longer you get a normal network error, not a hang.
+- [ ] With a provider that rate-limits (or a key with a tiny quota), send quickly: the error reads "…rate-limited this request (HTTP 429). Retry in about Ns." (or "Retry shortly.").
+- [ ] On a flaky connection, ask for a tool task: a call cut mid-stream is retried quietly instead of showing a half-built tool card or running broken arguments.
+- [ ] Router: after a retried message, Credits activity shows one charge for it.
+- [ ] Settings → Providers still adds and edits providers as before (the new key sheet is only used by declarative config, which has no UI entry yet).

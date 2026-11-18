@@ -160,6 +160,11 @@ mdat and live-folder checks).
   `last-exit-verdict.json`, `runtime/<uuid>/`); Intel never writes them.
 - Agents must never run a global `pkill -f swift-test`: kill only their own
   run's PIDs (one did, while another test run was active).
+- **Declarative config stage 3**: the native credential sheet for keyed
+  providers. **Engine slice 6** (rows 11–12): connect retry, "Retry in about
+  Ns" for 429/503, cut tool calls retried before any text.
+- **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
+  2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
   was building (log stopped growing for 10 minutes). Use `fullrun_pty.sh` for
   full runs; kill the stalled `swift-test` and `swiftpm-testing-helper` and the

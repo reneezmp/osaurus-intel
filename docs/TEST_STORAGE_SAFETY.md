@@ -512,3 +512,21 @@ the same tests was clean, and Intel never writes VecturaKit stores. Conclusion:
 app writes, not test leaks. The check stays. A hit inside the test window should
 be re-run (ideally with the other app quit, or compared against `lsof` and a
 second run) before concluding that a test leaked.
+
+## 2026-11-18: one test run at a time
+
+Two agents ran the gated full suite at the same time in different worktrees.
+The runs hung at 0% CPU (`BackgroundTaskAgentGroupCloseTests`, earlier in an
+avatar test) or failed tests their changes never touched
+(`EditableTextViewSpellCheckTests` "defaults to off",
+`FileDiffEngineTests.wordDocumentDiffsByParagraph`), and a full run took
+32 minutes instead of 2. Each test process is `swiftpm-testing-helper`, so
+concurrent runs share its `UserDefaults` domain and caches even with separate
+`OSAURUS_TEST_ROOT`s. Run alone, the same combined tree passed everything
+(5706 tests). Feeding the tests `< /dev/null` and using a pty did not prevent
+the hang on their own.
+
+Rule: only one gated test run at a time on the machine. The gate wraps
+`swift test` in `/usr/bin/lockf -k /tmp/osaurus-test-gate.lock`, so a second
+run waits ("waiting for gate lock"). Builds outside the gate may still run in
+parallel. Agents must never kill another run's processes (no global `pkill`).
