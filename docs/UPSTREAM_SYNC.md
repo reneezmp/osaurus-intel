@@ -150,6 +150,16 @@ mdat and live-folder checks).
   modal, not yet reachable from the model (stage 4 swaps the tool). Open item
   before stage 4: map `delegation.spawnable_agents` onto Intel's Gate 4
   allowlist.
+- **Engine slice 5** (rows 40–41): `/agents/{id}/run` and plugin runs get
+  upstream's empty-turn and announce-only recovery and the history trim, and
+  match upstream in not retrying reasoning-only turns or cut calls (an agent
+  first added those retries; reverted: extra retries cost API money).
+- Renée's `/Applications/osaurus.app` updated itself to **1.0.7** (Sparkle,
+  2026-11-18 12:06). Live hits from it include 1.x-only paths
+  (`classic-resave/`, `sync-local/`, `.termination-forensics-active`,
+  `last-exit-verdict.json`, `runtime/<uuid>/`); Intel never writes them.
+- Agents must never run a global `pkill -f swift-test`: kill only their own
+  run's PIDs (one did, while another test run was active).
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
   was building (log stopped growing for 10 minutes). Use `fullrun_pty.sh` for
   full runs; kill the stalled `swift-test` and `swiftpm-testing-helper` and the

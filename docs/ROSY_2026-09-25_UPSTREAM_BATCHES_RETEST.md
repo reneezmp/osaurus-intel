@@ -3491,3 +3491,11 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] Ask the Orchestrator to change a setting (e.g. its model): Intel's review card still appears; Cancel changes nothing, Apply changes exactly what it listed.
 - [ ] With the paired iPhone, make the same request from the phone: the plan is listed there, and applying or cancelling from the phone works.
 - [ ] Add a provider with a key and chat once with tools: still works.
+
+## Engine slice 5: API and plugin run recovery (2026-11-18)
+
+`W-cov-reaudit` 5c (`COV_REAUDIT_STAGE5C_ENGINE.md` rows 40–41). Not in candidate 68. Needs the local API on (it stays off by default; turn it on only for this test and off afterwards).
+
+- [ ] POST `/agents/default/run` with a model that returns an empty reply (or Max Tokens very low): a retry happens, then an error event with upstream's wording, no `finish_reason: stop`.
+- [ ] A long conversation on a small-context model through the same endpoint answers instead of failing with the provider's context error (history trim).
+- [ ] A plugin `complete` call with tiny Max Tokens returns `{"error":"output_token_limit"…}`.
