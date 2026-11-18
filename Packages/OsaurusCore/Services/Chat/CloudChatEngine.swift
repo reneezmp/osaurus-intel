@@ -523,6 +523,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return m
     }
 
+    /// Upstream Classic `runBatchInParallel`: after one call in a batch is not
+    /// approved (Deny, a blocked policy, or a surface with no approval UI), the
+    /// calls after it do not run; each gets a paired `rejected` envelope so no
+    /// assistant `tool_calls` entry dangles.
+    static func skippedAfterRejectionResult(toolName: String) -> String {
+        ToolEnvelope.failure(
+            kind: .rejected,
+            message: "Skipped: an earlier tool call in this batch was rejected, so this call did not run.",
+            tool: toolName
+        )
+    }
+
     /// Repair a (possibly restored) wire-message sequence so it satisfies
     /// DeepSeek's strict tool-call schema. Sessions persisted by earlier Intel
     /// builds could drop `tool_call_id` on tool-result turns; DeepSeek then
@@ -1816,6 +1828,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             var resultImages: [Data] = []
                             var runEndedByTool = false
                             var roundDataMovement: [Bool] = []
+                            var rejectedInBatch = false  // Classic: a refusal skips the rest of the batch
                             for rawCall in finalized.completion.toolCalls {
                                 try Task.checkCancellation()
                                 let call = IntelCodexResponsesToolCall(
@@ -1825,14 +1838,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 )
                                 // Upstream's scope gate (IntelToolScopeGate.swift).
                                 let isOffered = activeTools?.contains(where: { $0.function.name == call.name }) == true
-                                if request.reportsToolStarts, isOffered {
+                                if request.reportsToolStarts, isOffered, !rejectedInBatch {
                                     continuation.yield(
                                         StreamingToolHint.encodeStarted(
                                             callId: call.callID, name: call.name, arguments: call.arguments))
                                 }
                                 var result: String
                                 var wasHeld = false
-                                if !isOffered {
+                                if rejectedInBatch {
+                                    result = Self.skippedAfterRejectionResult(toolName: call.name)
+                                } else if !isOffered {
                                     NSLog("[CloudChatEngine] refusing '\(call.name)': not offered in this request")
                                     let offered = activeTools
                                     result = await MainActor.run {
@@ -1913,6 +1928,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         }
                                     }
                                     if !approved {
+                                        rejectedInBatch = true
                                         let reason = policy == .deny
                                             ? "blocked by your tool permissions (Deny)"
                                             : Self.unapprovedReason
@@ -2293,6 +2309,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // the result back as a tool message.
                         var runEndedByTool = false
                         var roundDataMovement: [Bool] = []
+                        var rejectedInBatch = false  // Classic: a refusal skips the rest of the batch
                         for call in orderedCalls {
                             try Task.checkCancellation()
                             let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
@@ -2301,7 +2318,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // model gets a `tool_not_found` envelope and the run
                             // goes on (it used to end the turn).
                             let isOffered = activeTools?.contains(where: { $0.function.name == call.name }) == true
-                            if request.reportsToolStarts, isOffered {
+                            if request.reportsToolStarts, isOffered, !rejectedInBatch {
                                 continuation.yield(
                                     StreamingToolHint.encodeStarted(
                                         callId: callId, name: call.name, arguments: call.arguments))
@@ -2310,7 +2327,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             var wasHeld = false
                             let toolStart = Date()
 
-                            if !isOffered {
+                            if rejectedInBatch {
+                                result = Self.skippedAfterRejectionResult(toolName: call.name)
+                            } else if !isOffered {
                                 NSLog("[CloudChatEngine] refusing '\(call.name)': not offered in this request")
                                 let offered = activeTools
                                 result = await MainActor.run {
@@ -2402,6 +2421,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 }
 
                                 if !approved {
+                                    rejectedInBatch = true
                                     let reason =
                                         policy == .deny
                                         ? "blocked by your tool permissions (Deny)"
