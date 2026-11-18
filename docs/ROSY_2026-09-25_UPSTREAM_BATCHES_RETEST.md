@@ -3473,3 +3473,13 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] Set `file_write` to Ask, run a task that uses it and Deny: the run ends with "The requested action was not completed." and you are not asked again.
 - [ ] A research task that keeps hitting a blocked URL ends with a status message saying the source is blocked, not a bare error.
 - [ ] Stop mid-run still ends quietly (no closing line).
+
+## Engine slice 4: out of credits (2026-11-18)
+
+`W-cov-reaudit` 5c (`COV_REAUDIT_STAGE5C_ENGINE.md` rows 13–14). Not in candidate 68. Needs a Router account with an empty or nearly empty balance.
+
+- [ ] Send with an `osaurus/...` Router model while out of credits: the reply reads "Error: You're out of credits. Add credits to continue." (no raw 402 JSON) and a "You're out of credits" notice shows your balance.
+- [ ] "Not now" closes it and the error line stays. "Add credits" opens the usual top-up sheet and nothing is charged until you pay there.
+- [ ] After topping up (or redeeming a code) in Settings → Credits, back in the chat a "Credits added" notice offers Retry, which regenerates only the blocked reply; "Later" sends nothing.
+- [ ] If you sent another message before topping up, no "Credits added" notice appears.
+- [ ] A failure on a non-Router model shows the plain "Error: …" line and no credits notice.

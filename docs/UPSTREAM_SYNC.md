@@ -137,6 +137,15 @@ mdat and live-folder checks).
 - **Declarative config stage 1** (`W-declarative-config`): upstream's config
   model, YAML/JSON document and secret references, with the Yams dependency
   (5.4.0, pinned in both `Package.resolved` files). Nothing applies yet.
+- **Engine slice 3** (rows 5–9): announce-only and "shall I continue?"
+  nudges, tool-free status steps, and a denied or `rejected` call ends a chat
+  run instead of re-asking the model.
+- **Engine slice 4** (rows 13–14): a Router 402 reads "You're out of credits"
+  with an Add credits notice (opens the existing top-up sheet, never buys) and
+  a Retry offer once the balance rises.
+- `fullrun_pty.sh` needs a terminal: under some agent shells `script(1)` fails
+  ("tcgetattr/ioctl: Operation not supported on socket"); the script now falls
+  back to the plain gate.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
   was building (log stopped growing for 10 minutes). Use `fullrun_pty.sh` for
   full runs; kill the stalled `swift-test` and `swiftpm-testing-helper` and the
