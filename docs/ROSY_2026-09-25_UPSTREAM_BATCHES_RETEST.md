@@ -3463,3 +3463,13 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] The app launches and every Settings tab still opens (the new package must not break startup).
 - [ ] Add a cloud provider with an API key and chat once with tools on: the provider and tools still work.
 - [ ] Ask the Orchestrator to change a setting: the approval card still appears and nothing changes until you approve.
+
+## Engine slice 3: announce nudges and stop on Deny (2026-11-18)
+
+`W-cov-reaudit` 5c (`COV_REAUDIT_STAGE5C_ENGINE.md` rows 5–9). Not in candidate 68.
+
+- [ ] With a small or weak model in a folder chat, ask for a long file. If it says "Let me write the file:" and stops, the chat nudges it into making the call; after two failed nudges it shows a short, honest status instead of ending on the promise.
+- [ ] Ask for a 3-step task (it keeps a todo). If the model asks "Shall I continue?", it carries on without you replying. With no todo open, its question to you stands.
+- [ ] Set `file_write` to Ask, run a task that uses it and Deny: the run ends with "The requested action was not completed." and you are not asked again.
+- [ ] A research task that keeps hitting a blocked URL ends with a status message saying the source is blocked, not a bare error.
+- [ ] Stop mid-run still ends quietly (no closing line).
