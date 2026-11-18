@@ -3455,3 +3455,11 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] Press Stop mid-reply: your message and the partial text stay, with no "Error:" line.
 - [ ] Turn Wi-Fi off mid-reply: the text already shown stays and "Error: …" appears below it, not instead of it.
 - [ ] With a local model or gateway that reuses `call_0` for parallel calls (if one is at hand), each call gets its own tool row and result.
+
+## Declarative config stage 1 (2026-11-18)
+
+`W-declarative-config` stage 1: the config model and the Yams package only; nothing to click yet. Not in candidate 68.
+
+- [ ] The app launches and every Settings tab still opens (the new package must not break startup).
+- [ ] Add a cloud provider with an API key and chat once with tools on: the provider and tools still work.
+- [ ] Ask the Orchestrator to change a setting: the approval card still appears and nothing changes until you approve.

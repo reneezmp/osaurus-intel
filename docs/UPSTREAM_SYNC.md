@@ -122,6 +122,29 @@ filtered gate only proves the suites you named.
 
 ---
 
+## Classic parity work, 2026-11-18
+
+Resumed after a week. Scratchpad files (the test gate `fullrun.sh`,
+`fullrun_pty.sh` and the agents' `PORT_BRIEF.md`) were wiped by the OS
+again and were recreated from the session transcript; if they are missing,
+rebuild them from `TEST_STORAGE_SAFETY.md` (temp `OSAURUS_TEST_ROOT`,
+`OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1`, `--no-parallel --disable-xctest`,
+mdat and live-folder checks).
+
+- **Engine slice 2** (`COV_REAUDIT_STAGE5C_ENGINE.md` rows 15, 18, 21): a
+  refused call skips the rest of its batch; unique call ids per round; Stop is
+  not an error and a mid-reply failure is appended below the streamed text.
+- **Declarative config stage 1** (`W-declarative-config`): upstream's config
+  model, YAML/JSON document and secret references, with the Yams dependency
+  (5.4.0, pinned in both `Package.resolved` files). Nothing applies yet.
+- Lesson: the plain gate stalled at 0% CPU in a full run while another agent
+  was building (log stopped growing for 10 minutes). Use `fullrun_pty.sh` for
+  full runs; kill the stalled `swift-test` and `swiftpm-testing-helper` and the
+  gate still removes its temp root.
+- Live hit seen: `~/.osaurus/.storage-maintenance.json` is the upstream app's
+  6-hourly `PRAGMA optimize` stamp (`lastOptimize` matched the mtime); no test
+  runs `StorageMaintenance`, and under the gate its root is the temp folder.
+
 ## 2026-09-25 — Full upstream feasibility audit through `a4daf94c4`
 
 Fetched `upstream/main` and classified every commit in
