@@ -594,6 +594,15 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         notifyModelsChanged()
     }
 
+    /// The picker's provider prefix (upstream `pickerPrefix(for:)`), used by
+    /// the declarative config's model references.
+    nonisolated static func pickerPrefix(for providerName: String) -> String {
+        providerName
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .replacingOccurrences(of: "/", with: "-")
+    }
+
     /// Upstream #2958: seed the Osaurus Cloud starter favourites once the
     /// Router catalog is known. Picker ids follow `ModelPickerItemCache`:
     /// `<provider name, lowercased and dashed>/<router model id>`.
@@ -1394,6 +1403,45 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         guard let tool = toolsByName[toolName] else { return nil }
         if let mcp = tool as? MCPProviderTool { return mcp.providerName }
         return nil
+    }
+
+    /// Explicit per-tool enablement and policy overrides, for the declarative
+    /// config exporter/planner (upstream Classic `explicitToolSettings`).
+    /// Intel keeps the global switch as `disabledToolNames`, so only
+    /// switched-off tools appear in `enabled`.
+    func explicitToolSettings() -> (enabled: [String: Bool], policies: [String: ToolPermissionPolicy]) {
+        (Dictionary(uniqueKeysWithValues: disabledToolNames.map { ($0, false) }), _policies)
+    }
+
+    /// Which portable group owns a tool, for the declarative config document:
+    /// MCP tools by server NAME, native plugin tools by plugin id (Intel
+    /// groups plugin tools under the plugin's display name, so the id is
+    /// looked up from the loaded plugins). Built-in tools return nil.
+    @MainActor
+    func portableToolGroup(for toolName: String) -> PortableToolGroup? {
+        guard let tool = toolsByName[toolName] else { return nil }
+        if let mcp = tool as? MCPProviderTool { return .mcpServer(mcp.providerName) }
+        if let group = pluginToolGroups[toolName] {
+            let id =
+                PluginManager.shared.plugins.first {
+                    ($0.plugin.manifest.name ?? $0.plugin.id) == group
+                }?.plugin.id ?? group
+            return .plugin(id)
+        }
+        return nil
+    }
+
+    /// Every registered tool name keyed by its portable group. Tools with no
+    /// group are omitted. Snapshot for the declarative exporter/applier.
+    @MainActor
+    func portableToolGroups() -> [PortableToolGroup: [String]] {
+        var groups: [PortableToolGroup: [String]] = [:]
+        for name in toolsByName.keys {
+            guard let group = portableToolGroup(for: name) else { continue }
+            groups[group, default: []].append(name)
+        }
+        for key in groups.keys { groups[key]?.sort() }
+        return groups
     }
 
     /// Remove tools by name. Used by FolderToolManager when the folder clears

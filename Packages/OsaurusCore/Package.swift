@@ -31,6 +31,8 @@ let package = Package(
         .package(url: "https://github.com/mgriebling/SwiftMath", from: "1.7.3"),
         .package(url: "https://github.com/raspu/Highlightr", from: "2.3.0"),
         .package(url: "https://github.com/AAChartModel/AAChartKit-Swift.git", from: "9.5.0"),
+        // Declarative configuration YAML (upstream ConfigYAML, W-declarative-config).
+        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
         .package(path: "../IntelStubs"),
     ],
     targets: [
@@ -142,6 +144,7 @@ let package = Package(
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "MCP", package: "swift-sdk"),
+                .product(name: "Yams", package: "Yams"),
                 .product(name: "IkigaJSON", package: "IkigaJSON"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "OsaurusRepository", package: "OsaurusRepository"),
