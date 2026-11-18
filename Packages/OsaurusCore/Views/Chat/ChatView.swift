@@ -4437,15 +4437,35 @@ final class ChatSession: ObservableObject {
                         }
                     }
                 }
+            } catch is CancellationError {
+                // Upstream Classic: a Stop is not an error. `stop()` finalises
+                // the run (the user turn stays, the empty placeholder is
+                // trimmed); writing "Error: cancelled" here showed a failure
+                // on a reply the user ended on purpose. (Upstream's other
+                // cancel source, the privacy review sheet, does not exist on
+                // Intel.)
+                lastStreamError = nil
             } catch {
                 // After tool rounds the error belongs under the tool results,
                 // in the engine's newest reply; writing it to the run's first
                 // reply replaced what the model said before the tools.
+                // Upstream Classic: keep what already streamed and append the
+                // error below it; with nothing streamed the error stands alone.
                 assistantTurn = liveAssistantTurn(fallback: assistantTurn)
-                assistantTurn.content = "Error: \(error.localizedDescription)"
+                assistantTurn.content = Self.streamErrorContent(
+                    streamed: assistantTurn.content, message: error.localizedDescription)
                 lastStreamError = error.localizedDescription
             }
         }
+    }
+
+    /// Upstream Classic's catch: text the model already streamed stays, and
+    /// the error goes below it after a blank line; with nothing streamed the
+    /// error stands alone (Intel keeps its `Error: ` prefix).
+    nonisolated static func streamErrorContent(streamed: String, message: String) -> String {
+        let line = "Error: \(message)"
+        let hasText = streamed.contains { !$0.isWhitespace }
+        return hasText ? streamed + "\n\n" + line : line
     }
 
     /// Intel: `CloudChatEngine` streams each reply after a tool result into a
