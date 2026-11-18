@@ -523,6 +523,35 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return m
     }
 
+    /// Upstream Classic `AgentToolLoop.uniquelyIdentifiedInvocations`: one
+    /// batch, unique call ids. Some gateways and small local models emit the
+    /// same `tool_call_id` (often `call_0`) for every call in a message; the id
+    /// keys the live feed, the chat row and the paired tool result, so two
+    /// siblings sharing one overwrite each other, and `sanitizeToolSequence`
+    /// keeps duplicates as they are. The first occurrence keeps the model's id;
+    /// later duplicates and missing ids are minted, in model order.
+    static func uniquelyIdentifiedCallIds(_ supplied: [String]) -> [String] {
+        var seen: Set<String> = []
+        return supplied.map { raw in
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolved: String
+            if !trimmed.isEmpty, !seen.contains(trimmed) {
+                resolved = trimmed == raw ? raw : trimmed
+            } else {
+                var minted = Self.mintCallId()
+                while seen.contains(minted) { minted = Self.mintCallId() }
+                resolved = minted
+            }
+            seen.insert(resolved)
+            return resolved
+        }
+    }
+
+    /// Upstream Classic `AgentToolLoop.mintCallId`: `call_` plus 24 hex digits.
+    static func mintCallId() -> String {
+        "call_" + String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(24))
+    }
+
     /// Upstream Classic `runBatchInParallel`: after one call in a batch is not
     /// approved (Deny, a blocked policy, or a surface with no approval UI), the
     /// calls after it do not run; each gets a paired `rejected` envelope so no
@@ -2265,11 +2294,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                         // Echo the assistant's tool-call message into the
                         // continuation context.
-                        let orderedCalls = partials.sorted { $0.key < $1.key }.map { entry in
+                        var orderedCalls = partials.sorted { $0.key < $1.key }.map { entry in
                             var call = entry.value
                             call.name = Self.resolvedOfferedToolName(call.name, offered: activeTools)
                             return call
                         }
+                        // Upstream Classic `uniquelyIdentifiedInvocations`: unique ids per round.
+                        let uniqueIds = Self.uniquelyIdentifiedCallIds(orderedCalls.map(\.id))
+                        for index in orderedCalls.indices { orderedCalls[index].id = uniqueIds[index] }
                         // Intel desktop subagent step: hand the proposed calls
                         // back instead of running them.
                         if request.stopAtToolCalls {
@@ -2312,7 +2344,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         var rejectedInBatch = false  // Classic: a refusal skips the rest of the batch
                         for call in orderedCalls {
                             try Task.checkCancellation()
-                            let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
+                            let callId = call.id
                             // Upstream's scope gate (IntelToolScopeGate.swift): a
                             // tool this request didn't offer is never run; the
                             // model gets a `tool_not_found` envelope and the run

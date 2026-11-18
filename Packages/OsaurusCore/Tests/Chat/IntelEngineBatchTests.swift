@@ -16,6 +16,55 @@ import Testing
 
 @Suite("Intel engine tool batches", .serialized)
 struct IntelEngineBatchTests {
+    // MARK: - Row 21: unique ids
+
+    @Test("The first occurrence of a call id is kept; duplicates and blanks are minted")
+    func duplicateIdsAreMinted() {
+        let ids = ChatEngine.uniquelyIdentifiedCallIds(["call_0", "call_0", "", "call_1", "call_0"])
+        #expect(ids.count == 5)
+        #expect(ids[0] == "call_0")
+        #expect(ids[3] == "call_1")
+        #expect(Set(ids).count == 5)
+        for index in [1, 2, 4] { #expect(ids[index].hasPrefix("call_") && ids[index].count == 29) }
+    }
+
+    @Test("sanitizeToolSequence keeps duplicate ids as they are (so the engine must not emit them)")
+    func sanitizeDoesNotRepairDuplicates() {
+        let repaired = ChatEngine.sanitizeToolSequence([
+            ["role": "user", "content": "go"],
+            [
+                "role": "assistant", "content": "",
+                "tool_calls": [
+                    ["id": "call_0", "type": "function", "function": ["name": "a", "arguments": "{}"]],
+                    ["id": "call_0", "type": "function", "function": ["name": "b", "arguments": "{}"]],
+                ],
+            ],
+            ["role": "tool", "tool_call_id": "call_0", "content": "A"],
+            ["role": "tool", "tool_call_id": "call_0", "content": "B"],
+        ])
+        let calls = (repaired[1]["tool_calls"] as? [[String: Any]]) ?? []
+        #expect(calls.compactMap { $0["id"] as? String } == ["call_0", "call_0"])
+    }
+
+    @Test("Two calls that share one id reach the app, and the next request, with different ids")
+    func engineMintsDistinctIdsForASharedId() async throws {
+        let deltas = try await Self.run(
+            [Self.twoCallStream(first: "call_0", second: "call_0"), Self.textStream()]
+        ) { $0.reportsToolStarts = true }
+        let ids = deltas.compactMap { StreamingToolHint.decodeDone($0)?.callId }
+        #expect(ids.count == 2)
+        #expect(Set(ids).count == 2)
+        #expect(ids.first == "call_0")
+
+        let body = try #require(FixtureProtocol.requestBodies.last)
+        let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let messages = try #require(json["messages"] as? [[String: Any]])
+        let echoed = messages.compactMap { $0["tool_calls"] as? [[String: Any]] }.flatMap { $0 }.compactMap { $0["id"] as? String }
+        let answered = messages.filter { $0["role"] as? String == "tool" }.compactMap { $0["tool_call_id"] as? String }
+        #expect(Set(echoed).count == 2)
+        #expect(echoed == answered)
+    }
+
     // MARK: - Row 18: skip the rest after a refusal
 
     @Test("After a refused call the rest of the batch is skipped with a rejected envelope")
