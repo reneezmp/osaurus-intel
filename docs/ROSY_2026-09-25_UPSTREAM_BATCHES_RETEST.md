@@ -3483,3 +3483,11 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 - [ ] After topping up (or redeeming a code) in Settings → Credits, back in the chat a "Credits added" notice offers Retry, which regenerates only the blocked reply; "Later" sends nothing.
 - [ ] If you sent another message before topping up, no "Credits added" notice appears.
 - [ ] A failure on a non-Router model shows the plain "Error: …" line and no credits notice.
+
+## Declarative config stage 2 (2026-11-18)
+
+`W-declarative-config` stage 2: planner, applier and the new approval window, not yet used by the Orchestrator. Not in candidate 68.
+
+- [ ] Ask the Orchestrator to change a setting (e.g. its model): Intel's review card still appears; Cancel changes nothing, Apply changes exactly what it listed.
+- [ ] With the paired iPhone, make the same request from the phone: the plan is listed there, and applying or cancelling from the phone works.
+- [ ] Add a provider with a key and chat once with tools: still works.

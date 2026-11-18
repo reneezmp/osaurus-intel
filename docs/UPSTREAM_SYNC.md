@@ -146,6 +146,10 @@ mdat and live-folder checks).
 - `fullrun_pty.sh` needs a terminal: under some agent shells `script(1)` fails
   ("tcgetattr/ioctl: Operation not supported on socket"); the script now falls
   back to the plain gate.
+- **Declarative config stage 2**: planner, applier, approval queue and
+  modal, not yet reachable from the model (stage 4 swaps the tool). Open item
+  before stage 4: map `delegation.spawnable_agents` onto Intel's Gate 4
+  allowlist.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
   was building (log stopped growing for 10 minutes). Use `fullrun_pty.sh` for
   full runs; kill the stalled `swift-test` and `swiftpm-testing-helper` and the
