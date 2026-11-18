@@ -3445,3 +3445,13 @@ Not in candidate 67. Details: `UPSTREAM_SYNC.md`, "Classic fixes, 2026-11-11".
 
 - [ ] Chat on an Osaurus Router model with a tool-heavy request: Insights' run row shows input/output tokens summed over all rounds (larger than the last round alone), and Credits' activity shows one charge per round (no doubled charges on a retried round).
 - [ ] Ask a model with a small Max Tokens to write a long file: instead of a raw "exhausted its output limit" error, it retries once with smaller chunks.
+
+## Engine slice 2: Deny, Stop and mid-reply errors (2026-11-18)
+
+`W-cov-reaudit` 5c (`COV_REAUDIT_STAGE5C_ENGINE.md` rows 15, 18, 21). Not in candidate 68.
+
+- [ ] Set `file_write` to Ask and ask for two files at once ("create a.txt and b.txt"). Deny the first card: no second card appears, the second call shows as skipped, and the same batch is not asked again.
+- [ ] Same prompt, Allow the first: the second card still appears normally.
+- [ ] Press Stop mid-reply: your message and the partial text stay, with no "Error:" line.
+- [ ] Turn Wi-Fi off mid-reply: the text already shown stays and "Error: …" appears below it, not instead of it.
+- [ ] With a local model or gateway that reuses `call_0` for parallel calls (if one is at hand), each call gets its own tool row and result.
