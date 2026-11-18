@@ -279,20 +279,16 @@ struct IntelTerminalRecoveryEngineTests {
         #expect(deltas.last == AgentToolLoop.emptyTurnFallback)
     }
 
-    @Test("A headless run retries reasoning only once, then reports an incomplete response")
-    func agentRunReasoningOnly() async throws {
-        let (deltas, bodies) = try await run(
-            [Self.reasoningOnly("Thinking."), Self.answer("It is noon.")],
-            tools: [Self.offeredTool], interactive: false, agentRun: true)
-        #expect(bodies.count == 2)
-        #expect(deltas.last == "It is noon.")
+    @Test("A headless run does not retry reasoning only: it ends at once (upstream has no continuation hook)")
+    func agentRunReasoningOnlyEndsAtOnce() async throws {
         do {
             _ = try await run(
-                [Self.reasoningOnly("a"), Self.reasoningOnly("b")],
+                [Self.reasoningOnly("Thinking."), Self.answer("never sent")],
                 tools: [Self.offeredTool], interactive: false, agentRun: true)
-            Issue.record("expected the recovery to be exhausted")
+            Issue.record("expected the run to end")
         } catch let error as ChatEngine.AgentRunRecoveryExhausted {
             #expect(error.kind == .incompleteReasoning)
+            #expect(TerminalFixtureProtocol.bodies.count == 1)
         }
     }
 
@@ -307,18 +303,17 @@ struct IntelTerminalRecoveryEngineTests {
         }
     }
 
-    @Test("A headless run retries a cut tool call once, then errors")
-    func agentRunTruncatedToolCall() async throws {
-        let (deltas, bodies) = try await run(
-            [Self.cutToolCall, Self.answer("Done.")], tools: [Self.offeredTool], interactive: false, agentRun: true)
-        #expect(bodies.count == 2)
-        #expect(deltas.last == "Done.")
+    @Test("A headless run does not retry a cut tool call: it is a length error (upstream)")
+    func agentRunTruncatedToolCallIsLengthError() async throws {
         do {
             _ = try await run(
-                [Self.cutToolCall, Self.cutToolCall], tools: [Self.offeredTool], interactive: false, agentRun: true)
-            Issue.record("expected the recovery to be exhausted")
+                [Self.cutToolCall, Self.answer("never sent")], tools: [Self.offeredTool],
+                interactive: false, agentRun: true)
+            Issue.record("expected the run to end")
         } catch let error as ChatEngine.AgentRunRecoveryExhausted {
-            #expect(error.message == AgentToolLoop.truncatedToolCallFallback)
+            #expect(error.kind == .outputLimit)
+            #expect(error.message == AgentToolLoop.lengthExhaustedFallback)
+            #expect(TerminalFixtureProtocol.bodies.count == 1)
         }
     }
 

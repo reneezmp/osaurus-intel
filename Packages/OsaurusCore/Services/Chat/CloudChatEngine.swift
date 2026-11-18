@@ -1547,6 +1547,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             default:
                                 break
                             }
+                            // Upstream's HTTP / plugin loops have no
+                            // `prepareIncompleteReasoningContinuation`: reasoning
+                            // with no answer ends the run at once, no retry.
+                            if agentRunRecovery {
+                                switch step {
+                                case .incompleteReasoning, .incompleteVisibleResponse:
+                                    return .finishWithText(AgentToolLoop.incompleteReasoningFallback)
+                                default: break
+                                }
+                            }
                             let action = terminalRecovery.action(
                                 for: step, completedToolWork: toolWorkThisRun,
                                 pendingTodo: pendingTodo, announcedRecovery: announcedRecovery)
@@ -1870,8 +1880,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 if let reasoning = StreamingReasoningHint.decode(emission) { noteReasoning(reasoning) }
                                 continuation.yield(emission)
                             }
+                            } catch IntelCodexResponsesAdapter.Error.outputLimitDuringToolCall where agentRunRecovery {
+                                // Upstream's HTTP / plugin loops: a cut call is a `length` stop.
+                                throw AgentRunRecoveryExhausted(message: AgentToolLoop.lengthExhaustedFallback)
                             } catch IntelCodexResponsesAdapter.Error.outputLimitDuringToolCall(let toolName, let characters)
-                                where recoversTerminals && !request.isToolFreeWrapUp
+                                where interactiveChatRun && !request.isToolFreeWrapUp
                             {
                                 // Upstream `.truncatedToolCall` on the Responses wire:
                                 // one smaller-chunks retry, then the honest fallback.
@@ -2341,7 +2354,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         if roundFinishReason == "length", !partials.isEmpty {
                             // Upstream `.truncatedToolCall`: the chat retries once
                             // with a smaller-chunks notice, then ends honestly.
-                            if recoversTerminals, !request.isToolFreeWrapUp {
+                            // Upstream's HTTP / plugin loops have no truncated-call
+                            // retry: a cut call is a `length` stop, an error.
+                            if agentRunRecovery {
+                                throw AgentRunRecoveryExhausted(message: AgentToolLoop.lengthExhaustedFallback)
+                            }
+                            if interactiveChatRun, !request.isToolFreeWrapUp {
                                 let named = partials.sorted { $0.key < $1.key }.map(\.value.name).first { !$0.isEmpty }
                                 let characters = partials.values.reduce(0) { $0 + $1.arguments.count }
                                 // Drop the half-built tool card from the screen.

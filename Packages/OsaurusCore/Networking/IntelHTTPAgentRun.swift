@@ -636,14 +636,18 @@ extension HTTPHandler {
                     // Upstream maps an exhausted empty-after-tool-work or
                     // output-limit run to an error event (`writeError`) and
                     // ends the stream without a finish chunk.
-                    onLoop { ctx in
-                        writer.writeError(exhausted.message, context: ctx)
-                        writer.writeEnd(ctx)
+                    // Reasoning with no answer has no mapping upstream (the
+                    // stream just ends normally), so it falls through.
+                    if exhausted.kind != .incompleteReasoning {
+                        onLoop { ctx in
+                            writer.writeError(exhausted.message, context: ctx)
+                            writer.writeEnd(ctx)
+                        }
+                        log(
+                            model: model, response: loggedResponseText, toolCalls: loggedToolCalls,
+                            error: exhausted.message)
+                        return
                     }
-                    log(
-                        model: model, response: loggedResponseText, toolCalls: loggedToolCalls,
-                        error: exhausted.message)
-                    return
                 } catch is ChatEngine.ToolRoundLimitReached {
                     // Upstream ends a capped run with a notice, not an error.
                     let notice = Self.toolLoopBudgetNotice(maxIterations)
