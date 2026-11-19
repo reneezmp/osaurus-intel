@@ -9,6 +9,7 @@
 
 #if OSAURUS_INTEL
 
+import CryptoKit
 import Foundation
 
 /// Converts an OpenAI chat-completions-shaped dictionary to a conservative
@@ -27,6 +28,10 @@ enum IntelCodexResponsesAdapter {
         /// call; the engine retries it once with a smaller-chunks notice).
         case outputLimitDuringToolCall(toolName: String?, argumentCharacters: Int)
         case incompleteStream
+        /// A refusal (`response.refusal.*`, or a `refusal` content part on the
+        /// completed message). The associated value is the provider's
+        /// explanation, empty when it gave none (upstream #2562).
+        case refusal(String)
 
         var errorDescription: String? {
             switch self {
@@ -41,6 +46,9 @@ enum IntelCodexResponsesAdapter {
                     + "'\(name ?? "?")' arguments (received \(characters) characters). "
                     + "Increase the agent's Max Tokens setting and retry."
             case .incompleteStream: return "Codex Responses stream ended without response.completed."
+            case .refusal(let explanation):
+                return "OpenAI refused this request: "
+                    + (explanation.isEmpty ? "no explanation provided by the provider" : explanation)
             }
         }
     }
@@ -48,14 +56,28 @@ enum IntelCodexResponsesAdapter {
     /// The only supported integration entry point for request conversion.
     /// `chatCompletions` is the dictionary CloudChatEngine already builds for
     /// its OpenAI-compatible path. The returned value is directly JSON-serializable.
+    /// Which Responses backend the request is for. The ChatGPT-account Codex
+    /// endpoint rejects output-token and sampling controls (upstream's OAuth
+    /// payload transform removes them); the public Responses API
+    /// (`.openResponses`, the "OpenAI" preset) takes them (upstream
+    /// `toOpenResponsesRequest`).
+    enum Target: Equatable {
+        case codex
+        case openAI
+    }
+
     static func makeRequest(
         chatCompletions: [String: Any],
-        responsesLiteSessionId: String? = nil
+        responsesLiteSessionId: String? = nil,
+        target: Target = .codex,
+        codexSessionId: String? = nil,
+        promptCacheKey: String? = nil
     ) throws -> [String: Any] {
-        let supportedKeys: Set<String> = [
+        var supportedKeys: Set<String> = [
             "model", "messages", "stream", "max_tokens", "max_completion_tokens",
             "tools", "tool_choice", "reasoning_effort", "reasoning",
         ]
+        if target == .openAI { supportedKeys.formUnion(["temperature", "top_p", "response_format"]) }
         for key in chatCompletions.keys where !supportedKeys.contains(key) {
             throw Error.unsupportedInput("field \"\(key)\"")
         }
@@ -142,9 +164,30 @@ enum IntelCodexResponsesAdapter {
         }
         // ChatGPT-account Codex rejects output-token controls on this endpoint.
         // Accept them from the shared request shape but intentionally omit them,
-        // matching upstream's OAuth payload transform.
+        // matching upstream's OAuth payload transform. The public Responses API
+        // takes them (upstream `toOpenResponsesRequest`, stage 5d row 12).
+        if target == .openAI {
+            if let limit = chatCompletions["max_completion_tokens"] ?? chatCompletions["max_tokens"] {
+                guard let integer = limit as? Int, integer > 0 else {
+                    throw Error.invalidInput("max_tokens must be a positive integer")
+                }
+                payload["max_output_tokens"] = integer
+            }
+            if let temperature = chatCompletions["temperature"] { payload["temperature"] = temperature }
+            if let topP = chatCompletions["top_p"] { payload["top_p"] = topP }
+            if let format = chatCompletions["response_format"] as? [String: Any],
+                (format["type"] as? String) == "json_object"
+            {
+                // Only `json_object` is carried, as upstream does.
+                payload["text"] = ["format": ["type": "json_object"]]
+            }
+            if let promptCacheKey, !promptCacheKey.isEmpty { payload["prompt_cache_key"] = promptCacheKey }
+        }
         if let tools = chatCompletions["tools"] {
-            payload["tools"] = try convertTools(tools)
+            let converted = try convertTools(tools)
+            payload["tools"] = converted
+            // Upstream: parallel calls are on whenever tools are offered.
+            if !converted.isEmpty { payload["parallel_tool_calls"] = true }
         }
         if let choice = chatCompletions["tool_choice"] {
             payload["tool_choice"] = try convertToolChoice(choice)
@@ -179,29 +222,113 @@ enum IntelCodexResponsesAdapter {
             payload["reasoning"] = codexReasoning
         }
 
+        // Upstream `toCodexOAuthPayloadData`: every Codex request (Lite or not)
+        // carries its conversation session as the prompt-cache key and in
+        // `client_metadata.x-codex-turn-metadata`.
+        if target == .codex, let sessionId = responsesLiteSessionId ?? codexSessionId {
+            payload["prompt_cache_key"] = sessionId
+            let turnMetadata = try JSONSerialization.data(
+                withJSONObject: ["session_id": sessionId, "thread_id": sessionId, "request_kind": "turn"],
+                options: .osaurusCanonical)
+            var clientMetadata = payload["client_metadata"] as? [String: Any] ?? [:]
+            clientMetadata["x-codex-turn-metadata"] = String(decoding: turnMetadata, as: UTF8.self)
+            payload["client_metadata"] = clientMetadata
+        }
+
         if let responsesLiteSessionId {
-            let tools = payload["tools"] as? [Any] ?? []
+            // Responses Lite carries tool declarations and base instructions as
+            // developer input items. Tools sit in a `functions` namespace and
+            // stay type-tagged (upstream #2562 / #2565: the backend 400s on
+            // `input[0].tools[0].tools[0].type` when the tag is missing).
+            let functionTools = (payload["tools"] as? [[String: Any]] ?? []).map { tool -> [String: Any] in
+                var nested = tool
+                nested["type"] = "function"
+                return nested
+            }
+            let tools: [Any] =
+                functionTools.isEmpty
+                ? []
+                : [["type": "namespace", "name": "functions", "description": "", "tools": functionTools] as [String: Any]]
+            let toolsData = try JSONSerialization.data(withJSONObject: tools, options: .osaurusCanonical)
             var prefix: [[String: Any]] = [
-                ["type": "additional_tools", "role": "developer", "tools": tools]
+                [
+                    "id": stableResponsesItemID(
+                        prefix: "at_",
+                        source: responsesLiteSessionId + "|additional-tools|" + String(decoding: toolsData, as: UTF8.self)),
+                    "type": "additional_tools",
+                    "role": "developer",
+                    "tools": tools,
+                ]
             ]
             if let instructions = payload["instructions"] as? String, !instructions.isEmpty {
                 prefix.append([
+                    "id": stableResponsesItemID(
+                        prefix: "msg_", source: responsesLiteSessionId + "|instructions|" + instructions),
                     "type": "message",
                     "role": "developer",
                     "content": [["type": "input_text", "text": instructions]],
+                    "internal_chat_message_metadata_passthrough": ["content_item_kinds": ["model.base_instructions"]],
                 ])
             }
-            payload["input"] = prefix + input
+            payload["input"] = strippingImageDetail(from: prefix + input)
             payload.removeValue(forKey: "tools")
             payload.removeValue(forKey: "instructions")
             payload["tool_choice"] = "auto"
             payload["parallel_tool_calls"] = false
-            payload["prompt_cache_key"] = responsesLiteSessionId
             var reasoning = payload["reasoning"] as? [String: Any] ?? [:]
             reasoning["context"] = "all_turns"
             payload["reasoning"] = reasoning
         }
         return payload
+    }
+
+    /// Stable provider item id derived from a logical call/prefix identity
+    /// (upstream `RemoteChatRequest.stableResponsesItemID`): random ids make a
+    /// byte-identical conversation miss remote prompt caches on every retry.
+    static func stableResponsesItemID(prefix: String, source: String) -> String {
+        let digest = SHA256.hash(data: Data(source.utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return prefix + String(hex.prefix(32))
+    }
+
+    /// Responses Lite does not accept the public API's image `detail` hint.
+    /// Removed recursively from input images, tool outputs included
+    /// (upstream `strippingImageDetail`).
+    static func strippingImageDetail(from value: Any) -> Any {
+        if let array = value as? [Any] { return array.map { strippingImageDetail(from: $0) } }
+        guard var dictionary = value as? [String: Any] else { return value }
+        if dictionary["type"] as? String == "input_image" { dictionary.removeValue(forKey: "detail") }
+        for (key, nested) in dictionary { dictionary[key] = strippingImageDetail(from: nested) }
+        return dictionary
+    }
+
+    /// Upstream `isStrictResponsesToolSchema`: OpenAI strict function schemas
+    /// need every object property listed in `required` and
+    /// `additionalProperties: false`, recursively. False for an incomplete
+    /// schema, so the request asks for best-effort validation rather than
+    /// claiming a contract the provider would reject.
+    static func isStrictResponsesToolSchema(_ schema: Any?) -> Bool {
+        func isFalse(_ value: Any?) -> Bool {
+            guard let number = value as? NSNumber else { return false }
+            return CFGetTypeID(number) == CFBooleanGetTypeID() && !number.boolValue
+        }
+        func isStrict(_ value: Any) -> Bool {
+            guard let object = value as? [String: Any] else { return true }
+            let isObjectType = (object["type"] as? String) == "object"
+            if isObjectType || object["properties"] != nil {
+                guard isFalse(object["additionalProperties"]) else { return false }
+                let properties = object["properties"] as? [String: Any] ?? [:]
+                let required = Set((object["required"] as? [Any] ?? []).compactMap { $0 as? String })
+                guard required == Set(properties.keys), properties.values.allSatisfy({ isStrict($0) }) else { return false }
+            }
+            if let items = object["items"], !isStrict(items) { return false }
+            for key in ["anyOf", "oneOf", "allOf"] {
+                if let alternatives = object[key] as? [Any], !alternatives.allSatisfy({ isStrict($0) }) { return false }
+            }
+            return true
+        }
+        guard let root = schema as? [String: Any], (root["type"] as? String) == "object" else { return false }
+        return isStrict(root)
     }
 
     private static func messageItem(role: String, content: String, contentType: String) -> [String: Any] {
@@ -238,7 +365,12 @@ enum IntelCodexResponsesAdapter {
             try validateKeys(function, allowed: ["name", "description", "parameters", "strict"], path: "tools[\(index)].function")
             guard let name = nonEmptyString(function["name"]) else { throw Error.invalidInput("tools[\(index)].function.name must be a non-empty string") }
             var converted: [String: Any] = ["type": "function", "name": name]
-            for key in ["description", "parameters", "strict"] where function[key] != nil { converted[key] = function[key] }
+            for key in ["description", "parameters"] where function[key] != nil { converted[key] = function[key] }
+            // Upstream: an explicit opt-out wins; an opt-in is still gated on
+            // the schema so a strict contract is never claimed that the
+            // provider would reject.
+            converted["strict"] =
+                (function["strict"] as? Bool) == false ? false : isStrictResponsesToolSchema(function["parameters"])
             return converted
         }
     }
@@ -383,6 +515,7 @@ struct IntelCodexResponsesSSEDecoder {
     private var pendingTools: [Int: PendingTool] = [:]
     private var emittedText: [String: String] = [:]
     private var emittedReasoning: [String: String] = [:]
+    private var refusalText = ""
     private var completed: IntelCodexResponsesCompletion?
 
     init(allowedToolNames: Set<String>) {
@@ -506,6 +639,13 @@ struct IntelCodexResponsesSSEDecoder {
         case "response.failed", "response.incomplete", "error":
             throw IntelCodexResponsesAdapter.Error.terminalFailure(terminalMessage(event, type: type))
 
+        case "response.refusal.delta":
+            if let delta = event["delta"] as? String { refusalText += delta }
+
+        case "response.refusal.done":
+            if let refusal = event["refusal"] as? String, !refusal.isEmpty { refusalText = refusal }
+            throw IntelCodexResponsesAdapter.Error.refusal(refusalText)
+
         case "response.output_text.done":
             let text = try requiredString(event, key: "text", context: type)
             let key = "\(try requiredIndex(event, context: type)):\(try requiredInteger(event, key: "content_index", context: type))"
@@ -526,14 +666,17 @@ struct IntelCodexResponsesSSEDecoder {
             break
 
         default:
-            // Unknown protocol events can carry undisclosed tool-capable output;
-            // rejecting them is safer than allowing a later function call through.
-            throw IntelCodexResponsesAdapter.Error.unsupportedOutput("event type \"\(type)\"")
+            // Upstream `handleOpenResponsesEvent` ignores event types it does not
+            // know (web-search progress, new OpenAI events). Nothing runs from an
+            // ignored event: a tool call executes only from a completed
+            // `function_call` item whose name the request offered.
+            break
         }
     }
 
     private mutating func complete(_ event: [String: Any], emissions: inout [String]) throws {
         guard completed == nil else { throw IntelCodexResponsesAdapter.Error.malformedEvent("duplicate response.completed") }
+        if !refusalText.isEmpty { throw IntelCodexResponsesAdapter.Error.refusal(refusalText) }
         let response = try requiredObject(event, key: "response", context: "response.completed")
         guard response["status"] as? String == "completed" else {
             throw IntelCodexResponsesAdapter.Error.terminalFailure("response.completed carried status \"\(response["status"] as? String ?? "missing")\"")
@@ -581,7 +724,9 @@ struct IntelCodexResponsesSSEDecoder {
             }
             pendingTools[outputIndex] = pending
         default:
-            throw IntelCodexResponsesAdapter.Error.unsupportedOutput("output item type \"\(kind)\"")
+            // Unknown item kinds (web-search calls, ...) are kept verbatim for
+            // replay and never executed (upstream keeps every item generically).
+            return
         }
     }
 
@@ -599,10 +744,11 @@ struct IntelCodexResponsesSSEDecoder {
             throw IntelCodexResponsesAdapter.Error.malformedEvent("message output item needs content array")
         }
         for (contentIndex, part) in content.enumerated() {
-            guard part["type"] as? String == "output_text" else {
-                let type = part["type"] as? String ?? "missing"
-                throw IntelCodexResponsesAdapter.Error.unsupportedOutput("message content type \"\(type)\"")
+            if part["type"] as? String == "refusal" {
+                // Upstream `openResponsesRefusal`: surfaced as an error, not text.
+                throw IntelCodexResponsesAdapter.Error.refusal((part["refusal"] as? String) ?? "")
             }
+            guard part["type"] as? String == "output_text" else { continue }
             guard capture, let text = part["text"] as? String else {
                 if capture { throw IntelCodexResponsesAdapter.Error.malformedEvent("completed output_text needs text") }
                 continue

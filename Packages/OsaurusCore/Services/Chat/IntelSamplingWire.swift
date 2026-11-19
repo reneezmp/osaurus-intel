@@ -126,6 +126,7 @@ enum IntelSamplingWire {
         wire: Wire,
         rejectsSamplers: Bool,
         providerLabel: String,
+        sendsResponsesSamplers: Bool = false,
         into body: inout [String: Any]
     ) throws {
         guard let sampling, !sampling.isEmpty else { return }
@@ -142,9 +143,17 @@ enum IntelSamplingWire {
         guard unsupported.isEmpty else {
             throw Unsupported(provider: providerLabel, names: unsupported)
         }
-        // The Responses adapter accepts no sampling keys; temperature and
-        // Top P are dropped there (soft), everything else already threw.
-        if wire == .responses { return }
+        // The Codex Responses adapter accepts no sampling keys; temperature and
+        // Top P are dropped there (soft), everything else already threw. The
+        // public Responses API (`.openResponses`) takes both for non-reasoning
+        // models (upstream `toOpenResponsesRequest`).
+        if wire == .responses {
+            if sendsResponsesSamplers {
+                if let value = effective.temperature { body["temperature"] = value }
+                if let value = effective.topP { body["top_p"] = value }
+            }
+            return
+        }
 
         if let value = effective.temperature { body["temperature"] = value }
         if let value = effective.topP { body["top_p"] = value }

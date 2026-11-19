@@ -83,6 +83,178 @@ struct IntelCodexResponsesAdapterTests {
         #expect(input[0]["role"] as? String == "developer")
         #expect(input[1]["role"] as? String == "developer")
         #expect(input[2]["role"] as? String == "user")
+        // Upstream shape (#2562 / #2565): namespace-wrapped, type-tagged tools,
+        // stable ids, base-instructions metadata, turn metadata.
+        let tools = try #require(input[0]["tools"] as? [[String: Any]])
+        #expect(tools.count == 1)
+        #expect(tools[0]["type"] as? String == "namespace")
+        #expect(tools[0]["name"] as? String == "functions")
+        let nested = try #require(tools[0]["tools"] as? [[String: Any]])
+        #expect(nested.first?["type"] as? String == "function")
+        #expect(nested.first?["name"] as? String == "list_knowledge")
+        #expect((input[0]["id"] as? String)?.hasPrefix("at_") == true)
+        #expect((input[1]["id"] as? String)?.hasPrefix("msg_") == true)
+        #expect(
+            (input[1]["internal_chat_message_metadata_passthrough"] as? [String: Any])?["content_item_kinds"] as? [String]
+                == ["model.base_instructions"])
+        let metadata = try #require((payload["client_metadata"] as? [String: Any])?["x-codex-turn-metadata"] as? String)
+        let turn = try #require(JSONSerialization.jsonObject(with: Data(metadata.utf8)) as? [String: String])
+        #expect(turn == ["session_id": "0198f2ab-7b38-7a11-88ba-123456789abc",
+                         "thread_id": "0198f2ab-7b38-7a11-88ba-123456789abc", "request_kind": "turn"])
+    }
+
+    @Test func liteIdsAreStableAndImageDetailIsStripped() throws {
+        let body: [String: Any] = [
+            "model": "gpt-5.6-luna",
+            "messages": [
+                ["role": "system", "content": "Be exact."],
+                ["role": "user", "content": [
+                    ["type": "text", "text": "look"],
+                    ["type": "image_url", "image_url": ["url": "data:image/png;base64,AA==", "detail": "high"]],
+                ]],
+            ],
+            "tools": [["type": "function", "function": ["name": "t", "parameters": ["type": "object"]]]],
+        ]
+        let a = try IntelCodexResponsesAdapter.makeRequest(chatCompletions: body, responsesLiteSessionId: "s1")
+        let b = try IntelCodexResponsesAdapter.makeRequest(chatCompletions: body, responsesLiteSessionId: "s1")
+        let ida = (a["input"] as? [[String: Any]])?.map { $0["id"] as? String }
+        let idb = (b["input"] as? [[String: Any]])?.map { $0["id"] as? String }
+        #expect(ida == idb)
+        let other = try IntelCodexResponsesAdapter.makeRequest(chatCompletions: body, responsesLiteSessionId: "s2")
+        let otherFirst = (other["input"] as? [[String: Any]])?.first?["id"] as? String
+        #expect(otherFirst != nil && otherFirst != ida?.first ?? nil)
+        let image = ((a["input"] as? [[String: Any]])?.last?["content"] as? [[String: Any]])?.last
+        #expect(image?["type"] as? String == "input_image")
+        #expect(image?["detail"] == nil)
+        #expect(image?["image_url"] as? String == "data:image/png;base64,AA==")
+    }
+
+    @Test func nonLiteCodexCarriesSessionCacheKeyAndMetadataButKeepsTopLevelTools() throws {
+        let payload = try IntelCodexResponsesAdapter.makeRequest(
+            chatCompletions: [
+                "model": "gpt-5.5", "max_tokens": 100,
+                "messages": [["role": "user", "content": "Hi"]],
+                "tools": [["type": "function", "function": ["name": "t", "parameters": ["type": "object"]]]],
+            ],
+            codexSessionId: "sess-1")
+        #expect(payload["prompt_cache_key"] as? String == "sess-1")
+        #expect((payload["client_metadata"] as? [String: Any])?["x-codex-turn-metadata"] is String)
+        #expect(payload["max_output_tokens"] == nil)
+        #expect((payload["tools"] as? [[String: Any]])?.first?["type"] as? String == "function")
+        #expect(payload["parallel_tool_calls"] as? Bool == true)
+        let none = try IntelCodexResponsesAdapter.makeRequest(
+            chatCompletions: ["model": "gpt-5.5", "messages": [["role": "user", "content": "Hi"]]])
+        #expect(none["prompt_cache_key"] == nil && none["client_metadata"] == nil)
+        #expect(none["parallel_tool_calls"] == nil)
+    }
+
+    // MARK: Stage 5d slice 3 (rows 9, 10, 12, 13)
+
+    @Test func strictSchemaCheckMatchesUpstream() {
+        let strictSchema: [String: Any] = [
+            "type": "object", "additionalProperties": false, "required": ["a", "b"],
+            "properties": [
+                "a": ["type": "string"],
+                "b": ["type": "object", "additionalProperties": false, "required": ["c"],
+                      "properties": ["c": ["type": "integer"]]],
+            ],
+        ]
+        #expect(IntelCodexResponsesAdapter.isStrictResponsesToolSchema(strictSchema))
+        // Missing `additionalProperties: false`, an unlisted property, a nested
+        // object that is not strict, a nil / non-object root: all non-strict.
+        #expect(!IntelCodexResponsesAdapter.isStrictResponsesToolSchema(["type": "object", "properties": [:]]))
+        var missingRequired = strictSchema
+        missingRequired["required"] = ["a"]
+        #expect(!IntelCodexResponsesAdapter.isStrictResponsesToolSchema(missingRequired))
+        var nested = strictSchema
+        nested["properties"] = ["a": ["type": "object", "properties": ["c": ["type": "string"]]]]
+        nested["required"] = ["a"]
+        #expect(!IntelCodexResponsesAdapter.isStrictResponsesToolSchema(nested))
+        #expect(!IntelCodexResponsesAdapter.isStrictResponsesToolSchema(nil))
+        #expect(!IntelCodexResponsesAdapter.isStrictResponsesToolSchema(["type": "string"]))
+        // An `anyOf` alternative that is not strict breaks it; `items` too.
+        var anyOf = strictSchema
+        anyOf["anyOf"] = [["type": "object", "properties": [:]]]
+        #expect(!IntelCodexResponsesAdapter.isStrictResponsesToolSchema(anyOf))
+        var items = strictSchema
+        items["properties"] = ["a": ["type": "array", "items": ["type": "object", "properties": [:]]]]
+        items["required"] = ["a"]
+        #expect(!IntelCodexResponsesAdapter.isStrictResponsesToolSchema(items))
+    }
+
+    @Test func toolsCarryStrictByTheSchemaCheckAndAnExplicitOptOutWins() throws {
+        let strictSchema: [String: Any] = [
+            "type": "object", "additionalProperties": false, "required": ["a"], "properties": ["a": ["type": "string"]],
+        ]
+        let payload = try IntelCodexResponsesAdapter.makeRequest(
+            chatCompletions: [
+                "model": "gpt-5.5", "messages": [["role": "user", "content": "Hi"]],
+                "tools": [
+                    ["type": "function", "function": ["name": "strict_one", "parameters": strictSchema]],
+                    ["type": "function", "function": ["name": "loose_one", "parameters": ["type": "object", "properties": [:]]]],
+                    ["type": "function", "function": ["name": "opt_out", "parameters": strictSchema, "strict": false]],
+                    ["type": "function", "function": ["name": "opt_in_loose", "parameters": ["type": "object"], "strict": true]],
+                ],
+            ])
+        let tools = try #require(payload["tools"] as? [[String: Any]])
+        #expect(tools.map { $0["strict"] as? Bool } == [true, false, false, false])
+    }
+
+    @Test func openAITargetSendsLimitsSamplingJSONModeAndCacheKey() throws {
+        let payload = try IntelCodexResponsesAdapter.makeRequest(
+            chatCompletions: [
+                "model": "gpt-4.1", "max_tokens": 777, "temperature": 0.3, "top_p": 0.9,
+                "response_format": ["type": "json_object"],
+                "messages": [["role": "user", "content": "Hi"]],
+                "tools": [["type": "function", "function": ["name": "t", "parameters": ["type": "object"]]]],
+            ],
+            target: .openAI, promptCacheKey: "osaurus-session-abc")
+        #expect(payload["max_output_tokens"] as? Int == 777)
+        #expect(payload["temperature"] as? Double == 0.3)
+        #expect(payload["top_p"] as? Double == 0.9)
+        #expect(((payload["text"] as? [String: Any])?["format"] as? [String: Any])?["type"] as? String == "json_object")
+        #expect(payload["prompt_cache_key"] as? String == "osaurus-session-abc")
+        #expect(payload["parallel_tool_calls"] as? Bool == true)
+        #expect(payload["client_metadata"] == nil)
+        // No limit asked: none sent. text.format only for json_object.
+        let bare = try IntelCodexResponsesAdapter.makeRequest(
+            chatCompletions: ["model": "gpt-4.1", "response_format": ["type": "text"],
+                              "messages": [["role": "user", "content": "Hi"]]],
+            target: .openAI)
+        #expect(bare["max_output_tokens"] == nil && bare["text"] == nil && bare["parallel_tool_calls"] == nil)
+        #expect(bare["prompt_cache_key"] == nil)
+    }
+
+    @Test func refusalEventsAndContentPartsSurfaceAsAnError() throws {
+        var streamed = IntelCodexResponsesSSEDecoder(allowedToolNames: [])
+        _ = try streamed.append(Data("data: {\"type\":\"response.refusal.delta\",\"delta\":\"I can't \"}\n\n".utf8))
+        #expect(throws: IntelCodexResponsesAdapter.Error.refusal("I can't help")) {
+            try streamed.append(Data("data: {\"type\":\"response.refusal.done\",\"refusal\":\"I can't help\"}\n\n".utf8))
+        }
+        #expect(IntelCodexResponsesAdapter.Error.refusal("no").errorDescription == "OpenAI refused this request: no")
+        #expect(IntelCodexResponsesAdapter.Error.refusal("").errorDescription?.contains("no explanation") == true)
+
+        var completed = IntelCodexResponsesSSEDecoder(allowedToolNames: [])
+        let frame = "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"refusal\",\"refusal\":\"Not allowed\"}]}]}}\n\n"
+        #expect(throws: IntelCodexResponsesAdapter.Error.refusal("Not allowed")) {
+            try completed.append(Data(frame.utf8))
+        }
+    }
+
+    @Test func unknownEventsAndContentPartsAreIgnored() throws {
+        var decoder = IntelCodexResponsesSSEDecoder(allowedToolNames: [])
+        let frames = [
+            "data: {\"type\":\"response.web_search_call.searching\",\"output_index\":0}\n\n",
+            "data: {\"type\":\"response.some_future_event\",\"x\":1}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"web_search_call\",\"id\":\"ws_1\"},{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"},{\"type\":\"annotation_blob\"}]}]}}\n\n",
+        ]
+        var emissions: [String] = []
+        for frame in frames { emissions += try decoder.append(Data(frame.utf8)) }
+        let final = try decoder.finish()
+        emissions += final.emissions
+        #expect(emissions == ["ok"])
+        #expect(final.completion.outputItems.count == 2)
+        #expect(final.completion.toolCalls.isEmpty)
     }
 
     @Test func replaysAssistantTextAsOutputAndNewUserTextAsInput() throws {
@@ -159,11 +331,11 @@ struct IntelCodexResponsesAdapterTests {
         _ = try noTerminal.append(Data("data: {\"type\":\"response.created\"}\n\n".utf8))
         #expect(throws: IntelCodexResponsesAdapter.Error.incompleteStream) { try noTerminal.finish() }
 
+        // Upstream ignores event and item kinds it does not know (stage 5d row 10);
+        // an unknown item is kept for replay and never executed.
         var decoder = IntelCodexResponsesSSEDecoder(allowedToolNames: [])
-        let unknown = "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"computer_call\"}}\n\n"
-        #expect(throws: IntelCodexResponsesAdapter.Error.unsupportedOutput("output item type \"computer_call\"")) {
-            try decoder.append(Data(unknown.utf8))
-        }
+        let unknown = "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"web_search_call\"}}\n\n"
+        #expect(try decoder.append(Data(unknown.utf8)).isEmpty)
     }
 
     @Test func emitsAuthoritativeCompletedTextWhenNoDeltaArrived() throws {

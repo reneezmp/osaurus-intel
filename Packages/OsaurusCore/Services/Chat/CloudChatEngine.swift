@@ -884,7 +884,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// The resolved HTTP target for a chat request: which URL to POST to and
     /// the auth/extra headers to send.
     private struct ResolvedEndpoint {
-        let url: String
+        var url: String
         var headers: [String: String]
         let providerLabel: String
         let modelId: String
@@ -1343,9 +1343,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         let toolSpecs = Self.encodeTools(request.tools, stripRestrictedTopLevelKeys: toolSchemaStrict)
         let usesResponsesLite = endpoint.isCodex
             && OpenAICodexOAuthService.usesResponsesLite(modelId: endpoint.modelId)
-        let responsesLiteSessionId = usesResponsesLite
+        // Upstream `toCodexOAuthPayloadData`: every Codex request carries the
+        // conversation's session id (prompt-cache key and turn metadata); only
+        // Responses Lite also sends the affinity headers and the Lite shape.
+        let codexSessionId = endpoint.isCodex
             ? codexResponsesLiteSessionId(for: request.session_id)
             : nil
+        let responsesLiteSessionId = usesResponsesLite ? codexSessionId : nil
 
         NSLog("[CloudChatEngine] Starting streamChat — model=\(resolvedModel), via=\(endpoint.providerLabel), messages=\(request.messages.count), tools=\(request.tools?.count ?? 0)")
 
@@ -1375,6 +1379,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
         return AsyncThrowingStream { continuation in
             let task = Task {
+                // Row 11: a host with no /responses endpoint is retried once on
+                // Chat Completions, which swaps this copy's URL and wire.
+                var endpoint = endpoint
+                var usedResponsesFallback = false
                 let inferenceStartedAt = Date()
                 let requestBody = Self.serializeRequestForInsights(request)
                 var responseText = ""
@@ -1781,6 +1789,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 usesResponsesWire: endpoint.usesResponsesWire),
                             rejectsSamplers: Self.rejectsSamplingTemperature(modelId: endpoint.modelId),
                             providerLabel: endpoint.providerLabel,
+                            sendsResponsesSamplers: endpoint.usesResponsesWire && !endpoint.isCodex,
                             into: &body)
                         if let liveToolSpecs {
                             body["tools"] = liveToolSpecs
@@ -1807,9 +1816,32 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 // default effort (upstream #3229).
                                 body["reasoning"] = ["summary": "auto"]
                             }
+                            if !endpoint.isCodex {
+                                // Upstream `toOpenResponsesRequest`: the cap goes out as
+                                // `max_output_tokens`.
+                                if let maxTokens = Self.streamMaxTokens(
+                                    requested: request.max_tokens, isOsaurusRouter: false,
+                                    providerType: endpoint.provider?.providerType)
+                                {
+                                    body["max_tokens"] = maxTokens
+                                }
+                                // `text.format` (JSON mode): Intel's ChatCompletionRequest has no
+                                // `response_format` yet (stage 5d slice 6, row 22 adds it); the
+                                // adapter already maps `response_format` once the engine passes it.
+                            }
+                            // Session-scoped prompt-cache routing for the OpenAI preset
+                            // (openai.com only, as upstream's `supportsPromptCacheKey`).
+                            var cacheRouting: [String: Any] = [:]
+                            if !endpoint.isCodex {
+                                Self.applyPromptCacheRouting(
+                                    provider: endpoint.provider, sessionId: request.session_id, into: &cacheRouting)
+                            }
                             body = try IntelCodexResponsesAdapter.makeRequest(
                                 chatCompletions: body,
-                                responsesLiteSessionId: responsesLiteSessionId
+                                responsesLiteSessionId: responsesLiteSessionId,
+                                target: endpoint.isCodex ? .codex : .openAI,
+                                codexSessionId: codexSessionId,
+                                promptCacheKey: cacheRouting["prompt_cache_key"] as? String
                             )
                             var input = body["input"] as? [[String: Any]] ?? []
                             input.append(contentsOf: codexReplayItems)
@@ -1819,6 +1851,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     "type": "message", "role": "user",
                                     "content": [["type": "input_text", "text": roundNotices.joined(separator: "\n")]],
                                 ])
+                            }
+                            if responsesLiteSessionId != nil,
+                                let stripped = IntelCodexResponsesAdapter.strippingImageDetail(from: input) as? [[String: Any]]
+                            {
+                                // Lite rejects the public API's image `detail` hint,
+                                // including on replayed items and tool outputs.
+                                input = stripped
                             }
                             body["input"] = input
                         } else {
@@ -1961,6 +2000,28 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     provider: endpoint.providerLabel, model: endpoint.modelId)
                                 wireMessages = IntelImageInputFallback.strippingImages(wireMessages)
                                 retriedWithoutImages = true
+                                pendingHarnessNotices = roundNotices
+                                round -= 1
+                                continue
+                            }
+                            // Upstream `RemoteResponsesCapabilityFallback` (row 11): an
+                            // OpenAI-preset host that has no /responses endpoint is
+                            // retried once on Chat Completions. A missing endpoint is
+                            // never billed. Only before any Responses state exists
+                            // (`codexReplayItems` holds Responses-native items the chat
+                            // wire cannot replay).
+                            if !usedResponsesFallback, endpoint.provider?.providerType == .openResponses,
+                                !endpoint.isCodex, codexReplayItems.isEmpty,
+                                var fallbackProvider = endpoint.provider,
+                                IntelResponsesCapabilityFallback.isUnsupportedEndpoint(
+                                    status: statusCode, body: Data(errorBody.utf8), endpoint: urlRequest.url),
+                                let chatURL = fallbackProvider.url(for: RemoteProviderType.openaiLegacy.chatEndpoint)
+                            {
+                                NSLog("[CloudChatEngine] \(endpoint.providerLabel) has no /responses endpoint; retrying on Chat Completions")
+                                fallbackProvider.providerType = .openaiLegacy
+                                endpoint.provider = fallbackProvider
+                                endpoint.url = chatURL.absoluteString
+                                usedResponsesFallback = true
                                 pendingHarnessNotices = roundNotices
                                 round -= 1
                                 continue
