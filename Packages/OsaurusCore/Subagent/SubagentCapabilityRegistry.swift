@@ -233,6 +233,16 @@ public enum SubagentCapabilityRegistry {
     /// agent)`). SSOT so the tool, registry gating, and visibility resolver agree.
     public static let spawnAgentToolName = "spawn_agent"
 
+    /// Tools a delegated child (a `.delegation`-sourced chat) never carries
+    /// (upstream composer, W-subagents stage 2): every spawn tool, so a
+    /// helper cannot fan out recursively; `clarify`, because the child's
+    /// requester is the orchestrator model and a user question would strand
+    /// the run until its wall-clock budget; and Intel's Gate 4
+    /// `orchestrator_delegate`, which is a second way to delegate.
+    public static func isExcludedFromDelegatedChild(_ name: String) -> Bool {
+        spawn.toolNames.contains(name) || name == "clarify" || name == "orchestrator_delegate"
+    }
+
     /// The spawn capability — ONE tool, `spawn_agent`, which delegates a task
     /// to a configured agent (its system prompt + model, local or a teammate's
     /// shared workspace agent). Parallelism is "several calls in one message"

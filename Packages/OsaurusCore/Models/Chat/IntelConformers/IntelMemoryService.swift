@@ -108,8 +108,8 @@ public actor MemoryService {
     /// Switching to a different conversation flushes the previous one.
     /// A delegated session (upstream #3210) passes `.delegated`, so the
     /// delegating agent's instructions never write the user's identity.
-    /// Intel has no delegated sessions yet (`W-subagents`); every caller
-    /// uses the `.user` default.
+    /// `ChatSession` passes `.delegated` for a `.delegation` run
+    /// (`W-subagents` stage 2); every other caller uses the `.user` default.
     public func bufferTurn(
         userMessage: String,
         assistantMessage: String?,

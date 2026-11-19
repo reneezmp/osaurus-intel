@@ -182,6 +182,12 @@ struct ChatCompletionRequest: Codable, Sendable {
     /// `maxToolAttempts` for `/agents/{id}/run`); `nil` keeps the engine's
     /// own. Not encoded.
     var maxToolRounds: Int? = nil
+    /// Intel (`W-subagents`, upstream `DelegatedRunContract.contextPositions`):
+    /// a delegated child's context-window ceiling. The engine trims history to
+    /// the tighter of this and the model's window, every round, so the ceiling
+    /// holds even when tool results grow the transcript. `nil` for every other
+    /// run. Not encoded.
+    var contextPositionCap: Int? = nil
     /// Intel: the chat's tool-free status step after the step limit
     /// (upstream streams it outside its loop driver), so the engine's
     /// terminal recovery stays off and a blank reply gets the chat's own

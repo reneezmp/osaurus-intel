@@ -305,6 +305,24 @@ final class ChatSession: ObservableObject {
     /// (plugin / HTTP / scheduler / watcher) runs, defaults to `.chat` for
     /// user-driven UI sessions.
     var source: SessionSource = .chat
+    /// Enforced delegation budget for `.delegation`-dispatched sessions
+    /// (upstream Classic; W-subagents stage 2): per-generation response-token
+    /// cap, tool-loop attempt cap and context-position cap. Set once by
+    /// `ExecutionContext` from the `DispatchRequest`; nil for every ordinary
+    /// chat. Tighten-only: it can lower a limit, never raise one.
+    var delegationBudget: DelegatedRunContract?
+    /// The exact model the delegation was admitted with. Request-scoped; it
+    /// is never an agent preference and wins over the agent's default.
+    var delegationModel: String?
+
+    /// Terminal tool rejection of the current run, for the delegation
+    /// dispatcher (see `DelegatedToolFailureState`).
+    var delegatedToolFailure = DelegatedToolFailureState()
+
+    private var admittedDelegationModel: String? {
+        guard source == .delegation else { return nil }
+        return delegationModel
+    }
     var sourcePluginId: String?
     var externalSessionKey: String?
     var dispatchTaskId: UUID?
@@ -821,10 +839,22 @@ final class ChatSession: ObservableObject {
     /// stays as the fallback when the agent's default isn't available yet
     /// (remote catalog still loading, model uninstalled). Never touches
     /// window chats (`source == .chat`), where a manual pick must survive.
-    /// Upstream #2232; Intel: no delegated-model admission (`W-subagents`),
-    /// and Intel's `resolvePickerModel` stands in for `resolvePickerModelId`.
+    /// Upstream #2232; a delegation's admitted model wins (`W-subagents`
+    /// stage 2), and Intel's `resolvePickerModel` stands in for `resolvePickerModelId`.
     func applyAgentDefaultModelForDispatch() {
         guard source != .chat else { return }
+        if let admitted = admittedDelegationModel {
+            // A delegation runs on exactly the model admission approved (on
+            // Intel: Gate 4's admitted cloud model). An unavailable target is
+            // preserved for the runtime's ordinary error, never swapped for
+            // another model (upstream Classic).
+            isLoadingModel = true
+            selectedModel = Self.resolvePickerModel(admitted, among: pickerItems) ?? admitted
+            loadActiveModelOptions(for: selectedModel)
+            applyImageModelDefaults(for: selectedModel)
+            isLoadingModel = false
+            return
+        }
         guard
             let configured = AgentManager.shared.effectiveModel(for: agentId ?? Agent.defaultId),
             let model = Self.resolvePickerModel(configured, among: pickerItems),
@@ -849,13 +879,19 @@ final class ChatSession: ObservableObject {
         // Options changed (e.g., remote models loaded) - re-check agent's preferred model.
         // This corrects the initial fallback to "foundation" when remote models weren't yet available.
         let effectiveModel = AgentManager.shared.effectiveModel(for: agentId ?? Agent.defaultId)
-        let newSelected = Self.modelAfterDiscovery(
-            manual: lastManualModelSelection,
-            restored: source == .chat ? restoredWindowModelSelection : nil,
-            agentDefault: effectiveModel,
-            previous: selectedModel,
-            among: newOptions
-        )
+        let newSelected: String?
+        if let admitted = admittedDelegationModel {
+            // Admitted delegation model wins over every other selection.
+            newSelected = Self.resolvePickerModel(admitted, among: newOptions) ?? admitted
+        } else {
+            newSelected = Self.modelAfterDiscovery(
+                manual: lastManualModelSelection,
+                restored: source == .chat ? restoredWindowModelSelection : nil,
+                agentDefault: effectiveModel,
+                previous: selectedModel,
+                among: newOptions
+            )
+        }
 
         pickerItems = newOptions
         isLoadingModel = true
@@ -2685,6 +2721,11 @@ final class ChatSession: ObservableObject {
         /// the project namespace additively, they don't replace the
         /// agent's own.
         let projectId: UUID?
+        /// The session's source, captured at run start (upstream): a
+        /// `.delegation` run buffers its turn with delegated provenance so
+        /// the orchestrating agent's instructions never write the user's
+        /// identity into the target agent's memory.
+        let memorySource: SessionSource
     }
 
     private func isRunActive(_ runId: UUID) -> Bool {
@@ -2799,6 +2840,7 @@ final class ChatSession: ObservableObject {
     }
 
     private func beginRun(_ runId: UUID, context: RunContext) {
+        delegatedToolFailure.begin(runID: runId)
         activeRunId = runId
         activeRunContext = context
     }
@@ -2916,6 +2958,7 @@ final class ChatSession: ObservableObject {
             return
         }
 
+        delegatedToolFailure.finish(runID: runId)
         let context = activeRunContext
         // Upstream #2388: a user Stop is recorded as `cancelled` on the turn
         // it interrupted, so the saved transcript doesn't read as a reply
@@ -3098,7 +3141,8 @@ final class ChatSession: ObservableObject {
                     conversationId: context.memoryConversationId,
                     sessionDate: today,
                     projectId: context.projectId,
-                    personalMemoryEnabled: !memoryOff
+                    personalMemoryEnabled: !memoryOff,
+                    provenance: context.memorySource == .delegation ? .delegated : .user
                 )
             }
         }
@@ -3498,7 +3542,8 @@ final class ChatSession: ObservableObject {
                 userContent: trimmed,
                 memoryAgentId: memoryAgentId,
                 memoryConversationId: memoryConversationId,
-                projectId: projectId
+                projectId: projectId,
+                memorySource: source
             )
         )
 
@@ -3516,7 +3561,11 @@ final class ChatSession: ObservableObject {
             topP: ChatConfigurationStore.load().topPOverride.map { Float($0) }
         )
 
-        currentTask = Task { @MainActor [weak self] in
+        // Upstream Classic rebinds `currentSessionSource` from the persisted
+        // session on every turn: the composer strips every spawn tool from a
+        // `.delegation` child, and tool bodies inherit the binding from this
+        // Task's creation. (W-subagents stage 2.)
+        currentTask = ChatExecutionContext.$currentSessionSource.withValue(self.source) { Task { @MainActor [weak self] in
             guard let self else { return }
             guard self.isRunActive(runId) else {
                 #if OSAURUS_INTEL
@@ -3749,7 +3798,14 @@ final class ChatSession: ObservableObject {
 
                 budgetTracker.snapshot(context: context)
 
-                let effectiveMaxTokensForAgent = AgentManager.shared.effectiveMaxTokens(for: effectiveAgentId)
+                var effectiveMaxTokensForAgent = AgentManager.shared.effectiveMaxTokens(for: effectiveAgentId)
+                if let delegationBudget = self.delegationBudget {
+                    // Delegated child: the contract's per-generation response
+                    // ceiling is ENFORCED here. Tighten-only (upstream Classic).
+                    effectiveMaxTokensForAgent = delegationBudget
+                        .clampedResponseTokens(agentConfigured: effectiveMaxTokensForAgent)
+                }
+                let delegatedContextPositions = self.delegationBudget?.contextPositions
 
                 /// Convert a single turn to a ChatMessage (returns nil if should be skipped)
                 @MainActor
@@ -3835,7 +3891,12 @@ final class ChatSession: ObservableObject {
                     return msgs
                 }
 
-                let maxAttempts = max(chatCfg.maxToolAttempts ?? 15, 1)
+                var maxAttempts = max(chatCfg.maxToolAttempts ?? 15, 1)
+                if let delegationBudget = self.delegationBudget {
+                    // Delegated child: the contract's turn ceiling is ENFORCED
+                    // here. Tighten-only (upstream Classic).
+                    maxAttempts = delegationBudget.clampedToolAttempts(surfaceConfigured: maxAttempts)
+                }
                 let toolBudgetWarningThreshold = 3
                 var attempts = 0
                 var reachedToolLimit = false
@@ -3934,6 +3995,8 @@ final class ChatSession: ObservableObject {
                     // what is left of Max Tool Attempts (upstream's
                     // `maxIterations`); it used to stop at its own default of 12.
                     req.maxToolRounds = max(1, maxAttempts - attempts + 1)
+                    // Delegated child: the engine trims history to this window.
+                    req.contextPositionCap = delegatedContextPositions
                     debugLog(
                         "send: attempt=\(attempts) model=\(req.model) tools=\(req.tools?.count ?? 0) sessionId=\(req.session_id ?? "nil")"
                     )
@@ -4398,6 +4461,7 @@ final class ChatSession: ObservableObject {
                             finalReq.samplingParametersAreImplicit = true
                             turnGenerationControls.apply(to: &finalReq)
                             finalReq.isToolFreeWrapUp = true
+                            finalReq.contextPositionCap = delegatedContextPositions
                             finalReq.idempotencyKey = "\(runId.uuidString):final"
                             // The request has no tools; the notice says so, so
                             // the model reports what is unfinished instead of
@@ -4548,7 +4612,7 @@ final class ChatSession: ObservableObject {
                 // now) and remembers the blocked turn for a retry after top-up.
                 noteInsufficientFundsIfNeeded(error: error, blockedTurn: assistantTurn)
             }
-        }
+        } }
     }
 
     /// When a send fails because the router account is out of credits, surface

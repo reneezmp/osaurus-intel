@@ -23,6 +23,16 @@ enum IntelWireHistoryTrim {
     /// neither the model catalog nor the Context Length setting knows it.
     static let fallbackContextWindow = 128_000
 
+    /// The window the per-round trim uses: the tighter of the resolved window
+    /// and a delegated child's enforced position ceiling
+    /// (`DelegatedRunContract.clampedContextWindow`; W-subagents stage 2).
+    /// Tighten-only: a cap above the window changes nothing, and a nil cap
+    /// leaves the resolved window (possibly nil: no trim) untouched.
+    static func effectiveWindow(resolved: Int?, contextPositionCap: Int?) -> Int? {
+        guard let cap = contextPositionCap else { return resolved }
+        return min(resolved ?? .max, max(1, cap))
+    }
+
     /// Upstream `AgentLoopBudget.makeBudgetManager`.
     static func makeBudgetManager(
         contextWindow: Int, systemPromptChars: Int, toolTokens: Int, maxResponseTokens: Int?

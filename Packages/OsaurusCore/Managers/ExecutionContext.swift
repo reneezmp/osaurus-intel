@@ -47,7 +47,9 @@ public final class ExecutionContext: ObservableObject {
         folderPath: String? = nil,
         source: SessionSource = .chat,
         sourcePluginId: String? = nil,
-        externalSessionKey: String? = nil
+        externalSessionKey: String? = nil,
+        delegationBudget: DelegatedRunContract? = nil,
+        delegationModel: String? = nil
     ) {
         self.id = id
         self.agentId = agentId
@@ -66,6 +68,10 @@ public final class ExecutionContext: ObservableObject {
         session.sourcePluginId = sourcePluginId
         session.externalSessionKey = externalSessionKey
         session.dispatchTaskId = id
+        // Delegated runs (upstream `spawn_agent`): the enforced budget and the
+        // admitted model ride the session; both are nil for every other source.
+        session.delegationBudget = delegationBudget
+        session.delegationModel = source == .delegation ? delegationModel : nil
         session.applyInitialModelSelection()
         if let title { session.title = title }
         self.chatSession = session
@@ -82,7 +88,9 @@ public final class ExecutionContext: ObservableObject {
     public init(
         reattaching existing: ChatSessionData,
         folderBookmark: Data? = nil,
-        folderPath: String? = nil
+        folderPath: String? = nil,
+        delegationBudget: DelegatedRunContract? = nil,
+        delegationModel: String? = nil
     ) {
         self.id = existing.id
         self.agentId = existing.agentId ?? Agent.defaultId
@@ -92,6 +100,11 @@ public final class ExecutionContext: ObservableObject {
 
         let session = ChatSession()
         session.agentId = existing.agentId
+        // A resumed delegation (`spawn_agent` `continue`) re-applies the
+        // launcher's enforced contract so the follow-up turn is clamped and
+        // priced exactly like the first one (upstream).
+        session.delegationBudget = delegationBudget
+        session.delegationModel = existing.source == .delegation ? delegationModel : nil
         // Apply identity + history immediately so observers (e.g. the
         // BackgroundTaskState activity feed) see the existing turns from
         // the very first publish.

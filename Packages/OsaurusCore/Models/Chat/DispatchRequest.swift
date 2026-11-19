@@ -59,6 +59,43 @@ public struct DispatchRequest: Sendable {
     /// tool deny list and the `.ask` refusal hold for the whole run.
     public let externalSurface: Bool
 
+    /// True when this dispatch is a TRUE agent delegation (an orchestrating
+    /// agent's `spawn_agent` call). Derived from `source` so there is exactly
+    /// one source of truth (upstream Classic `DispatchRequest`). The
+    /// dispatcher binds the source as `ChatExecutionContext.currentSessionSource`
+    /// for the run, which the composer uses to strip `spawn_*` tools from the
+    /// delegated child so a helper can never fan out recursively.
+    public var isDelegatedRun: Bool { source == .delegation }
+
+    /// Enforced delegation budget for `.delegation` dispatches: the child
+    /// run's per-generation response-token cap, assistant tool-loop turn cap
+    /// and context-position cap, from the launcher's `SubagentBudgets`. nil
+    /// (every other source) leaves the chat surface's normal limits
+    /// untouched. A budget the child is not held to would be fail-open, so
+    /// these are enforced by `ChatSession`.
+    public let delegationResponseTokenCap: Int?
+    public let delegationAssistantTurnCap: Int?
+    public let delegationContextPositionCap: Int?
+    /// Exact model resolved and admitted for this delegated run (Intel: the
+    /// Gate 4 admitted cloud model). Only carried for `.delegation`.
+    public let delegationModel: String?
+
+    /// The enforced delegation contract carried by this request, or nil.
+    /// All three caps must be present to form a contract; a partial contract
+    /// is no contract (upstream).
+    public var delegationContract: DelegatedRunContract? {
+        guard
+            let tokens = delegationResponseTokenCap,
+            let turns = delegationAssistantTurnCap,
+            let positions = delegationContextPositionCap
+        else { return nil }
+        return DelegatedRunContract(
+            responseTokens: tokens,
+            assistantTurns: turns,
+            contextPositions: positions
+        )
+    }
+
     public init(
         id: UUID = UUID(),
         prompt: String,
@@ -74,7 +111,11 @@ public struct DispatchRequest: Sendable {
         reattachSession: Bool = true,
         requestedToolNames: [String] = [],
         allowsBuiltInAgent: Bool = false,
-        externalSurface: Bool = false
+        externalSurface: Bool = false,
+        delegationResponseTokenCap: Int? = nil,
+        delegationContextPositionCap: Int? = nil,
+        delegationAssistantTurnCap: Int? = nil,
+        delegationModel: String? = nil
     ) {
         self.id = id
         self.prompt = prompt
@@ -91,6 +132,10 @@ public struct DispatchRequest: Sendable {
         self.requestedToolNames = requestedToolNames
         self.allowsBuiltInAgent = allowsBuiltInAgent
         self.externalSurface = externalSurface
+        self.delegationResponseTokenCap = delegationResponseTokenCap
+        self.delegationContextPositionCap = delegationContextPositionCap
+        self.delegationAssistantTurnCap = delegationAssistantTurnCap
+        self.delegationModel = source == .delegation ? delegationModel : nil
     }
 }
 

@@ -3012,8 +3012,17 @@ final class SystemPromptComposer: @unchecked Sendable {
                 }
             // Per-agent switches: image / video / AppleScript (kept out of the
             // chain above, which is at the type checker's limit).
+            // Upstream's recursion guard for TRUE agent delegation: a
+            // `.delegation`-sourced session IS a spawned child, so it never
+            // gets a spawn tool (no fan-out, whatever the target's own
+            // spawnable configuration says) and never `clarify` (its
+            // requester is the orchestrator model, not the user). The engine
+            // refuses any call to a tool the request did not offer
+            // (`IntelToolScopeGate`), so this strip also holds at execution.
+            let isDelegatedChild = ChatExecutionContext.currentSessionSource == .delegation
             let allSpecs = chainedSpecs.filter { (spec: Tool) -> Bool in
                 let name = spec.function.name
+                if isDelegatedChild, SubagentCapabilityRegistry.isExcludedFromDelegatedChild(name) { return false }
                 if name == ToolRegistry.imageToolName { return imageEnabled }
                 if name == ToolRegistry.videoToolName { return videoEnabled }
                 if ToolRegistry.appleScriptToolNames.contains(name) { return appleScriptEnabled }

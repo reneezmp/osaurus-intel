@@ -1547,12 +1547,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     // upstream's 128k fallback.
                     // Headless runs trim when they can loop (upstream
                     // `guard maxIterations > 1`).
-                    let trimWindow: Int? =
+                    let resolvedTrimWindow: Int? =
                         (interactiveChatRun || (agentRunRecovery && (request.maxToolRounds ?? 12) > 1))
                         ? await MainActor.run {
                             IntelContextBudget.resolveWindow(modelId: resolvedModel)?.tokens
                         } ?? IntelWireHistoryTrim.fallbackContextWindow
                         : nil
+                    // A delegated child's enforced position ceiling
+                    // (`DelegatedRunContract.clampedContextWindow`, upstream
+                    // Classic): history is trimmed to the tighter window on
+                    // every round, so the ceiling holds as tool results grow.
+                    let trimWindow = IntelWireHistoryTrim.effectiveWindow(
+                        resolved: resolvedTrimWindow, contextPositionCap: request.contextPositionCap)
                     let compactionWatermark = CompactionWatermark()
                     var tokenBudgetNoticeFired = false
                     var codexReplayItems: [[String: Any]] = []

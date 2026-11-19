@@ -134,7 +134,14 @@ public final class BackgroundTaskManager: ObservableObject {
     private var taskObservers: [UUID: Set<AnyCancellable>] = [:]
 
     /// Continuations for callers awaiting task completion (e.g. ScheduleManager)
-    private var completionContinuations: [UUID: CheckedContinuation<DispatchResult, Never>] = [:]
+    /// Value-only terminal metadata is copied while the task still owns its
+    /// live session, so it cannot be lost when cleanup releases that session
+    /// (upstream Classic; W-subagents stage 2).
+    struct CompletionWithToolFailure: Sendable {
+        let result: DispatchResult
+        let terminalToolFailure: DelegatedToolFailure?
+    }
+    private var completionContinuations: [UUID: CheckedContinuation<CompletionWithToolFailure, Never>] = [:]
 
     /// Tracks the number of turns already processed per chat task so we only log new tool calls.
     private var chatTurnCounts: [UUID: Int] = [:]
@@ -774,7 +781,9 @@ public final class BackgroundTaskManager: ObservableObject {
             context = ExecutionContext(
                 reattaching: existing,
                 folderBookmark: folder?.bookmark,
-                folderPath: folder?.path
+                folderPath: folder?.path,
+                delegationBudget: request.delegationContract,
+                delegationModel: request.delegationModel
             )
         } else {
             context = createContext(for: request)
@@ -893,11 +902,15 @@ public final class BackgroundTaskManager: ObservableObject {
             // Upstream: `isExternalSurface` is rebound from the request so the
             // external tool policy holds for the whole run. Widen-only.
             let externalSurface = Self.resolvedExternalSurface(for: request)
-            await ChatExecutionContext.$isExternalSurface.withValue(externalSurface) {
-                await ChatExecutionContext.$currentRunId.withValue(boundRunId) {
-                    await ChatExecutionContext.$currentRunActor.withValue(boundActor) {
-                        await ChatExecutionContext.$currentBackgroundId.withValue(context.id) {
-                            await context.start(prompt: request.prompt)
+            // Upstream: the request's source is the run's `currentSessionSource`
+            // (a delegated child's composer strips every spawn tool from it).
+            await ChatExecutionContext.$currentSessionSource.withValue(request.source) {
+                await ChatExecutionContext.$isExternalSurface.withValue(externalSurface) {
+                    await ChatExecutionContext.$currentRunId.withValue(boundRunId) {
+                        await ChatExecutionContext.$currentRunActor.withValue(boundActor) {
+                            await ChatExecutionContext.$currentBackgroundId.withValue(context.id) {
+                                await context.start(prompt: request.prompt)
+                            }
                         }
                     }
                 }
@@ -972,11 +985,18 @@ public final class BackgroundTaskManager: ObservableObject {
     /// Await completion of a background task. Suspends until the task completes, is cancelled, finalized, or times out.
     /// A 30-minute timeout prevents indefinite hangs if a task never reaches a terminal state.
     public func awaitCompletion(_ id: UUID, timeoutSeconds: UInt64 = 1800) async -> DispatchResult {
+        await awaitCompletionWithToolFailure(id, timeoutSeconds: timeoutSeconds).result
+    }
+
+    /// `awaitCompletion` plus the child's typed terminal tool rejection, when
+    /// it had one (upstream Classic). The delegation dispatcher uses it so a
+    /// denied tool inside a delegated child stays a non-retryable denial.
+    func awaitCompletionWithToolFailure(_ id: UUID, timeoutSeconds: UInt64 = 1800) async -> CompletionWithToolFailure {
         if let state = backgroundTasks[id], !state.status.isActive {
-            return resultFromState(state)
+            return completionSnapshot(for: id, result: resultFromState(state))
         }
         guard backgroundTasks[id] != nil else {
-            return .failed("Background task not found")
+            return CompletionWithToolFailure(result: .failed("Background task not found"), terminalToolFailure: nil)
         }
 
         // Start a watchdog that will resume the continuation with a timeout error
@@ -984,7 +1004,8 @@ public final class BackgroundTaskManager: ObservableObject {
         let timeoutTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
             guard !Task.isCancelled else { return }
-            completionContinuations.removeValue(forKey: id)?.resume(returning: .failed("Background task timed out"))
+            completionContinuations.removeValue(forKey: id)?.resume(
+                returning: CompletionWithToolFailure(result: .failed("Background task timed out"), terminalToolFailure: nil))
         }
 
         let result = await withCheckedContinuation { continuation in
@@ -994,6 +1015,12 @@ public final class BackgroundTaskManager: ObservableObject {
         timeoutTask.cancel()
         return result
     }
+
+    #if DEBUG
+        func hasCompletionWaiterForTesting(_ id: UUID) -> Bool {
+            completionContinuations[id] != nil
+        }
+    #endif
 
     // MARK: - Private: Dispatch Helpers
 
@@ -1109,6 +1136,12 @@ public final class BackgroundTaskManager: ObservableObject {
     }
 
     #if DEBUG
+        /// Test-only: the context `dispatchChat` would build for `request`
+        /// (upstream's seam of the same name), without starting a run.
+        func makeContextForTesting(_ request: DispatchRequest) -> ExecutionContext {
+            createContext(for: request)
+        }
+
         /// Test-only: insert a pre-built `BackgroundTaskState` directly so
         /// regression tests can exercise `observeChatTask` without spinning up
         /// a real `ExecutionContext` + MLX-backed engine.
@@ -1209,7 +1242,9 @@ public final class BackgroundTaskManager: ObservableObject {
             folderPath: folder?.path,
             source: request.source,
             sourcePluginId: request.sourcePluginId,
-            externalSessionKey: request.externalSessionKey
+            externalSessionKey: request.externalSessionKey,
+            delegationBudget: request.delegationContract,
+            delegationModel: request.delegationModel
         )
     }
 
@@ -1248,8 +1283,20 @@ public final class BackgroundTaskManager: ObservableObject {
         }
     }
 
+    private func completionSnapshot(for id: UUID, result: DispatchResult) -> CompletionWithToolFailure {
+        var failure: DelegatedToolFailure?
+        if case .failed = result,
+            let session = backgroundTasks[id]?.executionContext?.chatSession,
+            session.sessionId == id
+        {
+            failure = session.delegatedToolFailure.current
+        }
+        return CompletionWithToolFailure(result: result, terminalToolFailure: failure)
+    }
+
     private func resumeCompletion(for id: UUID, result: DispatchResult) {
-        completionContinuations.removeValue(forKey: id)?.resume(returning: result)
+        let snapshot = completionSnapshot(for: id, result: result)
+        completionContinuations.removeValue(forKey: id)?.resume(returning: snapshot)
     }
 
     /// Map a dispatch source to the audit-trail trigger kind we persist
