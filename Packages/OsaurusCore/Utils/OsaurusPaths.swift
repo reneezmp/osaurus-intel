@@ -435,6 +435,18 @@ public enum OsaurusPaths {
         root().appendingPathComponent("skills", isDirectory: true)
     }
 
+    /// Declarative configuration templates directory
+    /// (`~/.osaurus/templates/`). The only place `osaurus_config` reads
+    /// or writes YAML documents by name, never arbitrary paths.
+    public static func configTemplates() -> URL {
+        root().appendingPathComponent("templates", isDirectory: true)
+    }
+
+    /// Versioned template library (`TemplateStore`).
+    public static func templateLibrary() -> URL {
+        root().appendingPathComponent("template-library", isDirectory: true)
+    }
+
     /// Artifacts directory
     public static func artifacts() -> URL {
         root().appendingPathComponent("artifacts", isDirectory: true)

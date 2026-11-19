@@ -331,8 +331,114 @@ struct ConfigYAMLStrictDecodeTests {
     }
 }
 
-// (Upstream's `ConfigTemplateStoreSecurityTests` covers `ConfigTemplateStore`,
-// the saved-template folder, which Intel does not have yet.)
+// MARK: - Template store confinement
+
+struct ConfigTemplateStoreSecurityTests {
+
+    @Test
+    func traversalAndSeparatorNames_areRejected() {
+        for hostile in [
+            "../outside", "..", "a/b", "a\\b", "/etc/passwd",
+            "~/.ssh/id_rsa", ".hidden", "name\0null", "a:b",
+        ] {
+            if case .success(let fileName) = ConfigTemplateStore.sanitizedFileName(hostile) {
+                Issue.record("hostile name `\(hostile)` sanitised to `\(fileName)`")
+            }
+        }
+    }
+
+    @Test
+    func reasonableNames_areAccepted() {
+        for good in ["research-setup", "My_Template.v2", "daily.brief", "a"] {
+            guard case .success(let fileName) = ConfigTemplateStore.sanitizedFileName(good) else {
+                Issue.record("good name `\(good)` was rejected")
+                continue
+            }
+            #expect(fileName.hasSuffix(".yaml"))
+            #expect(!fileName.contains("/"))
+        }
+    }
+
+    @Test
+    func yamlExtensionIsStrippedBeforeSanitising() {
+        guard case .success(let fileName) = ConfigTemplateStore.sanitizedFileName("setup.yaml")
+        else {
+            Issue.record("`setup.yaml` was rejected")
+            return
+        }
+        #expect(fileName == "setup.yaml")
+    }
+
+    @Test
+    func overlongNames_areRejected() {
+        let overlong = String(repeating: "a", count: 101)
+        if case .success = ConfigTemplateStore.sanitizedFileName(overlong) {
+            Issue.record("101-char name was accepted")
+        }
+    }
+
+    @Test
+    func saveLoadList_roundTripInsideTemplatesDir() throws {
+        let name = "decl-config-test-\(UUID().uuidString.prefix(8))"
+        let yaml = "memory:\n  enabled: true\n"
+        guard case .success(let url) = ConfigTemplateStore.save(yaml: yaml, name: name) else {
+            Issue.record("save failed")
+            return
+        }
+        defer { try? FileManager.default.removeItem(at: url) }
+        // Confined: the saved file must live inside the templates dir.
+        // (Both sides symlink-resolved: under OSAURUS_TEST_ROOT=/tmp the
+        // store's confinement resolves /tmp -> /private/tmp.)
+        let resolvedDir = OsaurusPaths.configTemplates()
+            .resolvingSymlinksInPath().standardizedFileURL.path
+        #expect(url.path.hasPrefix(resolvedDir))
+        guard case .success(let loaded) = ConfigTemplateStore.load(name: name) else {
+            Issue.record("load failed")
+            return
+        }
+        #expect(loaded == yaml)
+        #expect(ConfigTemplateStore.list().contains(String(name)))
+    }
+
+    @Test
+    func loadMissingTemplate_failsWithHint() {
+        guard
+            case .failure(let message) = ConfigTemplateStore.load(
+                name: "definitely-missing-\(UUID().uuidString.prefix(8))")
+        else {
+            Issue.record("expected missing-template failure")
+            return
+        }
+        #expect(message.contains("No template named"))
+    }
+
+    @Test
+    func symlinkInsideTemplatesDir_cannotReadOutsideFiles() throws {
+        // A symlink named like a template must not let `load` read files
+        // outside the directory — confinement resolves symlinks first.
+        let fm = FileManager.default
+        let outside = fm.temporaryDirectory
+            .appendingPathComponent("decl-config-secret-\(UUID().uuidString.prefix(8)).txt")
+        try Data("outside-secret".utf8).write(to: outside)
+        defer { try? fm.removeItem(at: outside) }
+
+        try OsaurusPaths.ensureExists(OsaurusPaths.configTemplates())
+        let linkName = "sneaky-link-\(UUID().uuidString.prefix(8))"
+        let link = OsaurusPaths.configTemplates().appendingPathComponent(linkName + ".yaml")
+        try fm.createSymbolicLink(at: link, withDestinationURL: outside)
+        defer { try? fm.removeItem(at: link) }
+
+        switch ConfigTemplateStore.load(name: linkName) {
+        case .success(let contents):
+            #expect(
+                contents != "outside-secret",
+                "symlink escape: template load read a file outside the templates dir")
+        case .failure:
+            // Rejected — the confinement held.
+            break
+        }
+    }
+}
 
 // MARK: - Planner
 

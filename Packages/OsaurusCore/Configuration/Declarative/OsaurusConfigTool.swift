@@ -626,3 +626,110 @@ public final class OsaurusConfigTool: OsaurusTool, PermissionedTool, @unchecked 
         )
     }
 }
+
+// MARK: - Template store (path-confined)
+
+/// Named YAML templates under `~/.osaurus/templates/`. The ONLY file
+/// surface `osaurus_config` has: names are sanitised to a strict character
+/// set and the resolved path is verified to stay inside the directory, so
+/// neither the model nor a poisoned document can escape it.
+enum ConfigTemplateStore {
+    private static let allowedCharacters = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
+
+    enum Outcome<T> {
+        case success(T)
+        case failure(String)
+    }
+
+    /// Sanitise a template name into `<name>.yaml`, or explain why not.
+    static func sanitizedFileName(_ raw: String) -> Outcome<String> {
+        var name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        for ext in [".yaml", ".yml"] where name.lowercased().hasSuffix(ext) {
+            name = String(name.dropLast(ext.count))
+        }
+        guard !name.isEmpty, name.count <= 100 else {
+            return .failure("Template name must be 1...100 characters.")
+        }
+        guard name.unicodeScalars.allSatisfy({ allowedCharacters.contains($0) }) else {
+            return .failure(
+                "Template name may only contain letters, digits, `.`, `_`, and `-` "
+                    + "(no path separators).")
+        }
+        guard !name.hasPrefix(".") else {
+            return .failure("Template name may not start with a dot.")
+        }
+        return .success(name + ".yaml")
+    }
+
+    /// Resolve a sanitised file name to a URL confined to the templates dir.
+    /// Symlinks are resolved BEFORE the prefix check: a symlink planted
+    /// inside `~/.osaurus/templates/` (e.g. `foo.yaml -> /etc/hosts`) must
+    /// not let template load read files outside the directory.
+    private static func confinedURL(fileName: String) -> URL? {
+        let dir = OsaurusPaths.configTemplates()
+            .resolvingSymlinksInPath().standardizedFileURL
+        let url = dir.appendingPathComponent(fileName)
+            .resolvingSymlinksInPath().standardizedFileURL
+        guard url.path.hasPrefix(dir.path + "/") else { return nil }
+        return url
+    }
+
+    static func save(yaml: String, name raw: String) -> Outcome<URL> {
+        switch sanitizedFileName(raw) {
+        case .failure(let message): return .failure(message)
+        case .success(let fileName):
+            guard let url = confinedURL(fileName: fileName) else {
+                return .failure("Template name resolves outside the templates directory.")
+            }
+            do {
+                try OsaurusPaths.ensureExists(OsaurusPaths.configTemplates())
+                try Data(yaml.utf8).write(to: url, options: .atomic)
+                return .success(url)
+            } catch {
+                return .failure("Could not save template: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    static func load(name raw: String) -> Outcome<String> {
+        switch sanitizedFileName(raw) {
+        case .failure(let message): return .failure(message)
+        case .success(let fileName):
+            guard let url = confinedURL(fileName: fileName) else {
+                return .failure("Template name resolves outside the templates directory.")
+            }
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                let available = list()
+                let hint = available.isEmpty
+                    ? "No templates saved yet — export with `save_as` to create one."
+                    : "Available: \(available.joined(separator: ", "))."
+                return .failure("No template named `\(raw)`. \(hint)")
+            }
+            guard
+                let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                let size = attrs[.size] as? Int,
+                size <= OsaurusConfigTool.maxDocumentBytes
+            else {
+                return .failure("Template is too large or unreadable.")
+            }
+            do {
+                return .success(try String(contentsOf: url, encoding: .utf8))
+            } catch {
+                return .failure("Could not read template: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    static func list() -> [String] {
+        let dir = OsaurusPaths.configTemplates()
+        guard
+            let entries = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil)
+        else { return [] }
+        return entries
+            .filter { ["yaml", "yml"].contains($0.pathExtension.lowercased()) }
+            .map { $0.deletingPathExtension().lastPathComponent }
+            .sorted()
+    }
+}
