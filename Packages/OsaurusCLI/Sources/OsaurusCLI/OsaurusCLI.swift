@@ -12,6 +12,7 @@ import OsaurusCLICore
 struct OsaurusCLI {
     private enum CommandType {
         case status
+        case doctor([String])
         case serve([String])
         case stop
         case list
@@ -34,6 +35,7 @@ struct OsaurusCLI {
         let rest = Array(args.dropFirst())
         switch command {
         case "status": return .status
+        case "doctor": return .doctor(rest)
         case "serve": return .serve(rest)
         case "stop": return .stop
         case "list": return .list
@@ -70,6 +72,8 @@ struct OsaurusCLI {
         switch cmd {
         case .status:
             await StatusCommand.execute(args: [])
+        case .doctor(let args):
+            await DoctorCommand.execute(args: args)
         case .serve(let args):
             await ServeCommand.execute(args: args)
         case .stop:
@@ -109,13 +113,22 @@ struct OsaurusCLI {
             osaurus - CLI for Osaurus
 
             Usage:
-              osaurus serve [--port N] [--expose] [--yes|-y]
+              osaurus serve [--port N] [--expose] [--yes|-y] [--supervise] [--interval N]
                                       Start the server (default: localhost only). If --expose
                                       is set, a warning prompt will appear unless --yes is provided.
+                                      With --supervise, run a long-lived keep-alive loop that
+                                      relaunches the server whenever it goes down (probe every
+                                      --interval seconds, default 15) — intended to run under a
+                                      launchd KeepAlive LaunchAgent so the server survives quit.
               osaurus stop            Stop the server
               osaurus mcp             Run MCP stdio server proxying to local HTTP
               osaurus version         Show version (also: --version or -v)
               osaurus status          Check if the Osaurus server is running
+              osaurus doctor [--port N] [--json] [--redact] [--verify-signatures]
+                                      Diagnose CLI/app version skew, duplicate app
+                                      bundles, server startup, and model storage.
+                                      Signature checks are explicit because they can
+                                      be slow when many app bundles are installed.
               osaurus list            List available model IDs
               osaurus show <model_id> Show metadata for a model
               osaurus pull <model_id> Download a model from Hugging Face
