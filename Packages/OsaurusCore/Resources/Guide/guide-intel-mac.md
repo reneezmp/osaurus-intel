@@ -21,7 +21,7 @@ This build of Osaurus is for Intel Macs. Most of Osaurus works the same; the fea
 - **Computer Use.**
 - **Subagents** (`spawn_agent`). The Orchestrator can delegate one bounded, tool-free task at a time to an allowed custom agent instead (see The Orchestrator topic).
 - **Agent templates, harness runtimes, and `osaurus import` bundles.**
-- **Some declarative configuration sections.** The Orchestrator's `osaurus_config` covers memory, the Orchestrator and custom agents, tools, MCP servers, plugins, cloud providers, search providers, schedules, watchers, commands and its delegation list. Channels, harness runtimes, local models, agent skills, knowledge switches, templates and sandbox network keys are not available on this build.
+- **Some declarative configuration sections.** The Orchestrator's `osaurus_config` (and the loopback-only `/admin/config/*` routes, whose apply always waits for your approval in the app) covers memory, the Orchestrator and custom agents, tools, MCP servers, plugins, cloud providers, search providers, schedules, watchers, commands and its delegation list. Channels, harness runtimes, local models, agent skills, knowledge switches, templates and sandbox network keys are not available on this build.
 - **Skill import from GitHub, Claude plugin import**, and skill zip import/export. Skills can be created, edited, and imported from a file.
 - **The Privacy Filter**, usage analytics, and crash reporting (this build sends neither).
 - **Osaurus as an MCP server for other apps.** The local server's `/mcp` endpoint only offers test tools.
