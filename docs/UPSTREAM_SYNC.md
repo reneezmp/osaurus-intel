@@ -194,6 +194,8 @@ mdat and live-folder checks).
   (Lite) before release: the old flat shape is the one that passed Rosy QA.
 - **Subagents stage 1** (`W-subagents`, `W_SUBAGENTS_PLAN.md`): model and
   stores only, nothing user-visible yet.
+- **Provider slice 4** (5d rows 16–18, 28, 43): discovery errors, bounded
+  429/503 retry, Router connect retry, Gemini list filter, SuperGrok refresh.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

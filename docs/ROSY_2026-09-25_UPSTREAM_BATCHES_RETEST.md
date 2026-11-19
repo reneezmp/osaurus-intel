@@ -3610,3 +3610,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] OpenAI (API key) preset, a non-reasoning model: with Max Tokens set low (about 50) the answer stops at the limit, and Temperature is respected. A normal tool-using chat works.
 - [ ] A custom OpenAI-type provider pointing at a server with only `/chat/completions` works from the first message (no 404 or 405).
 - [ ] Insights for Codex and OpenAI turns shows Reported tokens and no extra requests per turn.
+
+## Provider slice 4: discovery and connect (2026-11-19)
+
+`W-cov-reaudit` 5d (`COV_REAUDIT_STAGE5D_PROVIDER.md` rows 16–18, 28, 43). Not in candidate 68.
+
+- [ ] Add a provider with a wrong API key: it shows the provider's error (for example "invalid API key"), not "connected" with 0 models.
+- [ ] A Gemini key lists only chat models, with names like `gemini-2.5-flash` (no `models/` prefix).
+- [ ] Launch the app offline with the Router set up, then go online: the Router connects by itself, and Settings shows a real error while offline.
+- [ ] Disconnect a provider: its models disappear from the picker.
+- [ ] With SuperGrok signed in, after its token expires (or the next day), chats still work without signing in again; if the sign-in is revoked, it asks you to sign in.
