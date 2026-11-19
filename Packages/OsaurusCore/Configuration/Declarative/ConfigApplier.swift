@@ -343,20 +343,21 @@ enum ConfigApplier {
                     applyRelay(entry.capabilities?.relayEnabled, to: agent.id)
                     // Upstream (#2498) adds a new agent to the Default spawn pool
                     // here and stages the spawn tools for the same turn; Intel's
-                    // Orchestrator delegates only to agents the user lists in its
-                    // delegation allowlist (Gate 4), so a created agent is NOT
-                    // spawnable until the user adds it. `orchestrator_spawnable:
-                    // false` therefore has nothing to opt out of on Intel; it
-                    // still clears any pool entry the same way upstream does.
-                    if entry.orchestratorSpawnable == false {
-                        let agentId = agent.id
-                        _ = SubagentConfigurationStore.mutate { config in
-                            config.spawnableAgentIDs.removeAll { $0 == agentId }
-                        }
-                    }
+                    // Orchestrator delegates only to agents in its Gate 4
+                    // allowlist (`OrchestratorDelegationConfiguration
+                    // .customAgentAllowlist`), so a created agent is NEVER added
+                    // to it implicitly (owner policy: delegation widens only on
+                    // the user's say-so). `orchestrator_spawnable: false` (#3227)
+                    // therefore has nothing to opt out of: both spellings leave
+                    // the agent out, and a `delegation.spawnable_agents` list in
+                    // the same document (applied after `agents`, so it wins) is
+                    // how it gets in. The inert `SubagentConfigurationStore` pool
+                    // is not touched.
                     var message =
-                        "Created. `\(agent.name)` is not in the Orchestrator's delegation list yet; "
-                        + "the user adds it in Settings → Orchestrator before the Orchestrator can delegate to it."
+                        "Created. `\(agent.name)` is not in the Orchestrator's delegation list"
+                        + (entry.orchestratorSpawnable == false ? " (`orchestrator_spawnable: false`)" : " yet")
+                        + "; list it under `delegation.spawnable_agents` (or the user adds it in "
+                        + "Settings → Orchestrator) before the Orchestrator can delegate to it."
                     if !outcome.notes.isEmpty {
                         message += " " + outcome.notes.joined(separator: " ")
                     }

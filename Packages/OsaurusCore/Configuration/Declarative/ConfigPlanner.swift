@@ -1205,9 +1205,12 @@ enum ConfigPlanner {
                     }
                 }
                 summarizePortableSettings(entry, into: &changes)
-                if entry.orchestratorSpawnable == false {
-                    changes.append("not added to the Orchestrator's delegation list")
-                }
+                // Intel never adds a created agent to the Orchestrator's Gate 4
+                // allowlist implicitly (#3227): say so for either spelling.
+                changes.append(
+                    entry.orchestratorSpawnable == false
+                        ? "not added to the Orchestrator's delegation list (orchestrator_spawnable: false)"
+                        : "not added to the Orchestrator's delegation list (list it in delegation.spawnable_agents)")
                 actions.append(
                     ConfigPlanAction(
                         section: "agents", target: entry.name, kind: .create,

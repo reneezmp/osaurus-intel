@@ -192,4 +192,64 @@ struct OrchestratorSpawnableAgentsMappingTests {
         let lines = plan.actions.flatMap(\.changes)
         #expect(lines.contains { $0.contains("stored only") }, "\(lines)")
     }
+
+    // MARK: - #3227 orchestrator_spawnable on creation
+
+    private func createAgent(_ name: String, spawnable: Bool?, delegating: Bool) async -> (ConfigPlan?, [ConfigApplyResult]) {
+        var document = OsaurusConfigDocument()
+        var entry = AgentEntry(name: name)
+        entry.systemPrompt = "Runs delegated probes"
+        entry.orchestratorSpawnable = spawnable
+        document.agents = [entry]
+        if delegating {
+            var section = DelegationSection()
+            section.spawnableAgents = [name]
+            document.delegation = section
+        }
+        let plan = try? await MainActor.run { try ConfigPlanner.plan(document: document, prune: false) }
+        let results = await ConfigApplier.apply(document: document, prune: false)
+        return (plan, results)
+    }
+
+    private func deleteAgent(named name: String) async {
+        let id = await MainActor.run {
+            AgentManager.shared.agents.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.id
+        }
+        if let id { _ = await AgentManager.shared.delete(id: id) }
+    }
+
+    @Test func aCreatedAgentIsNeverAddedToGate4_whateverOrchestratorSpawnableSays() async throws {
+        await SubagentStoreTestLock.shared.acquire()
+        defer { SubagentStoreTestLock.shared.release() }
+        let original = DefaultAgentConfigurationStore.load()
+        defer { DefaultAgentConfigurationStore.save(original) }
+        for spawnable in [nil, true, false] as [Bool?] {
+            let name = "Gate4 Created \(UUID().uuidString.prefix(6))"
+            let before = DefaultAgentConfigurationStore.load().delegation.customAgentAllowlist
+            let (plan, results) = await createAgent(name, spawnable: spawnable, delegating: false)
+            let lines = plan?.actions.flatMap(\.changes) ?? []
+            #expect(lines.contains { $0.contains("not added to the Orchestrator's delegation list") }, "\(lines)")
+            let row = results.first { $0.section == "agents" }
+            #expect(row?.status == .done, "\(results)")
+            #expect(row?.message?.contains("not in the Orchestrator's delegation list") == true)
+            #expect(DefaultAgentConfigurationStore.load().delegation.customAgentAllowlist == before)
+            await deleteAgent(named: name)
+        }
+    }
+
+    @Test func aDelegationListInTheSameDocumentStillWinsOverSpawnableFalse() async throws {
+        await SubagentStoreTestLock.shared.acquire()
+        defer { SubagentStoreTestLock.shared.release() }
+        let original = DefaultAgentConfigurationStore.load()
+        defer { DefaultAgentConfigurationStore.save(original) }
+        let name = "Gate4 Listed \(UUID().uuidString.prefix(6))"
+        let (_, results) = await createAgent(name, spawnable: false, delegating: true)
+        #expect(results.allSatisfy { $0.status != .failed }, "\(results)")
+        let id = await MainActor.run {
+            AgentManager.shared.agents.first { $0.name == name }?.id
+        }
+        let allow = DefaultAgentConfigurationStore.load().delegation.customAgentAllowlist
+        #expect(id.map { allow.contains($0) } == true, "the explicit delegation list was overridden")
+        await deleteAgent(named: name)
+    }
 }
