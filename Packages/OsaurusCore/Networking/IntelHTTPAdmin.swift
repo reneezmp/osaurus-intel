@@ -20,7 +20,8 @@
 //  keys; agent-scoped keys never reach `/admin/*` (the stage 1 gate).
 //  `/admin/config/*` is `IntelHTTPConfigAdmin.swift` (W-declarative-config
 //  stage 5: physical loopback only, every apply approved in the app),
-//  `/admin/import/*` is `W-osaurus-bundles`.
+//  `/admin/import/*` is `IntelHTTPImportAdmin.swift` (W-osaurus-bundles stage 3:
+//  the same rules, every import approved in the app).
 //
 
 import Foundation
@@ -30,6 +31,7 @@ import NIOHTTP1
 extension HTTPHandler {
     func routeAdminRequest(context: ChannelHandlerContext, head: HTTPRequestHead, path: String) -> Bool {
         if routeConfigAdminRequest(context: context, head: head, path: path) { return true }
+        if routeImportAdminRequest(context: context, head: head, path: path) { return true }
         switch (head.method, path) {
         case (.GET, "/admin/cache-stats"):
             sendResponse(context: context, status: .ok, headers: jsonHeaders(), body: Self.cacheStatsBody())

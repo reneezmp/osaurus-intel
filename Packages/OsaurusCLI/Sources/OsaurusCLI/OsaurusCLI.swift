@@ -24,6 +24,7 @@ struct OsaurusCLI {
         case manifest([String])
         case bundle([String])
         case coord([String])
+        case importCmd([String])
         case version
         case help
     }
@@ -51,6 +52,7 @@ struct OsaurusCLI {
         case "manifest": return .manifest(rest)
         case "bundle": return .bundle(rest)
         case "coord": return .coord(rest)
+        case "import": return .importCmd(rest)
         case "version", "--version", "-v": return .version
         case "help", "-h", "--help": return .help
         default: return nil
@@ -92,6 +94,8 @@ struct OsaurusCLI {
             await BundleCommand.execute(args: args)
         case .coord(let args):
             await CoordCommand.execute(args: args)
+        case .importCmd(let args):
+            await ImportCommand.execute(args: args)
         case .version:
             await VersionCommand.execute(args: [])
         case .help:
@@ -144,6 +148,12 @@ struct OsaurusCLI {
                                       Load and run an MCP Bundle (.mcpb file)
               osaurus coord <subcommand>
                                       Local coordinator orchestration foundation
+              osaurus import validate|install|update --from <bundle> [agent|skill|mcp] [name ...]
+                                      Queue agents, skills and MCP servers from an Osaurus
+                                      bundle folder; you review and apply them in Osaurus
+                                      (see `osaurus import help`)
+              osaurus import remove --bundle <id> [name ...] / osaurus import list
+                                      Remove or list what a bundle installed
               osaurus help            Show this help
 
             """

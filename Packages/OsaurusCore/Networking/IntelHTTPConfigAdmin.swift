@@ -67,9 +67,10 @@ enum ConfigAdminEndpoint {
         host: String?,
         origin: String?,
         secFetchSite: String?,
-        allowedOrigins: [String]
+        allowedOrigins: [String],
+        route: String = "/admin/config/*"
     ) -> String? {
-        let message = "Browser requests to /admin/config/* are refused."
+        let message = "Browser requests to \(route) are refused."
         guard let host, isLoopbackHost(host) else { return message }
         if let origin {
             return LocalAPIKeyPolicy.isExplicitlyAllowedOrigin(origin, allowedOrigins: allowedOrigins)
