@@ -3572,3 +3572,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Save an agent that has a working folder as a template: the file contains no absolute path outside your home folder, and Use Template on it shows a folder note instead of attaching the folder silently.
 - [ ] In the Orchestrator chat, "Make me an agent from the Cloud Agent template called Test Bot": the "Review configuration changes" window appears, and Cancel creates nothing.
 - [ ] Hide from Orchestrator and Delete work on a library template.
+
+## Bundles (2026-11-19)
+
+`W-osaurus-bundles`. Not in candidate 68. The `osaurus import` command can't be tested until the CLI builds (`W-cli-build`); use the in-app sheet.
+
+- [ ] Make a bundle folder: `osaurus-bundle.json` with `format` `osaurus.bundle`, `format_version` 1, `id` `com.example.test`, a name, version `1.0.0`, one skill `{ "name": "notes", "path": "skills/notes" }` and one agent `agents/helper.json` (`{ "name": "Helper", "system_prompt": "Be brief." }`), plus `skills/notes/SKILL.md`.
+- [ ] Agents → Bundles → Choose Bundle Folder: it is validated and queued, and nothing is applied yet. Remove from Queue works.
+- [ ] Queue it again and Apply: the result shows `skill/notes: done` and `agent/Helper: done`; Helper is in Agents and notes in Skills. Applying the same folder again shows `unchanged`.
+- [ ] Add a stdio MCP server to the manifest (`"mcp_servers": [{"name":"Echo","transport":"stdio","command":"/usr/bin/true"}]`) and queue it: a red line says it launches a local process. Remove it from the queue: Settings → MCP has no "Echo".
+- [ ] `curl -s -X POST http://127.0.0.1:<port>/admin/import/plan -d '{}'` answers 415; with `-H 'Content-Type: application/json'` it answers 400 asking for `bundle_path`; with `-H 'Origin: https://example.com'` it answers 403.
