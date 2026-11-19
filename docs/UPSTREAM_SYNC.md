@@ -171,6 +171,9 @@ mdat and live-folder checks).
   their approvals; writes to the same path stay in order.
 - **Engine slice 8** (row 30): a terminal desktop-subagent failure ends the
   chat run. This completes stage 5c.
+- **Stage 5d audit** (`COV_REAUDIT_STAGE5D_PROVIDER.md`, 51 rows, 10 port
+  slices): provider wire gaps, including Router billing visibility and
+  `clamp_to_balance`.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
