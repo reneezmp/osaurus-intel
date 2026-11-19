@@ -263,6 +263,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     private let providerOverride: RemoteProvider?
     private let session: URLSession
     private let credentials: IntelCodexCredentials
+    private let xaiCredentials: IntelXAICredentials
     private var codexResponsesLiteSessionIds: [String: String] = [:]
     private var codexResponsesLiteSessionOrder: [String] = []
 
@@ -324,8 +325,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         model: String = "deepseek-v4-pro",
         provider: RemoteProvider? = nil,
         session: URLSession = .shared,
-        credentials: IntelCodexCredentials = .shared
+        credentials: IntelCodexCredentials = .shared,
+        xaiCredentials: IntelXAICredentials = .shared
     ) {
+        self.xaiCredentials = xaiCredentials
         self.source = source
         self.model = model
         self.providerOverride = provider
@@ -1041,6 +1044,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             return headers
         }
         var headers = await provider.resolvedHeadersOffMainActor()
+        if provider.authType == .xaiOAuth {
+            // Upstream `refreshXAIOAuthIfNeeded` + `xaiOAuthHeaders`: refresh an
+            // expired SuperGrok token before the request and merge the fresh
+            // Bearer over the stored one (custom headers still apply).
+            let tokens = try await xaiCredentials.tokens(for: provider.id)
+            headers["Authorization"] = "Bearer \(tokens.accessToken)"
+        }
         if headers["Content-Type"] == nil { headers["Content-Type"] = "application/json" }
         return headers
     }
