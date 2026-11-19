@@ -146,6 +146,72 @@ struct IntelToolStopPolicyTests {
         #expect(!AgentToolLoop.shouldStopAfterToolOutcome(outcome(stale, tool: "complete")))
     }
 
+    // Row 30: upstream's terminal desktop-subagent failure rule.
+    @Test func aTerminalDesktopSubagentFailureStopsTheRun() {
+        func failure(_ kind: ToolEnvelope.Kind, retryable: Bool) -> String {
+            ToolEnvelope.failure(kind: kind, message: "No.", tool: "applescript", retryable: retryable)
+        }
+        for tool in ["applescript", "mac_query", "computer_use"] {
+            #expect(
+                AgentToolLoop.shouldStopAfterToolOutcome(
+                    outcome(failure(.executionError, retryable: false), tool: tool)))
+            #expect(
+                AgentToolLoop.shouldStopAfterToolOutcome(outcome(failure(.timeout, retryable: false), tool: tool)))
+            // Recoverable kinds and retryable failures still go back to the model.
+            #expect(
+                !AgentToolLoop.shouldStopAfterToolOutcome(outcome(failure(.invalidArgs, retryable: false), tool: tool)))
+            #expect(
+                !AgentToolLoop.shouldStopAfterToolOutcome(outcome(failure(.notFound, retryable: false), tool: tool)))
+            #expect(
+                !AgentToolLoop.shouldStopAfterToolOutcome(outcome(failure(.unavailable, retryable: false), tool: tool)))
+            #expect(
+                !AgentToolLoop.shouldStopAfterToolOutcome(
+                    outcome(failure(.executionError, retryable: true), tool: tool)))
+        }
+        // Other tools keep the pivot behaviour.
+        #expect(
+            !AgentToolLoop.shouldStopAfterToolOutcome(
+                outcome(failure(.executionError, retryable: false), tool: "browser_use")))
+        #expect(
+            !AgentToolLoop.shouldStopAfterToolOutcome(
+                outcome(failure(.executionError, retryable: false), tool: "file_write")))
+    }
+
+    // Row 30: a malformed repeat of a succeeded desktop call yields its summary.
+    @Test func aMalformedRepeatOfASucceededDesktopCallYieldsItsSummary() {
+        let state = AgentTaskState()
+        let success = ToolEnvelope.success(tool: "applescript", result: ["summary": "  Created the note.  "])
+        state.record(name: "applescript", argsJSON: #"{"task":"make a note"}"#, result: success)
+        func malformed(_ tool: String, field: String) -> String {
+            "{\"_error\":\"invalid_tool_arguments\",\"_tool\":\"\(tool)\",\"_field\":\"\(field)\"}"
+        }
+        #expect(
+            AgentToolLoop.completedDesktopSummaryBeforeMalformedRepeat(
+                toolName: "applescript", argumentsJSON: malformed("applescript", field: "task"), state: state)
+                == "Created the note.")
+        // Wrong field, other tool, or a well-formed repeat: no substitution.
+        #expect(
+            AgentToolLoop.completedDesktopSummaryBeforeMalformedRepeat(
+                toolName: "applescript", argumentsJSON: malformed("applescript", field: "goal"), state: state) == nil)
+        #expect(
+            AgentToolLoop.completedDesktopSummaryBeforeMalformedRepeat(
+                toolName: "mac_query", argumentsJSON: malformed("mac_query", field: "question"), state: state) == nil)
+        #expect(
+            AgentToolLoop.completedDesktopSummaryBeforeMalformedRepeat(
+                toolName: "applescript", argumentsJSON: "{\"task\":\"again\"}", state: state) == nil)
+        #expect(
+            AgentToolLoop.completedDesktopSummaryBeforeMalformedRepeat(
+                toolName: "file_write", argumentsJSON: malformed("file_write", field: "task"), state: state) == nil)
+        // A failed previous result is never substituted.
+        let failed = AgentTaskState()
+        failed.record(
+            name: "applescript", argsJSON: "{}",
+            result: ToolEnvelope.failure(kind: .executionError, message: "x", tool: "applescript"))
+        #expect(
+            AgentToolLoop.completedDesktopSummaryBeforeMalformedRepeat(
+                toolName: "applescript", argumentsJSON: malformed("applescript", field: "task"), state: failed) == nil)
+    }
+
     @Test func aRepeatedRetrievalReplayBecomesAStatusStep() {
         let failed = envelope(.executionError)
         let replay = outcome(failed, tool: "search_and_extract", deduped: true)

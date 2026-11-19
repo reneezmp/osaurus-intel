@@ -2047,6 +2047,26 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 continuation.finish()
                                 return
                             }
+                            // Upstream Classic (stage 5c row 30): a malformed repeat of a
+                            // desktop subagent call that just succeeded finishes with the
+                            // prior summary instead of running a second automation. Chat
+                            // runs only (upstream needs the surface's text hook).
+                            if interactiveChatRun, !request.isToolFreeWrapUp,
+                                finalized.completion.toolCalls.count == 1,
+                                let only = finalized.completion.toolCalls.first,
+                                let summary = AgentToolLoop.completedDesktopSummaryBeforeMalformedRepeat(
+                                    toolName: Self.resolvedOfferedToolName(only.name, offered: activeTools),
+                                    argumentsJSON: only.arguments, state: taskState)
+                            {
+                                let tail = IntelTerminalRecovery.appendedText(summary, afterVisible: roundVisibleText())
+                                responseText += tail
+                                continuation.yield(tail)
+                                NSLog("[CloudChatEngine] Desktop summary substituted for a malformed repeat")
+                                yieldUsageIfRequested()
+                                logInference()
+                                continuation.finish()
+                                return
+                            }
                             toolWorkThisRun = true
                             terminalRecovery.noteToolRound()
 
@@ -2632,6 +2652,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     orderedCalls.map {
                                         .init(callId: $0.id, name: $0.name, arguments: $0.arguments)
                                     }))
+                            yieldUsageIfRequested()
+                            logInference()
+                            continuation.finish()
+                            return
+                        }
+                        // Upstream Classic (stage 5c row 30): see the Codex branch.
+                        if interactiveChatRun, !request.isToolFreeWrapUp, orderedCalls.count == 1,
+                            let only = orderedCalls.first,
+                            let summary = AgentToolLoop.completedDesktopSummaryBeforeMalformedRepeat(
+                                toolName: only.name, argumentsJSON: only.arguments, state: taskState)
+                        {
+                            let tail = IntelTerminalRecovery.appendedText(summary, afterVisible: assistantContent)
+                            responseText += tail
+                            continuation.yield(tail)
+                            NSLog("[CloudChatEngine] Desktop summary substituted for a malformed repeat")
                             yieldUsageIfRequested()
                             logInference()
                             continuation.finish()

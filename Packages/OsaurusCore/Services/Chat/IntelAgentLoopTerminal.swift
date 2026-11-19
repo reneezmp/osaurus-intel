@@ -604,8 +604,8 @@ extension AgentToolLoop {
     ///
     /// Intel adaptation: the engine's own denial text (`⛔️ "x" was not run`)
     /// is an untyped failure; upstream's denial is a typed `user_denied`
-    /// envelope, so both stop. Upstream's terminal desktop-subagent failure
-    /// rule (row 30) is not ported here.
+    /// envelope, so both stop. A terminal desktop-subagent failure also
+    /// stops (row 30, `isTerminalDesktopSubagentFailure`).
     static func shouldStopAfterToolOutcome(_ outcome: IntelToolOutcome, heldErrorReplays: Int = 0) -> Bool {
         guard outcome.wasError || ToolEnvelope.isError(outcome.result) || outcome.result.hasPrefix("⛔️") else {
             return false
@@ -621,6 +621,9 @@ extension AgentToolLoop {
             return true
         }
         if isRecoverableTodoContractResult(outcome.result) { return false }
+        if isTerminalDesktopSubagentFailure(toolName: outcome.toolName, result: outcome.result) {
+            return true
+        }
         guard let data = outcome.result.data(using: .utf8),
             let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let kind = object["kind"] as? String
@@ -632,6 +635,66 @@ extension AgentToolLoop {
             return true
         }
         return false
+    }
+
+    /// Upstream `isTerminalDesktopSubagentFailure`: interactive desktop
+    /// subagents can partially affect external state before returning a
+    /// terminal failure. Once one reports a canonical, non-retryable failure,
+    /// chat must not ask the parent model to guess what happened or launch
+    /// another blind automation attempt. `invalid_args`, `not_found` and
+    /// `unavailable` stay recoverable (nothing has run, or the parent can fix
+    /// the call). Same three tool names as upstream; `computer_use` is
+    /// listed for parity and waits for `W-computer-use` to exist on Intel.
+    static func isTerminalDesktopSubagentFailure(toolName: String, result: String) -> Bool {
+        guard ["computer_use", "applescript", "mac_query"].contains(toolName) else { return false }
+        guard ToolEnvelope.isError(result),
+            let data = result.data(using: .utf8),
+            let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            envelope["retryable"] as? Bool == false,
+            let rawKind = envelope["kind"] as? String,
+            let kind = ToolEnvelope.Kind(rawValue: rawKind)
+        else { return false }
+        switch kind {
+        case .invalidArgs, .notFound, .unavailable:
+            return false
+        case .rejected, .timeout, .executionError, .toolNotFound, .userDenied, .permissionDenied:
+            return true
+        }
+    }
+
+    /// Upstream `completedDesktopSummaryBeforeMalformedRepeat`: a desktop
+    /// subagent already succeeded and the very next step emits only a
+    /// malformed repeat of the same tool (its primary required field
+    /// missing, reported as an `invalid_tool_arguments` marker). Returns the
+    /// prior call's real summary so the run finishes with it instead of
+    /// executing a second desktop mutation. Not a general repair: every other
+    /// malformed call still executes and reaches the model.
+    static func completedDesktopSummaryBeforeMalformedRepeat(
+        toolName: String, argumentsJSON: String, state: AgentTaskState
+    ) -> String? {
+        let requiredField: String
+        switch toolName {
+        case "computer_use": requiredField = "goal"
+        case "applescript": requiredField = "task"
+        case "mac_query": requiredField = "question"
+        default: return nil
+        }
+        guard
+            let argsData = argumentsJSON.data(using: .utf8),
+            let args = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any],
+            args["_error"] as? String == "invalid_tool_arguments",
+            args["_tool"] as? String == toolName,
+            args["_field"] as? String == requiredField,
+            let priorEnvelope = state.lastResultEnvelope,
+            ToolEnvelope.isSuccess(priorEnvelope),
+            let priorData = priorEnvelope.data(using: .utf8),
+            let prior = try? JSONSerialization.jsonObject(with: priorData) as? [String: Any],
+            prior["tool"] as? String == toolName,
+            let result = prior["result"] as? [String: Any],
+            let rawSummary = result["summary"] as? String
+        else { return nil }
+        let summary = rawSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        return summary.isEmpty ? nil : summary
     }
 
     /// Upstream's todo-contract rejections (the model is expected to correct
