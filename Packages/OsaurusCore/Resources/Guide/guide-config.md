@@ -75,6 +75,14 @@ For scripts on this Mac. All four routes answer only a caller on this Mac itself
 - `POST /admin/config/plan` with `{"yaml": "<document>", "prune": false}`: the dry-run diff.
 - `POST /admin/config/apply` with the same body: shows the plan in the Review configuration changes window and waits. Only your **Apply** there applies it. With no chat window open it answers 409 (`approval_unavailable`) and applies nothing; a decline answers 403, a timeout 408. `confirm_high_risk` in the body is ignored: a caller cannot approve for you. Credentials never travel through this route.
 
+## Osaurus bundles: `osaurus import`
+
+A vendor or IT team can ship a ready-made setup as a folder with `osaurus-bundle.json`: agents, skills, MCP servers and a short list of server settings (`require_local_access_key`, `allowed_origins`). Run `osaurus import validate --from <folder>` to check it, `osaurus import install --from <folder>` to queue it, and `osaurus import list` / `remove` to see or undo what a bundle installed.
+
+Nothing in a bundle lands without your approval in the Mac app. Queuing only copies the folder into `~/.osaurus/import/pending`. The request then waits until you open **Agents → Bundles**, read what it would create, update or remove (with the same high-risk lines as a configuration review), and click **Apply**. A running Osaurus also shows the review in the Review configuration changes window when the CLI asks it to apply; with no chat window open that answers 409 and the request stays queued. `--yes` on the command line is ignored by the app: a script cannot approve for you.
+
+A bundle is data. Nothing in it is run: skills are copied as files, MCP servers are registered (a stdio server's command is listed as a risk) and secrets are only `keychain:` / `env:` references. Plugins are never installed by a bundle (use the signed plugin installer), and harness runtimes, agent `skills` allow-lists and models are not available in Osaurus for Intel yet, so those items are reported as failed and skipped.
+
 ## Not configurable declaratively
 
 - **Settings-UI only**: server runtime (port, Expose to Network, caches), chat behavior, app shell (login item, dock icon, appearance, themes), voice, which cloud models the Orchestrator may delegate to, and macOS permission grants. The Orchestrator tells you the path with `osaurus_help` `find`.
