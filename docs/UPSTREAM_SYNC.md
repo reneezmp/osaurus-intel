@@ -174,6 +174,10 @@ mdat and live-folder checks).
 - **Stage 5d audit** (`COV_REAUDIT_STAGE5D_PROVIDER.md`, 51 rows, 10 port
   slices): provider wire gaps, including Router billing visibility and
   `clamp_to_balance`.
+- **Declarative config stage 5**: `W-declarative-config` is complete apart
+  from parts waiting on other features. `/admin/config/*` deliberately differs
+  from upstream: every apply needs the user's approval in the app, and browser
+  callers are refused (a web page also connects over loopback).
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

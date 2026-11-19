@@ -3540,3 +3540,15 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] A later message in the same chat works normally.
 - [ ] Ask a Mac question through `mac_query` with Automation allowed: a normal answer.
 - [ ] An AppleScript request with missing arguments gets one correction turn and the run continues.
+
+## Declarative config stage 5 (2026-11-18)
+
+`W-declarative-config` leftovers. Not in candidate 68. The local server must be running; leave Expose to Network off except for the one check that says otherwise. Use the port shown in Settings.
+
+- [ ] With a chat window open, run `curl -s -X POST localhost:<port>/admin/config/apply -H 'Content-Type: application/json' -d '{"yaml":"version: 1\ndelegation:\n  budget_max_tokens: 2048\n"}'`: the "Review configuration changes" window appears, and Cancel changes nothing.
+- [ ] Close every chat window and repeat: it answers 409 at once and nothing changes.
+- [ ] `curl localhost:<port>/admin/config/export` returns YAML with no keys or tokens in it.
+- [ ] `curl -H 'Origin: https://example.com' localhost:<port>/admin/config/export` answers 403.
+- [ ] From another computer, with Expose to Network temporarily on, `/admin/config/export` answers 403. Turn Expose to Network back off.
+- [ ] Create a watcher on a folder and drop two files in: its run names the folder and both files. Delete the folder and trigger it again: the run says the folder could not be read, not that it is empty.
+- [ ] Ask `osaurus_help` (or the Orchestrator) how configuration or automation works: the answer only mentions things this build has.
