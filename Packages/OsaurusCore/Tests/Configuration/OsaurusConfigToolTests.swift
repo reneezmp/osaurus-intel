@@ -87,8 +87,7 @@ struct OsaurusConfigToolTests {
         let actions = values.compactMap { value -> String? in
             if case .string(let s) = value { return s } else { return nil }
         }
-        // Intel omits upstream's `templates` action (no TemplateStore).
-        #expect(Set(actions) == ["schema", "export", "plan", "apply"])
+        #expect(Set(actions) == ["schema", "export", "plan", "apply", "templates"])
     }
 
     @Test func registryExposesItOnlyToTheDefaultAgentAndItOwnsItsApproval() {
