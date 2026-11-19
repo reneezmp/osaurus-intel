@@ -3509,3 +3509,15 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] On a flaky connection, ask for a tool task: a call cut mid-stream is retried quietly instead of showing a half-built tool card or running broken arguments.
 - [ ] Router: after a retried message, Credits activity shows one charge for it.
 - [ ] Settings → Providers still adds and edits providers as before (the new key sheet is only used by declarative config, which has no UI entry yet).
+
+## Orchestrator uses `osaurus_config` (2026-11-18)
+
+`W-declarative-config` stage 4. Not in candidate 68. This replaces the old Orchestrator review card, so earlier checks that mention that card now mean the "Review configuration changes" window.
+
+- [ ] In the Orchestrator chat, say "set your model to …": the "Review configuration changes" window shows the diff. Cancel changes nothing; Apply changes Settings → Orchestrator → model.
+- [ ] Ask it to let a custom agent be delegated to: the window lists `spawnable_agents`, and after Apply that agent is allowed in Settings → Orchestrator → Delegation. If the agent's model isn't admitted, the reply says it still can't be used.
+- [ ] Ask for something risky (an auto policy for a tool): the window marks it high risk, and Cancel leaves it unchanged.
+- [ ] Ask it to "expose to network": it doesn't turn it on and points you to Settings.
+- [ ] Ask it to add a provider without giving a key: the secure key sheet opens and no key appears in the chat.
+- [ ] With the paired iPhone, repeat the first check: the plan appears on the phone, and Cancel there applies nothing.
+- [ ] A scheduled task that asks to change settings is refused and nothing changes.

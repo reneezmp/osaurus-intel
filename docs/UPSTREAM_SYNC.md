@@ -163,6 +163,10 @@ mdat and live-folder checks).
 - **Declarative config stage 3**: the native credential sheet for keyed
   providers. **Engine slice 6** (rows 11–12): connect retry, "Retry in about
   Ns" for 429/503, cut tool calls retried before any text.
+- **Declarative config stage 4**: `osaurus_config` on upstream's planner
+  replaces `orchestrator_config`. `orchestrator_config`, its queue and its
+  card no longer exist; older sections of this file and the Rosy checklists
+  that name them describe the previous design.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
