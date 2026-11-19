@@ -192,6 +192,8 @@ mdat and live-folder checks).
 - **Provider slice 3** (5d rows 9–14): Responses parity, including
   upstream's Codex Lite namespace payload. Rosy must re-check Codex GPT-5.6
   (Lite) before release: the old flat shape is the one that passed Rosy QA.
+- **Subagents stage 1** (`W-subagents`, `W_SUBAGENTS_PLAN.md`): model and
+  stores only, nothing user-visible yet.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
