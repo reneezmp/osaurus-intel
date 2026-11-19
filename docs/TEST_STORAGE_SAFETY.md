@@ -530,3 +530,19 @@ Rule: only one gated test run at a time on the machine. The gate wraps
 `swift test` in `/usr/bin/lockf -k /tmp/osaurus-test-gate.lock`, so a second
 run waits ("waiting for gate lock"). Builds outside the gate may still run in
 parallel. Agents must never kill another run's processes (no global `pkill`).
+
+**Correction, same night.** The lock removed the cross-run failures, but the
+hang is not fully explained by concurrency: with the lock held by a single run,
+a full run stopped again at
+`BackgroundTaskAgentGroupCloseTests.closeAgentGroup_cancelsActiveFinalizesAllAndSparesOtherAgents`.
+`sample` showed only two threads, the main thread idle in `CFRunLoopRun` and a
+`JavaScriptAppleEvents` run-loop thread, with no cooperative-pool worker. The
+test body is synchronous, so the test task was never scheduled or its completion
+was lost. It happens right after the "Avatar bitmap renderer" suite, more often
+while other builds load the machine; the suite passes alone. Root cause unknown.
+
+The gate therefore has a watchdog: once "Test run started" appears, if the log
+stays silent for 300 seconds it kills only the `swiftpm-testing-helper` of its
+own repo path, keeps the log as `<log>.stalled1`, and retries once with a new
+temp root. A `STALLED:` line followed by a passing second attempt counts as a
+pass, but report it. Two stalled attempts exit 124.
