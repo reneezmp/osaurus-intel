@@ -441,6 +441,9 @@ enum ConfigApplier {
             &agent, from: entry.workingFolder,
             prepared: preparedFolder ?? prepareWorkingFolder(entry.workingFolder),
             outcome: &outcome)
+        if let source = entry.sourceTemplate {
+            agent.sourceTemplateName = source.isEmpty ? nil : source
+        }
         if var claudeCodeEntry = entry.claudeCode {
             // Never settable from an agent entry: only the Default agent may
             // change Osaurus configuration (the planner refuses it).

@@ -144,6 +144,7 @@ enum ConfigExporter {
         entry.sandbox = exportSandbox(of: agent)
         entry.subagents = exportSubagents(of: agent, agents: agents)
         entry.workingFolder = agent.workingFolderPath.map { .value($0) } ?? .null
+        entry.sourceTemplate = agent.sourceTemplateName
         entry.claudeCode = agent.claudeCode.map { ConfigHarness.export($0, includeConfigWrites: false) }
         return entry
     }

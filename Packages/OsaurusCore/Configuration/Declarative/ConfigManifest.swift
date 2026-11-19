@@ -294,6 +294,9 @@ public enum ConfigManifest {
                         comment: "folder PATH hint; attached when it exists locally,",
                         moreComments: ["otherwise the apply asks the user to pick it"]),
                     ConfigKeySpec(
+                        "source_template", .scalar(.string, example: "\"\""),
+                        comment: "provenance: agent template this agent came from"),
+                    ConfigKeySpec(
                         "claude_code", .mapping(ConfigManifest.claudeCodeKeys(includeConfigWrites: false)),
                         comment: "Claude Code options for this agent"),
                 ],

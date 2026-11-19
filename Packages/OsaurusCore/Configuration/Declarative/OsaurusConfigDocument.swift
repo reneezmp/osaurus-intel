@@ -443,6 +443,7 @@ public struct AgentEntry: Equatable, Sendable {
     /// the user to pick it. Explicit `null` detaches the folder.
     public var workingFolder: ConfigField<String> = .absent
     /// Provenance: the agent template this agent was created from.
+    public var sourceTemplate: String?
     public var claudeCode: AgentClaudeCodeEntry?
     /// Read only when the entry creates the agent: `false` keeps the new
     /// agent out of the Orchestrator's spawn pool. Patching an existing
@@ -469,6 +470,7 @@ extension AgentEntry: Codable {
         case sandbox
         case subagents
         case workingFolder = "working_folder"
+        case sourceTemplate = "source_template"
         case claudeCode = "claude_code"
         case orchestratorSpawnable = "orchestrator_spawnable"
     }
@@ -491,6 +493,7 @@ extension AgentEntry: Codable {
         sandbox = try c.decodeIfPresent(AgentSandboxEntry.self, forKey: .sandbox)
         subagents = try c.decodeIfPresent(AgentSubagentsEntry.self, forKey: .subagents)
         workingFolder = try c.configField(String.self, forKey: .workingFolder)
+        sourceTemplate = try c.decodeIfPresent(String.self, forKey: .sourceTemplate)
         claudeCode = try c.decodeIfPresent(AgentClaudeCodeEntry.self, forKey: .claudeCode)
         orchestratorSpawnable = try c.decodeIfPresent(Bool.self, forKey: .orchestratorSpawnable)
     }
@@ -513,6 +516,7 @@ extension AgentEntry: Codable {
         try c.encodeIfPresent(sandbox, forKey: .sandbox)
         try c.encodeIfPresent(subagents, forKey: .subagents)
         try c.encode(configField: workingFolder, forKey: .workingFolder)
+        try c.encodeIfPresent(sourceTemplate, forKey: .sourceTemplate)
         try c.encodeIfPresent(claudeCode, forKey: .claudeCode)
         try c.encodeIfPresent(orchestratorSpawnable, forKey: .orchestratorSpawnable)
     }

@@ -425,7 +425,9 @@ struct AgentsView: View {
             chatSubtitle: agent.chatSubtitle,
             isBuiltIn: false,
             createdAt: Date(),
-            updatedAt: Date()
+            updatedAt: Date(),
+            sourceTemplateName: agent.sourceTemplateName,
+            sourceTemplateID: agent.sourceTemplateID
         )
 
         // Intel: `AgentStore` is a no-op stub here, so saving through it made
@@ -5655,6 +5657,8 @@ struct AgentDetailView: View {
             order: current.order,
             workingFolderBookmark: current.workingFolderBookmark,
             workingFolderPath: current.workingFolderPath,
+            sourceTemplateName: current.sourceTemplateName,
+            sourceTemplateID: current.sourceTemplateID,
             generatedDescription: current.generatedDescription,
             generatedDescriptionPromptHash: current.generatedDescriptionPromptHash
         )

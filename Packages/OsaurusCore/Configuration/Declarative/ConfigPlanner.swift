@@ -1110,6 +1110,7 @@ enum ConfigPlanner {
                 }
             }
         }
+        diff("source_template", desired: entry.sourceTemplate, current: agent.sourceTemplateName, into: &changes)
         switch entry.workingFolder {
         case .absent:
             break

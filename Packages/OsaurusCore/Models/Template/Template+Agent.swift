@@ -232,7 +232,7 @@ extension Template {
             $0.isEmpty ? nil : $0
         } ?? agent.name
         var template = Template(
-            id: id ?? UUID(),
+            id: id ?? agent.sourceTemplateID ?? UUID(),
             name: displayName,
             summary: summary ?? (agent.description.isEmpty ? nil : agent.description),
             author: author.map { TemplateAuthor(name: $0) },

@@ -837,7 +837,7 @@ public final class OsaurusConfigTool: OsaurusTool, PermissionedTool, @unchecked 
         // Knowledge collection names resolve to this Mac's ids here, and a
         // missing `preferred` model becomes null (default model).
         var entry = template.resolvedEntry(overrides: overrides)
-        // Stage 3 sets `entry.sourceTemplate = template.name` here.
+        entry.sourceTemplate = template.name
         // Agents match by name, so a second use of the same template without
         // `overrides.name` would silently rewrite the first agent. Give it a
         // free name instead; an explicit name still updates on purpose.

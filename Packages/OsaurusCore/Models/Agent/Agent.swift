@@ -136,6 +136,14 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     /// authority; the bookmark is kept for upstream bundle compatibility.
     public var workingFolderBookmark: Data?
     public var workingFolderPath: String?
+    /// Name of the agent template this agent was created from (Use
+    /// Template, or an orchestrator apply based on a template). Display
+    /// provenance only; the template may have been renamed or deleted since.
+    /// Carried over by Duplicate. (upstream #3172)
+    public var sourceTemplateName: String?
+    /// Id of that template, so Save as Template on this agent saves a new
+    /// version of the same template instead of a fork.
+    public var sourceTemplateID: UUID?
     /// Purpose line generated in the background from `systemPrompt` when
     /// `description` is blank (upstream #2892; on Intel only while
     /// Settings › Chat › "Fill in missing agent descriptions" is on). Never
@@ -188,6 +196,8 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         order: Int? = nil,
         workingFolderBookmark: Data? = nil,
         workingFolderPath: String? = nil,
+        sourceTemplateName: String? = nil,
+        sourceTemplateID: UUID? = nil,
         generatedDescription: String? = nil,
         generatedDescriptionPromptHash: String? = nil
     ) {
@@ -225,6 +235,8 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         self.order = order
         self.workingFolderBookmark = workingFolderBookmark
         self.workingFolderPath = workingFolderPath
+        self.sourceTemplateName = sourceTemplateName
+        self.sourceTemplateID = sourceTemplateID
         self.generatedDescription = generatedDescription
         self.generatedDescriptionPromptHash = generatedDescriptionPromptHash
     }
@@ -417,6 +429,8 @@ extension Agent {
         workingFolderPath =
             try c.decodeIfPresent(String.self, forKey: .workingFolderPath)
             ?? folderLegacy.decodeIfPresent(String.self, forKey: .hostWorkspacePath)
+        sourceTemplateName = try c.decodeIfPresent(String.self, forKey: .sourceTemplateName)
+        sourceTemplateID = try c.decodeIfPresent(UUID.self, forKey: .sourceTemplateID)
         generatedDescription = try c.decodeIfPresent(String.self, forKey: .generatedDescription)
         generatedDescriptionPromptHash = try c.decodeIfPresent(String.self, forKey: .generatedDescriptionPromptHash)
     }
