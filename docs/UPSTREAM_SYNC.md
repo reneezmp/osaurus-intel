@@ -4807,6 +4807,35 @@ Sparkle key `bYYJJqFx…`. Not launched on the build Mac (macOS 27.2 beta
 26B5086k). The public release needs build 67 or higher. Rosy steps: "Release
 candidate 1.0.62 (build 66)" in the Rosy retest checklist.
 
+### Rosy candidate 1.0.62 (build 69) — 2026-11-19
+
+Built from `2710e77fc` with `scripts/build/build_rosy.sh` (Debug, thin x86_64,
+macOS 13.0 minimum): everything since candidate 68 (`541cd7a06`): stage 5c
+engine slices 2–8 (complete), `W-declarative-config` stages 1–5 (complete,
+`osaurus_config` replaces `orchestrator_config`), `W-agent-templates`,
+`W-osaurus-bundles`, stage 5d provider slices 1–4 (Router billing, wire
+safety, Responses parity including the Codex Lite namespace payload,
+discovery and connect), `W-subagents` stages 1–2 (plumbing only, nothing
+visible), `W-cli-build` (the CLI is not shipped in Rosy builds). Full suite
+5,957 tests passed on the final tree. Archive
+`build/rosy-deploy/Osaurus-Intel-RC-1.0.62-69-2026-11-19.zip` in the main
+checkout (96,964,965 bytes, SHA-256 `b9af67f1…3b270fb2e8`); strict codesign
+before and after unpacking, framework symlinks kept, canonical `~/.osaurus`,
+Sparkle key `bYYJJqFx…` (matches `App/osaurus/Info.plist`). Not launched on
+the build Mac. Rosy steps: the checklist sections dated 2026-11-18 and
+2026-11-19 (marked "Not in candidate 68"); start with **Provider slice 3**
+(Codex GPT-5.6 Lite) and **Provider slice 1** (Router billing). Candidate 68
+was never tested; its sections (2026-11-11 to 2026-11-13) still apply.
+
+**Stopped 2026-11-19 (weekly usage at 60%).** Saved, not in this build:
+`W-subagents` stage 3 (`spawn_agent`, `AgentDelegationDispatcher`) on local
+branch `wip-stage3-s23` (WIP, never compiled; where it stopped is in
+`W_SUBAGENTS_PLAN.md`). Next, in order: finish subagents stage 3; stage 5d
+slices 5–10; the other big Classic items (settings redesign, harness
+runtimes, background runs stage 3, Seatbelt sandbox, privacy filter, Computer
+Use); stage 6. An owner decision on browser access to the local HTTP routes
+is pending (asked 2026-11-18; see the session notes before changing it).
+
 ### Rosy candidate 1.0.62 (build 68) — 2026-11-13
 
 Built from `541cd7a06` with `scripts/build/build_rosy.sh` (Debug, thin

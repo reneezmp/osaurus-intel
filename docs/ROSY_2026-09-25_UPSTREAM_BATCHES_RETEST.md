@@ -13,7 +13,16 @@ nothing here is accepted until checked on Rosy.
 
 ## Candidate
 
-- **Current: `1.0.62` build `68`** (Debug, thin x86_64), built from
+- **Current: `1.0.62` build `69`** (Debug, thin x86_64), built from
+  `2710e77fc` on 2026-11-19: archive
+  `build/rosy-deploy/Osaurus-Intel-RC-1.0.62-69-2026-11-19.zip`, SHA-256
+  `b9af67f15f6406ac0302444e4fe415da0042c284c24a45d4a4ac2d3b270fb2e8`. It
+  contains every section marked "Not in candidate 68" (2026-11-18 and
+  2026-11-19) plus everything from candidate 68, which was never tested.
+  Start with "Provider slice 3" (Codex GPT-5.6 Lite) and "Provider slice 1"
+  (Router billing). Details: `UPSTREAM_SYNC.md`, "Rosy candidate 1.0.62
+  (build 69)".
+- Previous: `1.0.62` build `68` (Debug, thin x86_64), built from
   `541cd7a06` on 2026-11-13: archive
   `build/rosy-deploy/Osaurus-Intel-RC-1.0.62-68-2026-11-13.zip`, SHA-256
   `98d1ce06b55a9ad72083f1f11074f98e663352c478f9dd9e19d7566fae16bff7`. It
