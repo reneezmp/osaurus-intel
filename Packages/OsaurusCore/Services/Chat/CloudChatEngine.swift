@@ -2056,6 +2056,87 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             var roundDataMovement: [Bool] = []
                             var roundOutcomes: [IntelToolOutcome] = []
                             var rejectedInBatch = false  // Classic: a refusal skips the rest of the batch
+                            // Upstream Classic `runBatchInParallel` (stage 5c row 17);
+                            // see the chat-completions branch below for the shape.
+                            let batchMode = AgentToolLoop.batchMode(
+                                forToolNames: finalized.completion.toolCalls.map {
+                                    Self.resolvedOfferedToolName($0.name, offered: activeTools)
+                                })
+                            struct ToolSlot {
+                                var call: IntelCodexResponsesToolCall
+                                var result: String
+                                var wasHeld = false
+                                var wasDeduped = false
+                                var needsExecution = false
+                            }
+                            var slots: [ToolSlot] = []
+                            let loadBufferForRun = loadBuffer
+                            let modelForRun = resolvedModel
+                            let requestForRun = request
+                            let runTool: @Sendable (IntelBatchCall, Bool) async throws -> String = {
+                                batchCall, retainsOversized in
+                                // Tools that bind UI to their call (`speak`)
+                                // read the call id from the task-local.
+                                try await Self.withSubagentScope(model: modelForRun, request: requestForRun) {
+                                    try await ChatExecutionContext.$currentToolCallId.withValue(batchCall.callId) {
+                                        try await CapabilityLoadBuffer.$current.withValue(loadBufferForRun) {
+                                            // #3336: retain oversized results only when `file_read` can page them.
+                                            try await ChatExecutionContext.$retainsOversizedToolResults.withValue(
+                                                retainsOversized
+                                            ) {
+                                                try await ToolRegistry.shared.execute(
+                                                    name: batchCall.toolName,
+                                                    argumentsJSON: batchCall.jsonArguments
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Report one finished call (always in model order).
+                            func settle(_ slot: ToolSlot, isolation: isolated (any Actor)? = #isolation) async {
+                                let call = slot.call
+                                let result = await Self.processedShareArtifactResult(
+                                    name: call.name, result: slot.result)
+                                continuation.yield(
+                                    StreamingToolHint.encodeDone(
+                                        callId: call.callID,
+                                        name: call.name,
+                                        arguments: call.arguments,
+                                        result: result
+                                    )
+                                )
+                                if let adopted = await Self.adoptingLoadedTools(from: loadBuffer, into: activeTools) {
+                                    activeTools = adopted
+                                    liveToolSpecs = Self.encodeTools(adopted)
+                                }
+                                insightToolCalls.append(
+                                    ToolCallLog(
+                                        name: call.name,
+                                        arguments: call.arguments,
+                                        result: result,
+                                        isError: result.hasPrefix("⛔️")
+                                    )
+                                )
+                                results.append(.init(callID: call.callID, output: result))
+                                roundOutcomes.append(
+                                    IntelToolOutcome(
+                                        toolName: call.name, argumentsJSON: call.arguments, result: result,
+                                        wasDeduped: slot.wasDeduped, wasError: ToolEnvelope.isError(result)))
+                                taskState.record(name: call.name, argsJSON: call.arguments, result: result)
+                                grounded.record(toolName: call.name, argumentsJSON: call.arguments, result: result)
+                                roundDataMovement.append(
+                                    AgentToolLoop.isSuccessfulDataMovement(
+                                        name: call.name, argumentsJSON: call.arguments, result: result,
+                                        wasHeld: slot.wasHeld))
+                                if ChatExecutionContext.toolResultImagesEnabled {
+                                    resultImages += ToolResultMediaBridge.attachments(toolName: call.name, result: result)
+                                        .loadImages()
+                                }
+                                if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
+                                    runEndedByTool = true
+                                }
+                            }
                             for rawCall in finalized.completion.toolCalls {
                                 try Task.checkCancellation()
                                 let call = IntelCodexResponsesToolCall(
@@ -2070,9 +2151,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         StreamingToolHint.encodeStarted(
                                             callId: call.callID, name: call.name, arguments: call.arguments))
                                 }
-                                var result: String
+                                var result = ""
                                 var wasHeld = false
                                 var wasDeduped = false
+                                var needsExecution = false
                                 if rejectedInBatch {
                                     result = Self.skippedAfterRejectionResult(toolName: call.name)
                                 } else if !isOffered {
@@ -2162,32 +2244,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                             ? "blocked by your tool permissions (Deny)"
                                             : Self.unapprovedReason
                                         result = "⛔️ “\(call.name)” was not run — \(reason)."
+                                    } else if batchMode != .inline {
+                                        // Approved: runs with the rest of the batch below.
+                                        needsExecution = true
                                     } else {
                                         // Upstream #2656: the tool's wall time, so a
                                         // late return shows in the run log.
                                         let toolStart = Date()
                                         do {
-                                            // Tools that bind UI to their call (`speak`)
-                                            // read the call id from the task-local.
-                                            result = try await Self.withSubagentScope(
-                                                model: resolvedModel, request: request
-                                            ) {
-                                                try await ChatExecutionContext.$currentToolCallId.withValue(
-                                                    call.callID
-                                                ) {
-                                                    try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
-                                                        // #3336: retain oversized results only when `file_read` can page them.
-                                                        try await ChatExecutionContext.$retainsOversizedToolResults.withValue(
-                                                            activeTools?.contains(where: { $0.function.name == "file_read" }) == true
-                                                        ) {
-                                                            try await ToolRegistry.shared.execute(
-                                                                name: call.name,
-                                                                argumentsJSON: call.arguments
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
+                                            result = try await runTool(
+                                                IntelBatchCall(
+                                                    callId: call.callID, toolName: call.name,
+                                                    jsonArguments: call.arguments),
+                                                activeTools?.contains(where: { $0.function.name == "file_read" }) == true)
                                             NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")
                                         } catch {
                                             NSLog("[CloudChatEngine] tool '\(call.name)' THREW after \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s: \(error.localizedDescription)")
@@ -2195,45 +2264,36 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         }
                                     }
                                 }
-                                result = await Self.processedShareArtifactResult(name: call.name, result: result)
-                                continuation.yield(
-                                    StreamingToolHint.encodeDone(
-                                        callId: call.callID,
-                                        name: call.name,
-                                        arguments: call.arguments,
-                                        result: result
-                                    )
-                                )
-                                if let adopted = await Self.adoptingLoadedTools(from: loadBuffer, into: activeTools) {
-                                    activeTools = adopted
-                                    liveToolSpecs = Self.encodeTools(adopted)
+                                let slot = ToolSlot(
+                                    call: call, result: result, wasHeld: wasHeld, wasDeduped: wasDeduped,
+                                    needsExecution: needsExecution)
+                                if batchMode == .inline {
+                                    await settle(slot)
+                                } else {
+                                    slots.append(slot)
                                 }
-                                insightToolCalls.append(
-                                    ToolCallLog(
-                                        name: call.name,
-                                        arguments: call.arguments,
-                                        result: result,
-                                        isError: result.hasPrefix("⛔️")
-                                    )
-                                )
-                                results.append(.init(callID: call.callID, output: result))
-                                roundOutcomes.append(
-                                    IntelToolOutcome(
-                                        toolName: call.name, argumentsJSON: call.arguments, result: result,
-                                        wasDeduped: wasDeduped, wasError: ToolEnvelope.isError(result)))
-                                taskState.record(name: call.name, argsJSON: call.arguments, result: result)
-                                grounded.record(toolName: call.name, argumentsJSON: call.arguments, result: result)
-                                roundDataMovement.append(
-                                    AgentToolLoop.isSuccessfulDataMovement(
-                                        name: call.name, argumentsJSON: call.arguments, result: result,
-                                        wasHeld: wasHeld))
-                                if ChatExecutionContext.toolResultImagesEnabled {
-                                    resultImages += ToolResultMediaBridge.attachments(toolName: call.name, result: result)
-                                        .loadImages()
+                            }
+                            if batchMode != .inline {
+                                let runnable = slots.indices.filter { slots[$0].needsExecution }
+                                if !runnable.isEmpty {
+                                    NSLog("[CloudChatEngine] executing \(runnable.count) approved call(s)\(batchMode == .parallel ? " in parallel" : " in order"): \(runnable.map { slots[$0].call.name }.joined(separator: ", "))")
+                                    let retainsOversized = activeTools?.contains(where: { $0.function.name == "file_read" }) == true
+                                    let executions = await AgentToolLoop.runBatchInParallel(
+                                        runnable.map {
+                                            IntelBatchCall(
+                                                callId: slots[$0].call.callID, toolName: slots[$0].call.name,
+                                                jsonArguments: slots[$0].call.arguments)
+                                        },
+                                        serial: batchMode == .serial
+                                    ) { batchCall in try await runTool(batchCall, retainsOversized) }
+                                    for (index, execution) in zip(runnable, executions) {
+                                        slots[index].result = execution.result
+                                    }
                                 }
-                                if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
-                                    runEndedByTool = true
-                                }
+                                for slot in slots { await settle(slot) }
+                                // A Stop during the batch: every call has its result
+                                // card; the run ends here.
+                                try Task.checkCancellation()
                             }
                             // `complete` / `clarify` / `prompt_working_folder`
                             // end the run: the chat reacts to their result
@@ -2605,6 +2665,94 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         var roundDataMovement: [Bool] = []
                         var roundOutcomes: [IntelToolOutcome] = []
                         var rejectedInBatch = false  // Classic: a refusal skips the rest of the batch
+                        // Upstream Classic `runBatchInParallel` (stage 5c row 17):
+                        // approvals resolve serially in model order first, then
+                        // the approved calls run concurrently (same-path
+                        // `file_write` / `file_edit` calls one after another) and
+                        // the results are reported in call order. A round with a
+                        // single call, or one that loads tools (`capabilities`),
+                        // keeps the one-by-one flow so a later call can use them.
+                        let batchMode = AgentToolLoop.batchMode(forToolNames: orderedCalls.map(\.name))
+                        struct ToolSlot {
+                            var call: PartialToolCall
+                            var result: String
+                            var wasHeld = false
+                            var wasDeduped = false
+                            var needsExecution = false
+                            var started = Date()
+                            var durationMs: Double?
+                        }
+                        var slots: [ToolSlot] = []
+                        let loadBufferForRun = loadBuffer
+                        let modelForRun = resolvedModel
+                        let requestForRun = request
+                        let runTool: @Sendable (IntelBatchCall, Bool) async throws -> String = {
+                            batchCall, retainsOversized in
+                            try await Self.withSubagentScope(model: modelForRun, request: requestForRun) {
+                                try await ChatExecutionContext.$currentToolCallId.withValue(batchCall.callId) {
+                                    try await CapabilityLoadBuffer.$current.withValue(loadBufferForRun) {
+                                        // #3336: retain oversized results only when `file_read` can page them.
+                                        try await ChatExecutionContext.$retainsOversizedToolResults.withValue(
+                                            retainsOversized
+                                        ) {
+                                            try await ToolRegistry.shared.execute(
+                                                name: batchCall.toolName,
+                                                argumentsJSON: batchCall.jsonArguments
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Report one finished call: result card, loaded tools,
+                        // wire message, task state (always in model order).
+                        func settle(_ slot: ToolSlot, isolation: isolated (any Actor)? = #isolation) async {
+                            let call = slot.call
+                            let callId = call.id
+                            let result = await Self.processedShareArtifactResult(
+                                name: call.name, result: slot.result)
+                            continuation.yield(
+                                StreamingToolHint.encodeDone(
+                                    callId: callId,
+                                    name: call.name,
+                                    arguments: call.arguments,
+                                    result: result
+                                )
+                            )
+                            if let adopted = await Self.adoptingLoadedTools(from: loadBuffer, into: activeTools) {
+                                activeTools = adopted
+                                liveToolSpecs = Self.encodeTools(adopted)
+                            }
+                            insightToolCalls.append(
+                                ToolCallLog(
+                                    name: call.name,
+                                    arguments: call.arguments,
+                                    result: result,
+                                    durationMs: slot.durationMs ?? Date().timeIntervalSince(slot.started) * 1_000,
+                                    isError: result.hasPrefix("⛔️")
+                                )
+                            )
+                            // Images a tool staged (`file_read` on a picture) ride
+                            // with its result when the model takes images (upstream
+                            // `ToolResultMediaBridge`).
+                            wireMessages.append(
+                                IntelToolImageWire.toolMessage(
+                                    callId: callId, toolName: call.name, result: result,
+                                    imagesEnabled: ChatExecutionContext.toolResultImagesEnabled))
+                            roundOutcomes.append(
+                                IntelToolOutcome(
+                                    toolName: call.name, argumentsJSON: call.arguments, result: result,
+                                    wasDeduped: slot.wasDeduped, wasError: ToolEnvelope.isError(result)))
+                            taskState.record(name: call.name, argsJSON: call.arguments, result: result)
+                            grounded.record(toolName: call.name, argumentsJSON: call.arguments, result: result)
+                            roundDataMovement.append(
+                                AgentToolLoop.isSuccessfulDataMovement(
+                                    name: call.name, argumentsJSON: call.arguments, result: result,
+                                    wasHeld: slot.wasHeld))
+                            if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
+                                runEndedByTool = true
+                            }
+                        }
                         for call in orderedCalls {
                             try Task.checkCancellation()
                             let callId = call.id
@@ -2618,9 +2766,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     StreamingToolHint.encodeStarted(
                                         callId: callId, name: call.name, arguments: call.arguments))
                             }
-                            var result: String
+                            var result = ""
                             var wasHeld = false
                             var wasDeduped = false
+                            var needsExecution = false
                             let toolStart = Date()
 
                             if rejectedInBatch {
@@ -2725,26 +2874,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         : Self.unapprovedReason
                                     NSLog("[CloudChatEngine] tool '\(call.name)' not run — \(reason)")
                                     result = "⛔️ “\(call.name)” was not run — \(reason)."
+                                } else if batchMode != .inline {
+                                    // Approved: runs with the rest of the batch below.
+                                    needsExecution = true
                                 } else {
                                     NSLog("[CloudChatEngine] executing tool '\(call.name)' args=\(call.arguments.prefix(200))")
                                     do {
-                                        result = try await Self.withSubagentScope(
-                                            model: resolvedModel, request: request
-                                        ) {
-                                            try await ChatExecutionContext.$currentToolCallId.withValue(callId) {
-                                                try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
-                                                    // #3336: retain oversized results only when `file_read` can page them.
-                                                    try await ChatExecutionContext.$retainsOversizedToolResults.withValue(
-                                                        activeTools?.contains(where: { $0.function.name == "file_read" }) == true
-                                                    ) {
-                                                        try await ToolRegistry.shared.execute(
-                                                            name: call.name,
-                                                            argumentsJSON: call.arguments
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        result = try await runTool(
+                                            IntelBatchCall(callId: callId, toolName: call.name, jsonArguments: call.arguments),
+                                            activeTools?.contains(where: { $0.function.name == "file_read" }) == true)
                                         NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")
                                     } catch {
                                         NSLog("[CloudChatEngine] tool '\(call.name)' THREW after \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s: \(error.localizedDescription)")
@@ -2752,47 +2890,37 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     }
                                 }
                             }
-                            result = await Self.processedShareArtifactResult(name: call.name, result: result)
-                            continuation.yield(
-                                StreamingToolHint.encodeDone(
-                                    callId: callId,
-                                    name: call.name,
-                                    arguments: call.arguments,
-                                    result: result
-                                )
-                            )
-                            if let adopted = await Self.adoptingLoadedTools(from: loadBuffer, into: activeTools) {
-                                activeTools = adopted
-                                liveToolSpecs = Self.encodeTools(adopted)
+                            let slot = ToolSlot(
+                                call: call, result: result, wasHeld: wasHeld, wasDeduped: wasDeduped,
+                                needsExecution: needsExecution, started: toolStart)
+                            if batchMode == .inline {
+                                await settle(slot)
+                            } else {
+                                slots.append(slot)
                             }
-                            insightToolCalls.append(
-                                ToolCallLog(
-                                    name: call.name,
-                                    arguments: call.arguments,
-                                    result: result,
-                                    durationMs: Date().timeIntervalSince(toolStart) * 1_000,
-                                    isError: result.hasPrefix("⛔️")
-                                )
-                            )
-                            // Images a tool staged (`file_read` on a picture) ride
-                            // with its result when the model takes images (upstream
-                            // `ToolResultMediaBridge`).
-                            wireMessages.append(
-                                IntelToolImageWire.toolMessage(
-                                    callId: callId, toolName: call.name, result: result,
-                                    imagesEnabled: ChatExecutionContext.toolResultImagesEnabled))
-                            roundOutcomes.append(
-                                IntelToolOutcome(
-                                    toolName: call.name, argumentsJSON: call.arguments, result: result,
-                                    wasDeduped: wasDeduped, wasError: ToolEnvelope.isError(result)))
-                            taskState.record(name: call.name, argsJSON: call.arguments, result: result)
-                            grounded.record(toolName: call.name, argumentsJSON: call.arguments, result: result)
-                            roundDataMovement.append(
-                                AgentToolLoop.isSuccessfulDataMovement(
-                                    name: call.name, argumentsJSON: call.arguments, result: result, wasHeld: wasHeld))
-                            if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
-                                runEndedByTool = true
+                        }
+                        if batchMode != .inline {
+                            let runnable = slots.indices.filter { slots[$0].needsExecution }
+                            if !runnable.isEmpty {
+                                NSLog("[CloudChatEngine] executing \(runnable.count) approved call(s)\(batchMode == .parallel ? " in parallel" : " in order"): \(runnable.map { slots[$0].call.name }.joined(separator: ", "))")
+                                let retainsOversized = activeTools?.contains(where: { $0.function.name == "file_read" }) == true
+                                let executions = await AgentToolLoop.runBatchInParallel(
+                                    runnable.map {
+                                        IntelBatchCall(
+                                            callId: slots[$0].call.id, toolName: slots[$0].call.name,
+                                            jsonArguments: slots[$0].call.arguments)
+                                    },
+                                    serial: batchMode == .serial
+                                ) { batchCall in try await runTool(batchCall, retainsOversized) }
+                                for (index, execution) in zip(runnable, executions) {
+                                    slots[index].result = execution.result
+                                    slots[index].durationMs = execution.durationMs
+                                }
                             }
+                            for slot in slots { await settle(slot) }
+                            // A Stop during the batch: every call has its result
+                            // card; the run ends here.
+                            try Task.checkCancellation()
                         }
                         refundDataMovementRound(roundDataMovement)
                         if let bias = taskState.nextStepBias() {
