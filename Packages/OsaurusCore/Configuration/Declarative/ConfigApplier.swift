@@ -441,6 +441,14 @@ enum ConfigApplier {
             &agent, from: entry.workingFolder,
             prepared: preparedFolder ?? prepareWorkingFolder(entry.workingFolder),
             outcome: &outcome)
+        if var claudeCodeEntry = entry.claudeCode {
+            // Never settable from an agent entry: only the Default agent may
+            // change Osaurus configuration (the planner refuses it).
+            claudeCodeEntry.allowOsaurusConfigWrites = nil
+            var config = agent.claudeCode ?? .default
+            ConfigHarness.patch(&config, from: claudeCodeEntry)
+            agent.claudeCode = config
+        }
         guard let caps = entry.capabilities else { return outcome }
         patchCapabilities(&agent, from: caps)
         return outcome

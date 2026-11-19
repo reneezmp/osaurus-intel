@@ -299,6 +299,7 @@ enum ConfigPlanner {
                 checkRange(entry.maxTokens, 1...10_000_000, "agents[\(entry.name)].max_tokens", &issues)
                 do { try entry.generationSettings.valueOrNil?.validate() }
                 catch { issues.append("agents[\(entry.name)].generation_settings: \(error.localizedDescription)") }
+                checkClaudeCodeEntry(entry.claudeCode, label: "agents[\(entry.name)]", into: &issues)
                 if let mode = entry.tools?.mode, ToolSelectionMode(rawValue: mode) == nil {
                     issues.append(
                         "agents[\(entry.name)].tools.mode: must be `auto` or `manual` (got `\(mode)`).")
@@ -996,8 +997,39 @@ enum ConfigPlanner {
                 changes: changes, risks: risks))
     }
 
-    /// Plan lines and risks for an agent's `runtime` and `claude_code` keys.
+    /// Plan lines and risks for an agent's `claude_code` keys (upstream #3229
+    /// added `effort`). Intel has no harness runtime registry, so upstream's
+    /// `runtime` half of `diffRuntime` is not here (`W-harness-runtimes`).
     @MainActor
+    private static func diffClaudeCode(
+        _ claudeCode: AgentClaudeCodeEntry?, current: ClaudeCodeAgentConfig,
+        agent: String, into changes: inout [String], risks: inout [String]
+    ) {
+        guard let claudeCode else { return }
+        changes.append(contentsOf: ConfigHarness.changes(claudeCode, current: current, prefix: "claude_code"))
+        risks.append(contentsOf: ConfigHarness.risks(claudeCode, current: current, agent: agent))
+    }
+
+    /// `claude_code` values must be known keys (upstream `checkRuntimeReference`,
+    /// minus the harness `runtime` lookup). Only the Default agent may change
+    /// Osaurus configuration, and `agents[]` entries are never the Default agent.
+    private static func checkClaudeCodeEntry(
+        _ claudeCode: AgentClaudeCodeEntry?, label: String, into issues: inout [String]
+    ) {
+        if let raw = claudeCode?.mode, ConfigHarness.mode(forKey: raw) == nil {
+            issues.append(
+                "\(label).claude_code.mode: must be one of: \(ConfigHarness.modeKeys.joined(separator: ", ")).")
+        }
+        if let raw = claudeCode?.effort, ConfigHarness.effort(forKey: raw) == nil {
+            issues.append(
+                "\(label).claude_code.effort: must be one of: \(ConfigHarness.effortKeys.joined(separator: ", ")).")
+        }
+        if claudeCode?.allowOsaurusConfigWrites != nil {
+            issues.append(
+                "\(label).claude_code.allow_osaurus_config_writes: only the Default agent can change "
+                    + "Osaurus configuration.")
+        }
+    }
 
     private static func planActiveAgent(
         _ desired: String, current: String, into actions: inout [ConfigPlanAction]
@@ -1179,6 +1211,9 @@ enum ConfigPlanner {
                     diffCapabilities(caps, agent: agent, into: &changes, risks: &risks)
                 }
                 diffPortableSettings(entry, agent: agent, into: &changes)
+                diffClaudeCode(
+                    entry.claudeCode, current: agent.claudeCode ?? .default,
+                    agent: entry.name, into: &changes, risks: &risks)
                 if changes.isEmpty {
                     unchanged += 1
                 } else {
@@ -1205,6 +1240,9 @@ enum ConfigPlanner {
                     }
                 }
                 summarizePortableSettings(entry, into: &changes)
+                diffClaudeCode(
+                    entry.claudeCode, current: .default,
+                    agent: entry.name, into: &changes, risks: &risks)
                 // Intel never adds a created agent to the Orchestrator's Gate 4
                 // allowlist implicitly (#3227): say so for either spelling.
                 changes.append(
