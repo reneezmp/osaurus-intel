@@ -56,7 +56,7 @@ struct OsaurusGuideTests {
         let corpus = OsaurusGuide.topics.filter { $0.id != "intel-mac" }.map(\.body).joined(separator: "\n")
         #expect(corpus.contains("⌘,"), "guide should tell the user Settings… is ⌘,")
         for upstreamOnly in [
-            "osaurus_config", "osaurus_inspect", "osaurus_list", "Parakeet", "PocketTTS", "Pocket TTS",
+            "osaurus_inspect", "osaurus_list", "Parakeet", "PocketTTS", "Pocket TTS",
             "MLXModels", "Privacy → Activity Log", "Apple Silicon (M-series)", "No account or cloud required",
             "Download a local model",
         ] {

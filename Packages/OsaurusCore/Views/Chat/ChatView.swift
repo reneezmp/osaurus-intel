@@ -4884,11 +4884,9 @@ struct ChatView: View {
     var body: some View {
 #if OSAURUS_INTEL
         chatModeContent
-            .overlay { IntelConfigPlanApprovalCard(sessionID: session.sessionId?.uuidString) }
-            // Upstream's declarative-config plan modal (W-declarative-config
-            // stage 2). Nothing enqueues into `ConfigApprovalQueue` until the
-            // `osaurus_config` tool swap (stage 4); Intel's card above still
-            // serves `orchestrator_config`.
+            // Upstream's declarative-config plan modal: the one review surface
+            // for `osaurus_config` applies (stage 4 replaced Intel's own
+            // `IntelConfigPlanApprovalCard` / `orchestrator_config`).
             .overlay { ConfigApprovalModal(scope: .chat(windowState.windowId)) }
             .onChange(of: observedSession.promptQueue.current?.id) { newValue in
                 // Hand keyboard focus back to the composer once the last

@@ -200,59 +200,15 @@ struct IntelHTTPApprovalsTests {
         #expect(await request.value == nil)
     }
 
+    /// The paired phone's `/config/approvals` routes list and answer the
+    /// declarative planner's queue (the only config queue since the stage 4
+    /// `osaurus_config` swap).
     @Test func configPlan_fromAPhoneRun_isListedAndApplied() async throws {
         let server = try await startApprovalsTestServer()
         defer { Task { await server.shutdown() } }
-        let plan = Self.plan()
-        let review = Task { @MainActor in
-            await IntelConfigApprovalQueue.shared.requestApproval(
-                plan: plan, sessionID: "phone-run", fromPairedPhone: true, timeout: 30)
-        }
-        let id = try await waitFor { await MainActor.run { IntelConfigApprovalQueue.shared.pending.first?.id } }
-
-        let list = try await server.send("GET", "/config/approvals")
-        let rows = try #require(try list.object()["approvals"] as? [[String: Any]])
-        #expect(rows.count == 1)
-        #expect(rows.first?["id"] as? String == id.uuidString)
-        #expect(rows.first?["prune"] as? Bool == false)
-        #expect(rows.first?["change_count"] as? Int == 1)
-        #expect((rows.first?["summary"] as? String)?.contains("default_agent.name") == true)
-        #expect(rows.first?["high_risk"] as? Bool == true)
-
-        let apply = try await server.send("POST", "/config/approvals/\(id.uuidString)", json: #"{"decision":"apply"}"#)
-        #expect(apply.status == 200)
-        #expect(await review.value == .approved)
-    }
-
-    @Test func configPlan_fromAMacChat_isNotThePhones() async throws {
-        let server = try await startApprovalsTestServer()
-        defer { Task { await server.shutdown() } }
-        let review = Task { @MainActor in
-            await IntelConfigApprovalQueue.shared.requestApproval(plan: Self.plan(), sessionID: "mac-chat", timeout: 30)
-        }
-        let id = try await waitFor { await MainActor.run { IntelConfigApprovalQueue.shared.pending.first?.id } }
-        let list = try await server.send("GET", "/config/approvals")
-        #expect(list.body == #"{"approvals":[]}"#)
-        let cancel = try await server.send("POST", "/config/approvals/\(id.uuidString)", json: #"{"decision":"cancel"}"#)
-        #expect(cancel.status == 404)
-        await MainActor.run { IntelConfigApprovalQueue.shared.resolve(id: id, outcome: .cancelled) }
-        #expect(await review.value == .cancelled)
-    }
-
-    /// Stage 2 of `W-declarative-config`: the declarative planner's own queue
-    /// (`ConfigApprovalQueue`) answers on the same two routes as Intel's.
-    @Test func declarativePlan_fromAPhoneRun_isListedAndApplied() async throws {
-        let server = try await startApprovalsTestServer()
-        defer { Task { await server.shutdown() } }
-        let plan = ConfigPlan(
-            actions: [
-                ConfigPlanAction(
-                    section: "memory", target: "memory", kind: .update,
-                    changes: ["enabled: true -> false"], risks: [])
-            ], notes: [])
         let review = Task { @MainActor in
             await ConfigApprovalQueue.shared.requestApproval(
-                plan: plan, prune: false, fromPairedPhone: true, timeout: .seconds(30))
+                plan: Self.plan(), prune: false, fromPairedPhone: true, timeout: .seconds(30))
         }
         let id = try await waitFor { await MainActor.run { ConfigApprovalQueue.shared.pending.first?.id } }
 
@@ -261,41 +217,48 @@ struct IntelHTTPApprovalsTests {
         #expect(rows.count == 1)
         #expect(rows.first?["id"] as? String == id.uuidString)
         #expect(rows.first?["prune"] as? Bool == false)
+        #expect((rows.first?["summary"] as? String)?.contains("default_agent") == true)
 
         let apply = try await server.send("POST", "/config/approvals/\(id.uuidString)", json: #"{"decision":"apply"}"#)
         #expect(apply.status == 200)
         #expect(await review.value == .approved)
     }
 
-    @Test func mergedApprovalBodies_concatenateRowsAndSurviveGarbage() {
-        let a = Data(#"{"approvals":[{"id":"1"}]}"#.utf8)
-        let b = Data(#"{"approvals":[{"id":"2"},{"id":"3"}]}"#.utf8)
-        let merged = HTTPHandler.mergedPairedPhoneApprovals(a, Data("not json".utf8), b)
-        let rows = (try? JSONSerialization.jsonObject(with: merged) as? [String: Any])?["approvals"] as? [[String: Any]]
-        #expect(rows?.compactMap { $0["id"] as? String } == ["1", "2", "3"])
+    @Test func configPlan_fromAPhoneRun_canBeCancelled() async throws {
+        let server = try await startApprovalsTestServer()
+        defer { Task { await server.shutdown() } }
+        let review = Task { @MainActor in
+            await ConfigApprovalQueue.shared.requestApproval(
+                plan: Self.plan(), prune: false, fromPairedPhone: true, timeout: .seconds(30))
+        }
+        let id = try await waitFor { await MainActor.run { ConfigApprovalQueue.shared.pending.first?.id } }
+        let cancel = try await server.send("POST", "/config/approvals/\(id.uuidString)", json: #"{"decision":"cancel"}"#)
+        #expect(cancel.status == 200)
+        #expect(await review.value == .denied)
+    }
+
+    @Test func configPlan_fromAMacChat_isNotThePhones() async throws {
+        let server = try await startApprovalsTestServer()
+        defer { Task { await server.shutdown() } }
+        let review = Task { @MainActor in
+            await ConfigApprovalQueue.shared.requestApproval(plan: Self.plan(), prune: false, timeout: .seconds(30))
+        }
+        let id = try await waitFor { await MainActor.run { ConfigApprovalQueue.shared.pending.first?.id } }
+        let list = try await server.send("GET", "/config/approvals")
+        #expect(list.body == #"{"approvals":[]}"#)
+        let cancel = try await server.send("POST", "/config/approvals/\(id.uuidString)", json: #"{"decision":"cancel"}"#)
+        #expect(cancel.status == 404)
+        await MainActor.run { ConfigApprovalQueue.shared.resolve(id: id, outcome: .cancelled) }
+        #expect(await review.value == .cancelled)
     }
 
     // MARK: - The remote reviewer outside the routes
 
-    /// A phone run with no Mac chat open still parks its plan for the phone
-    /// (upstream); any other caller without a chat surface fails closed.
-    @Test func configService_parksAPhoneRunsPlan() async throws {
-        let plan = Self.plan()
-        let review = Task {
-            await ChatExecutionContext.$hasRemoteReviewer.withValue(true) {
-                await ChatExecutionContext.$currentSessionId.withValue("phone-run-2") {
-                    await IntelConfigApprovalService.requestApproval(plan: plan)
-                }
-            }
-        }
-        let request = try await waitFor { await MainActor.run { IntelConfigApprovalQueue.shared.pending.first } }
-        #expect(request.fromPairedPhone)
-        #expect(await MainActor.run { IntelConfigApprovalQueue.shared.resolveFromPairedPhone(id: request.id, apply: false) })
-        #expect(await review.value == .denied)
-
-        let closed = await ChatExecutionContext.$currentSessionId.withValue("no-surface") {
-            await IntelConfigApprovalService.requestApproval(plan: plan)
-        }
+    /// With no mounted chat surface (no Mac window to show the card) the
+    /// config service applies nothing: it fails closed instead of falling
+    /// back to a generic prompt that could persist "Always Allow".
+    @Test func configService_failsClosedWithoutAChatSurface() async throws {
+        let closed = await ConfigApprovalService.requestApproval(plan: Self.plan(), prune: false)
         #expect(closed == .cancelled)
     }
 
@@ -314,16 +277,13 @@ struct IntelHTTPApprovalsTests {
 
     // MARK: - Helpers
 
-    private static func plan() -> IntelDeclarativeConfigurationPlan {
-        var plan = IntelDeclarativeConfigurationPlan(
-            id: UUID(),
-            currentStateFingerprint: "current",
-            targetStateFingerprint: "target",
-            changes: [.init(path: "default_agent.name", before: "Before", after: "After")],
-            target: DefaultAgentConfiguration(displayName: "After")
-        )
-        plan.warnings = ["Delegation list becomes empty."]
-        return plan
+    private static func plan() -> ConfigPlan {
+        ConfigPlan(
+            actions: [
+                ConfigPlanAction(
+                    section: "default_agent", target: "default_agent", kind: .update,
+                    changes: ["name: Before → After"], risks: [])
+            ], notes: [])
     }
 }
 

@@ -1169,7 +1169,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
 
     private func registerIntelOrchestratorTools() {
         let tools: [OsaurusTool] = [
-            IntelOrchestratorConfigurationTool(),
+            OsaurusConfigTool(),
             IntelOrchestratorDelegationTool(),
             IntelOrchestratorTargetsTool(),
             // Upstream's in-app guide (`osaurus_help`, W-ui-misc).
@@ -1985,7 +1985,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     }
 
     static let orchestratorOnlyToolNames: Set<String> = [
-        IntelOrchestratorConfigurationTool.toolName,
+        OsaurusConfigTool.toolName,
         IntelOrchestratorDelegationTool.toolName,
         IntelOrchestratorTargetsTool.toolName,
         OsaurusHelpTool.toolName,

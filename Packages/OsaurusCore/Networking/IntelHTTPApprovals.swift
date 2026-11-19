@@ -9,7 +9,7 @@
 //  - `GET /approvals`, `POST /approvals/{id}`: tool approval cards
 //    (`ToolPermissionPromptService.remotePrompts`).
 //  - `GET /config/approvals`, `POST /config/approvals/{id}`: configuration
-//    plans (Intel's `IntelConfigApprovalQueue`).
+//    plans (upstream's `ConfigApprovalQueue`, raised by `osaurus_config`).
 //  - `GET /computer-use/prompts`, `POST /computer-use/prompts/{id}`: computer
 //    use confirm and cloud-vision consent cards (`ComputerUsePromptQueue`).
 //  - `GET /secrets/prompts`, `POST /secrets/prompts/{id}`: secret requests
@@ -69,27 +69,11 @@ extension HTTPHandler {
         let eventLoop = context.eventLoop
         runRequestTask {
             let data = await MainActor.run {
-                Self.mergedPairedPhoneApprovals(
-                    IntelConfigApprovalQueue.shared.pairedPhoneListJSON(),
-                    ConfigApprovalQueue.shared.pairedPhoneListJSON())
+                ConfigApprovalQueue.shared.pairedPhoneListJSON()
             }
             self.respondOnLoop(
                 eventLoop, status: .ok, headers: self.jsonHeaders(), body: String(decoding: data, as: UTF8.self))
         }
-    }
-
-    /// One `{"approvals":[...]}` body from several queues' bodies.
-    static func mergedPairedPhoneApprovals(_ bodies: Data...) -> Data {
-        var rows: [[String: Any]] = []
-        for body in bodies {
-            if let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any],
-                let list = object["approvals"] as? [[String: Any]]
-            {
-                rows.append(contentsOf: list)
-            }
-        }
-        return (try? JSONSerialization.data(withJSONObject: ["approvals": rows], options: [.sortedKeys]))
-            ?? Data(#"{"approvals":[]}"#.utf8)
     }
 
     /// POST /config/approvals/{id} — `{"decision":"apply" | "cancel"}` (§16.3).
@@ -118,11 +102,10 @@ extension HTTPHandler {
         let eventLoop = context.eventLoop
         runRequestTask {
             let answered = await MainActor.run {
-                // The declarative planner's queue (stage 2) and Intel's own
-                // `orchestrator_config` queue share these endpoints; ids are
-                // random UUIDs, so at most one of them holds the plan.
+                // The declarative planner's queue is the only config queue
+                // since the stage 4 swap (Intel's own `orchestrator_config`
+                // queue was removed).
                 ConfigApprovalQueue.shared.resolveFromPairedPhone(id: approvalId, apply: apply)
-                    || IntelConfigApprovalQueue.shared.resolveFromPairedPhone(id: approvalId, apply: apply)
             }
             self.respondOnLoop(
                 eventLoop, status: answered ? .ok : .notFound, headers: self.jsonHeaders(),

@@ -12,7 +12,8 @@ struct IntelOrchestratorPromptTests {
         #expect(prompt.contains("built-in Orchestrator"))
         #expect(prompt.contains("`orchestrator_delegate`"))
         #expect(prompt.contains("`orchestrator_targets`"))
-        #expect(prompt.contains("`orchestrator_config`"))
+        #expect(prompt.contains("`osaurus_config`"))
+        #expect(!prompt.contains("orchestrator_config"))
         #expect(prompt.contains("tool-free"))
         #expect(prompt.contains("inline text"))
     }
@@ -68,7 +69,7 @@ struct IntelOrchestratorPromptTests {
         )
         let names = Set(context.tools.map(\.function.name))
 
-        #expect(names.contains(IntelOrchestratorConfigurationTool.toolName))
+        #expect(names.contains(OsaurusConfigTool.toolName))
         #expect(names.contains(IntelOrchestratorDelegationTool.toolName))
         #expect(names.contains(IntelOrchestratorTargetsTool.toolName))
         #expect(context.prompt.contains("built-in Orchestrator"))

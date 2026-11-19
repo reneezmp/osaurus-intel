@@ -23,24 +23,19 @@ struct IntelUpstreamBatch0930Tests {
     /// the relaxed pass must find the Memory switch.
     @Test func findSettingDropsIntentWordsWhenTheStrictPassIsEmpty() {
         #expect(SettingsSearchIndex.search("please turn off memory").isEmpty)
-        let lookup = IntelOrchestratorConfigurationTool.findSettings("please turn off memory")
+        let lookup = IntelSettingsLookup.findSettings("please turn off memory")
         #expect(lookup.relaxedQuery == "memory")
         #expect(lookup.entries.contains { $0.title == "Enable Memory" })
-
-        let result = IntelOrchestratorConfigurationTool.findSettingResult(query: "please turn off memory")
-        #expect(result["relaxed_query"] as? String == "memory")
-        #expect((result["matches"] as? [[String: Any]])?.isEmpty == false)
     }
 
     @Test func findSettingKeepsTheStrictMatchAndReportsNoRelaxation() {
-        let lookup = IntelOrchestratorConfigurationTool.findSettings("memory")
+        let lookup = IntelSettingsLookup.findSettings("memory")
         #expect(lookup.relaxedQuery == nil)
         #expect(!lookup.entries.isEmpty)
-        #expect(IntelOrchestratorConfigurationTool.findSettingResult(query: "memory")["relaxed_query"] == nil)
     }
 
     @Test func findSettingMadeOnlyOfIntentWordsFindsNothing() {
-        let lookup = IntelOrchestratorConfigurationTool.findSettings("please turn it off")
+        let lookup = IntelSettingsLookup.findSettings("please turn it off")
         #expect(lookup.entries.isEmpty)
         #expect(lookup.relaxedQuery == nil)
     }
@@ -88,20 +83,6 @@ struct IntelUpstreamBatch0930Tests {
         #expect(replacing.warnings.isEmpty)
     }
 
-    @Test func toolResultCarriesPlanWarnings() async throws {
-        let store = BatchTestStore(value: .init(delegation: .init(customAgentAllowlist: [UUID()])))
-        let tool = IntelOrchestratorConfigurationTool(service: .init(store: store)) { _ in .denied }
-        let data = try JSONSerialization.data(withJSONObject: [
-            "operation": "plan", "document": #"{"version":1,"delegation":{"allowed_agent_ids":[]}}"#,
-        ])
-        let result = try await ChatExecutionContext.$currentAgentId.withValue(Agent.defaultId) {
-            try await tool.execute(argumentsJSON: String(decoding: data, as: UTF8.self))
-        }
-        #expect(!ToolEnvelope.isError(result))
-        #expect(result.contains("High risk"))
-        #expect(store.saveCount == 0)
-    }
-
     // MARK: - new_chat_agent
 
     @Test func newChatAgentDecodesIdsOrchestratorAndNull() throws {
@@ -134,19 +115,6 @@ struct IntelUpstreamBatch0930Tests {
 
         let exported = try await service.exportJSON()
         #expect(String(decoding: exported, as: UTF8.self).contains(id.uuidString))
-    }
-
-    @Test func toolRejectsANewChatAgentThatDoesNotExist() async throws {
-        let store = BatchTestStore(value: .init())
-        let tool = IntelOrchestratorConfigurationTool(service: .init(store: store)) { _ in .approved }
-        let data = try JSONSerialization.data(withJSONObject: [
-            "operation": "apply", "document": #"{"version":1,"new_chat_agent":"\#(UUID().uuidString)"}"#,
-        ])
-        let result = try await ChatExecutionContext.$currentAgentId.withValue(Agent.defaultId) {
-            try await tool.execute(argumentsJSON: String(decoding: data, as: UTF8.self))
-        }
-        #expect(ToolEnvelope.isError(result))
-        #expect(store.saveCount == 0)
     }
 
     @Test func newChatAgentFallsBackToTheOrchestrator() {

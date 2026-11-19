@@ -148,9 +148,9 @@ public final class ConfigApprovalQueue: ObservableObject {
     }
 }
 
-/// Entry point the tool calls: prefers the in-chat card, falls back to the
-/// generic modal panel when no chat surface is mounted, so an apply is
-/// always human-gated on attended surfaces.
+/// Entry point the tool calls: the in-chat card when a chat surface is
+/// mounted; otherwise (Intel) nothing is applied, so an apply is always
+/// human-gated.
 public enum ConfigApprovalService {
     public static func requestApproval(
         plan: ConfigPlan,
@@ -160,15 +160,10 @@ public enum ConfigApprovalService {
         if useCard {
             return await ConfigApprovalQueue.shared.requestApproval(plan: plan, prune: prune)
         }
-        var description = "Apply these configuration changes?\n\n" + plan.summaryText()
-        if prune {
-            description += "\n\nPrune is ON: entries not listed in the document will be DELETED."
-        }
-        let outcome = await ToolPermissionPromptService.requestPolicyApproval(
-            toolName: "osaurus_config",
-            description: description,
-            argumentsJSON: ""
-        )
-        return outcome == .denied ? .denied : .approved
+        // Intel (Gate 5B, kept in the stage 4 swap): with no mounted chat
+        // surface this FAILS CLOSED. Upstream falls back to the generic
+        // permission panel, whose "Always Allow" could persist an approval
+        // for configuration changes; here nothing is applied instead.
+        return .cancelled
     }
 }

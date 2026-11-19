@@ -116,8 +116,8 @@ struct OsaurusHelpTool: OsaurusTool {
                 "note": hits.isEmpty
                     ? "No catalog match. Try another name, or action 'topics' then 'read'. "
                         + "Do not invent a menu path, and do not claim you changed a setting."
-                    : "Quote the `path` breadcrumb. Only orchestrator_config can change settings, and only "
-                        + "its own; for anything else tell the user to open that path.",
+                    : "Quote the `path` breadcrumb. `osaurus_config` can change only the "
+                        + "settings its schema lists; for anything else tell the user to open that path.",
             ]
             if let relaxed = lookup.relaxedQuery { result["relaxed_query"] = relaxed }
             return ToolEnvelope.success(tool: name, result: result)
@@ -129,6 +129,6 @@ struct OsaurusHelpTool: OsaurusTool {
     /// Catalog lookup with upstream's relaxed second pass (intent and
     /// on/off words stripped when the strict match is empty).
     static func findSettings(_ query: String) -> (entries: [SettingsSearchEntry], relaxedQuery: String?) {
-        IntelOrchestratorConfigurationTool.findSettings(query)
+        IntelSettingsLookup.findSettings(query)
     }
 }

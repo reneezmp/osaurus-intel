@@ -439,7 +439,7 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
     func setActiveAgent(_ id: UUID) { activeAgentId = id }
 
     /// The agent brand-new chats open with (upstream #2936). The Orchestrator
-    /// unless `new_chat_agent` was applied through `orchestrator_config`; an
+    /// unless `new_chat_agent` was applied through `osaurus_config`; an
     /// agent that no longer exists falls back to the Orchestrator. Separate
     /// from `activeAgentId` (the agent the foreground window is browsing), so
     /// opening a custom agent's chat never re-targets the next new chat.

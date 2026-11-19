@@ -16,22 +16,30 @@ import Testing
 struct IntelAuditLeftoversTests {
     // MARK: - #49 find_setting
 
-    @Test("find_setting returns grounded paths and admits when nothing matches")
-    func findSetting() throws {
-        let result = IntelOrchestratorConfigurationTool.findSettingResult(query: "spell check")
+    @Test("osaurus_help find returns grounded paths and admits when nothing matches")
+    func findSetting() async throws {
+        let found = try await ChatExecutionContext.$currentAgentId.withValue(Agent.defaultId) {
+            try await OsaurusHelpTool().execute(argumentsJSON: #"{"action":"find","query":"spell check"}"#)
+        }
+        let envelope = try #require(try JSONSerialization.jsonObject(with: Data(found.utf8)) as? [String: Any])
+        let result = try #require(envelope["result"] as? [String: Any])
         let matches = try #require(result["matches"] as? [[String: Any]])
         #expect(matches.first?["path"] as? String == "Conversation › Appearance › Check Spelling While Typing")
         #expect((matches.first?["open_with"] as? String)?.contains("⌘,") == true)
 
-        let none = IntelOrchestratorConfigurationTool.findSettingResult(query: "zzqxv")
+        let missing = try await ChatExecutionContext.$currentAgentId.withValue(Agent.defaultId) {
+            try await OsaurusHelpTool().execute(argumentsJSON: #"{"action":"find","query":"zzqxv"}"#)
+        }
+        let noneEnvelope = try #require(try JSONSerialization.jsonObject(with: Data(missing.utf8)) as? [String: Any])
+        let none = try #require(noneEnvelope["result"] as? [String: Any])
         #expect((none["matches"] as? [[String: Any]])?.isEmpty == true)
-        #expect((none["guidance"] as? String)?.contains("do not invent") == true)
+        #expect((none["note"] as? String)?.contains("Do not invent") == true)
     }
 
     @Test("The Orchestrator prompt tells it to look settings up, not guess")
     func promptMentionsFindSetting() {
         let prompt = IntelOrchestratorPrompt.compose(agentID: Agent.defaultId, editablePrompt: "")
-        #expect(prompt.contains("find_setting"))
+        #expect(prompt.contains("action: \"find\""))
     }
 
     // MARK: - #25 agent default working folder
