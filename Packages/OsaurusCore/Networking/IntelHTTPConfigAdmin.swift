@@ -26,7 +26,9 @@
 //  a denial, timeout or cancel applies nothing. `confirm_high_risk` is
 //  accepted and ignored: a caller cannot approve on the user's behalf. The
 //  request log never records bodies on Intel, so a document is never logged.
-//  Not ported: `template` inputs (no ConfigTemplateStore: `W-agent-templates`).
+//  `template` names a whole-config YAML template saved in `~/.osaurus/templates`
+//  (`ConfigTemplateStore`, path-confined, W-agent-templates stage 2); it only
+//  supplies the document, so the same plan and approval apply.
 //
 
 import Foundation
@@ -176,15 +178,26 @@ enum ConfigAdminEndpoint {
         else {
             return error(
                 .badRequest,
-                "POST a JSON body: {\"yaml\": \"<document>\"} (the document may be YAML or JSON text), "
-                    + "plus an optional \"prune\" boolean.")
+                "POST a JSON body: {\"yaml\": \"<document>\"} (the document may be YAML or JSON text) "
+                    + "or {\"template\": \"<saved name>\"}, plus an optional \"prune\" boolean.")
         }
         let prune = ArgumentCoercion.bool(request["prune"]) ?? false
 
-        guard let yaml = (request["yaml"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !OsaurusConfigTool.isEmptyDocument(yaml)
-        else {
-            return error(.badRequest, "Provide the document as `yaml` (inline).")
+        let yaml: String
+        let inline = (request["yaml"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let templateName = (request["template"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let inline, !OsaurusConfigTool.isEmptyDocument(inline) {
+            guard templateName == nil || templateName?.isEmpty == true else {
+                return error(.badRequest, "Pass `yaml` OR `template`, not both.")
+            }
+            yaml = inline
+        } else if let templateName, !templateName.isEmpty {
+            switch ConfigTemplateStore.load(name: templateName) {
+            case .success(let contents): yaml = contents
+            case .failure(let message): return error(.badRequest, message)
+            }
+        } else {
+            return error(.badRequest, "Provide the document as `yaml` (inline) or `template` (saved name).")
         }
         guard yaml.utf8.count <= OsaurusConfigTool.maxDocumentBytes else {
             return error(
