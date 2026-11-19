@@ -56,6 +56,8 @@ struct AgentsView: View {
     @State private var selectedRemoteAgentId: UUID?
     @State private var isCreating = false
     @State private var isReordering = false
+    /// Agent Templates gallery sheet (W-agent-templates).
+    @State private var isShowingTemplates = false
     @State private var hasAppeared = false
     @State private var successMessage: String?
     @State private var sandboxCleanupNotice: SandboxCleanupNotice?
@@ -160,6 +162,9 @@ struct AgentsView: View {
                     isCreating = false
                 }
             )
+        }
+        .sheet(isPresented: $isShowingTemplates) {
+            AgentTemplatesGalleryView(onClose: { isShowingTemplates = false })
         }
         .sheet(isPresented: $isReordering) {
             AgentReorderSheet()
@@ -347,6 +352,9 @@ struct AgentsView: View {
                 HeaderIconButton("list.bullet.indent", help: "Reorder agents") {
                     isReordering = true
                 }
+            }
+            HeaderSecondaryButton(L("Templates"), icon: "square.on.square.dashed") {
+                isShowingTemplates = true
             }
             HeaderPrimaryButton("Create Agent", icon: "plus") {
                 isCreating = true
