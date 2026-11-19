@@ -3575,7 +3575,7 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 
 ## Bundles (2026-11-19)
 
-`W-osaurus-bundles`. Not in candidate 68. The `osaurus import` command needs the CLI from this build (`W-cli-build`, fixed 2026-11-19).
+`W-osaurus-bundles`. Not in candidate 68. The `osaurus import` command is not in Rosy builds yet (see the command-line section below); use the in-app sheet.
 
 - [ ] Make a bundle folder: `osaurus-bundle.json` with `format` `osaurus.bundle`, `format_version` 1, `id` `com.example.test`, a name, version `1.0.0`, one skill `{ "name": "notes", "path": "skills/notes" }` and one agent `agents/helper.json` (`{ "name": "Helper", "system_prompt": "Be brief." }`), plus `skills/notes/SKILL.md`.
 - [ ] Agents → Bundles → Choose Bundle Folder: it is validated and queued, and nothing is applied yet. Remove from Queue works.
@@ -3585,7 +3585,7 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 
 ## Command-line tool builds again (2026-11-19)
 
-`W-cli-build`. Not in candidate 68.
+`W-cli-build`. Not in candidate 68. **Rosy builds do not ship the `osaurus` command yet** (`build_rosy.sh` never builds the `osaurus-cli` scheme; `build_arm64.sh` does). Skip these until `W-cli-build`'s packaging follow-up lands.
 
 - [ ] `osaurus version` and `osaurus doctor` run and describe this Intel install.
 - [ ] With the app quit, `osaurus serve` starts the Intel app (not anything from Homebrew).
