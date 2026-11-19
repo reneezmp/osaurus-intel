@@ -3521,3 +3521,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Ask it to add a provider without giving a key: the secure key sheet opens and no key appears in the chat.
 - [ ] With the paired iPhone, repeat the first check: the plan appears on the phone, and Cancel there applies nothing.
 - [ ] A scheduled task that asks to change settings is refused and nothing changes.
+
+## Engine slice 7: parallel tool calls (2026-11-18)
+
+`W-cov-reaudit` 5c (`COV_REAUDIT_STAGE5C_ENGINE.md` row 17). Not in candidate 68. Watch Rosy's CPU and fan during these: it has only two cores.
+
+- [ ] Ask an agent to read three different files at once (with a model that batches calls): all three show as running together, then complete, and the answer uses all three.
+- [ ] Ask it to write `a.txt` and edit `a.txt` in the same turn: the final file contains the edit.
+- [ ] Set `file_write` to Ask, request two writes in one turn and Deny the first: the second shows as skipped, the run ends with the rejection message, and no second prompt appears.
+- [ ] Start a batch with a slow command plus a read and press Stop: the run ends, no further model request is sent, and no error line appears.
+- [ ] Ask it to load a capability and use it in the same turn: it still works.
