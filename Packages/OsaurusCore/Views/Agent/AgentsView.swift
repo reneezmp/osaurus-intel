@@ -58,6 +58,7 @@ struct AgentsView: View {
     @State private var isReordering = false
     /// Agent Templates gallery sheet (W-agent-templates).
     @State private var isShowingTemplates = false
+    @State private var isShowingBundleImport = false
     @State private var hasAppeared = false
     @State private var successMessage: String?
     @State private var sandboxCleanupNotice: SandboxCleanupNotice?
@@ -165,6 +166,9 @@ struct AgentsView: View {
         }
         .sheet(isPresented: $isShowingTemplates) {
             AgentTemplatesGalleryView(onClose: { isShowingTemplates = false })
+        }
+        .sheet(isPresented: $isShowingBundleImport) {
+            BundleImportSheet(onClose: { isShowingBundleImport = false })
         }
         .sheet(isPresented: $isReordering) {
             AgentReorderSheet()
@@ -355,6 +359,9 @@ struct AgentsView: View {
             }
             HeaderSecondaryButton(L("Templates"), icon: "square.on.square.dashed") {
                 isShowingTemplates = true
+            }
+            HeaderSecondaryButton(L("Bundles"), icon: "shippingbox") {
+                isShowingBundleImport = true
             }
             HeaderPrimaryButton("Create Agent", icon: "plus") {
                 isCreating = true
