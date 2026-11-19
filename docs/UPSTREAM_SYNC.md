@@ -189,6 +189,9 @@ mdat and live-folder checks).
   not build (`W-cli-build`).
 - **Provider slice 2** (5d rows 6–8, 15, 33, 34): tool schemas narrowed for
   strict providers, tolerant SSE framing, tool-call slots without `index`.
+- **Provider slice 3** (5d rows 9–14): Responses parity, including
+  upstream's Codex Lite namespace payload. Rosy must re-check Codex GPT-5.6
+  (Lite) before release: the old flat shape is the one that passed Rosy QA.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

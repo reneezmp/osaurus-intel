@@ -3600,3 +3600,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] A local or compatible server (for example LM Studio or llama.cpp) streams replies normally, and two tool calls in one turn stay two separate calls with their own arguments.
 - [ ] A provider error shows its message (no raw page of HTML or JSON longer than a line or two).
 - [ ] A provider with a custom header still works; a header value containing a line break is dropped rather than sent.
+
+## Provider slice 3: OpenAI Responses and Codex (2026-11-19)
+
+`W-cov-reaudit` 5d (`COV_REAUDIT_STAGE5D_PROVIDER.md` rows 9–14). Not in candidate 68. **The first check is release-critical:** the Codex Lite request shape changed to upstream's.
+
+- [ ] Codex sign-in with a GPT-5.6 (Lite) model: ask something that needs a tool (list files), then a follow-up, then attach a screenshot and ask about it. Each answers; no 400 in the error notice.
+- [ ] The same with a non-Lite Codex model (for example GPT-5.5).
+- [ ] OpenAI (API key) preset, a non-reasoning model: with Max Tokens set low (about 50) the answer stops at the limit, and Temperature is respected. A normal tool-using chat works.
+- [ ] A custom OpenAI-type provider pointing at a server with only `/chat/completions` works from the first message (no 404 or 405).
+- [ ] Insights for Codex and OpenAI turns shows Reported tokens and no extra requests per turn.
