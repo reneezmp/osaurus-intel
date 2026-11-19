@@ -3562,3 +3562,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] With a nearly empty Router balance, a long answer fails with the out-of-credits notice instead of stopping short with no error.
 - [ ] If a provider sends an error mid-stream, the chat shows that error once, with no silent retries; Credits shows no extra charges for it.
 - [ ] A Claude model that refuses a request shows "Anthropic refused this request…" with its explanation, not an empty reply.
+
+## Agent templates (2026-11-19)
+
+`W-agent-templates`. Not in candidate 68.
+
+- [ ] Agents → Templates lists Cloud Agent, Local Agent and Sub Agent. Use Template on Cloud Agent: the sheet shows the new agent and "Based on template: Cloud Agent"; nothing is created until you click Create Agent.
+- [ ] Export File on a template, then Import Template with that file: the review shows the name, the signature line and the requirements, and Import saves it. A file with a broken `agent:` key gives an error and saves nothing.
+- [ ] Save an agent that has a working folder as a template: the file contains no absolute path outside your home folder, and Use Template on it shows a folder note instead of attaching the folder silently.
+- [ ] In the Orchestrator chat, "Make me an agent from the Cloud Agent template called Test Bot": the "Review configuration changes" window appears, and Cancel creates nothing.
+- [ ] Hide from Orchestrator and Delete work on a library template.
