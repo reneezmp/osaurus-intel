@@ -216,11 +216,16 @@ enum ConfigExporter {
         section.localTextEnabled = config.localTextDelegationEnabled
         section.applescriptExecutionMode =
             ConfigAppBehaviorEnums.applescriptModeKey(for: config.defaultAppleScriptExecutionMode)
-        // The pool stores agent UUIDs; the document uses names. Ids without a
-        // live agent are dropped (matching the store's own pruning intent).
-        section.spawnableAgents = config.spawnableAgentIDs.compactMap { id in
-            agents.first { $0.id == id }?.name
-        }
+        // Intel (stage 4): `spawnable_agents` IS the Orchestrator's Gate 4
+        // delegation allowlist (`OrchestratorDelegationConfiguration
+        // .customAgentAllowlist`), not upstream's spawn pool: that is what
+        // `orchestrator_delegate` actually consults. The allowlist stores
+        // agent UUIDs; the document uses names, sorted for a stable export.
+        // Ids without a live custom agent are dropped.
+        section.spawnableAgents = DefaultAgentConfigurationStore.load().delegation
+            .customAgentAllowlist
+            .compactMap { id in agents.first { $0.id == id && !$0.isBuiltIn }?.name }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         section.spawnableWorkspaceAgents = config.spawnableWorkspaceAgents.map(\.key)
         if !config.workspaceAutoJoinDisabledIds.isEmpty {
             section.workspaceAutoJoin = Dictionary(

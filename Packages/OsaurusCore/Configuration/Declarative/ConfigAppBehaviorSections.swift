@@ -20,7 +20,8 @@ import Foundation
 
 /// Mirrors the Orchestrator slice of `SubagentConfiguration`
 /// (`agent-delegation.json`): the spawn pool, permission defaults, and
-/// worker budgets. Custom agents carry their own per-agent equivalents in
+/// worker budgets. On Intel `spawnable_agents` is the Orchestrator's Gate 4
+/// allowlist instead (see `ConfigExporter.exportDelegation`). Custom agents carry their own per-agent equivalents in
 /// `agents[].capabilities`.
 public struct DelegationSection: Codable, Equatable, Sendable {
     /// The "Swap local models for subagents" toggle
@@ -83,6 +84,19 @@ public struct DelegationSection: Codable, Equatable, Sendable {
     public var budgetMaxToolCalls: Int?
 
     public init() {}
+
+    /// Intel (stage 4): keys that only reach upstream's subagent store, which
+    /// this Mac's Orchestrator does not consult (its Gate 4 limits live in
+    /// Settings → Orchestrator). `spawnable_agents` is NOT one of them: it maps
+    /// onto the Gate 4 allowlist.
+    var hasStoreOnlyDelegationKeys: Bool {
+        localTextEnabled != nil || applescriptExecutionMode != nil
+            || spawnableWorkspaceAgents != nil || workspaceAutoJoin != nil
+            || permissionDefaults != nil || budgetMaxTokens != nil || budgetMaxTurns != nil
+            || budgetMaxSeconds != nil || budgetMaxParallelSpawns != nil
+            || budgetMaxRemoteParallelSpawns != nil || ramSafetyPreflight != nil
+            || coexistenceEnabled != nil
+    }
 
     /// Removed keys present in this section, as `key → replacement` hints.
     var removedKeyHints: [String] {

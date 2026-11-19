@@ -379,16 +379,23 @@ enum ConfigPlanner {
             checkBudget(
                 section.budgetMaxRemoteParallelSpawns, SubagentBudgets.remoteParallelSpawnBounds,
                 "budget_max_remote_parallel_spawns")
-            // Spawn targets may be custom agents (existing or created by this
-            // document) or built-in library agents — never the Default agent.
-            var spawnTargets = effectiveAgentNames(document: document, prune: prune)
-            spawnTargets.formUnion(
+            // Spawn targets are custom agents (existing or created by this
+            // document). Intel's Gate 4 allowlist admits only custom agents:
+            // a built-in library agent or the Default agent can never be
+            // delegated to (`IntelOrchestratorAdmission`), so they are
+            // rejected here instead of being accepted and silently inert.
+            let spawnTargets = effectiveAgentNames(document: document, prune: prune)
+            let builtInNames = Set(
                 AgentManager.shared.agents.filter { $0.isBuiltIn }.map { $0.name.lowercased() })
             for name in section.spawnableAgents ?? [] {
                 let key = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 if key == "default" {
                     issues.append(
                         "delegation.spawnable_agents: the Default agent cannot spawn itself.")
+                } else if builtInNames.contains(key) && !spawnTargets.contains(key) {
+                    issues.append(
+                        "delegation.spawnable_agents: `\(name)` is a built-in agent; the "
+                            + "Orchestrator on this Mac can delegate only to custom agents.")
                 } else if !spawnTargets.contains(key) {
                     issues.append(
                         "delegation.spawnable_agents: no agent named `\(name)` exists or is "
@@ -1412,6 +1419,17 @@ enum ConfigPlanner {
             "coexistence_enabled", desired: desired.coexistenceEnabled,
             current: current.coexistenceEnabled, into: &changes)
         guard !changes.isEmpty else { return }
+        // Intel: say plainly what each key reaches (stage 4 delegation mapping).
+        if changes.contains(where: { $0.hasPrefix("spawnable_agents") }) {
+            changes.append(
+                "(note) spawnable_agents sets the Orchestrator's allowed agents; a cloud model "
+                    + "must also be admitted in Settings → Orchestrator before it can delegate to them.")
+        }
+        if desired.hasStoreOnlyDelegationKeys {
+            changes.append(
+                "(note) the other delegation keys are stored only: the Orchestrator on this Mac "
+                    + "does not read them yet; its delegation limits are set in Settings → Orchestrator.")
+        }
 
         for (kind, raw) in normalizedDefaults ?? [:]
         where raw == SubagentPermissionPolicy.alwaysAllow.rawValue

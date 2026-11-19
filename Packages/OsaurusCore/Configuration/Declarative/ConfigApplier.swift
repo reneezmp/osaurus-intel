@@ -701,10 +701,12 @@ enum ConfigApplier {
         if let names = desired.spawnableAgents {
             var ids: [UUID] = []
             for name in names {
+                // Intel: custom agents only (Gate 4 never admits a built-in one).
                 guard
                     let agent = AgentManager.shared.agents.first(where: {
-                        $0.name.lowercased()
-                            == name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        !$0.isBuiltIn
+                            && $0.name.lowercased()
+                                == name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     })
                 else {
                     return ConfigApplyResult(
@@ -740,7 +742,40 @@ enum ConfigApplier {
             }
             workspaceAutoJoin.append((id, enabled))
         }
-        let hints = desired.removedKeyHints
+        var hints = desired.removedKeyHints
+        // Intel (stage 4): `spawnable_agents` replaces the Orchestrator's
+        // Gate 4 allowlist (`customAgentAllowlist`), which is what
+        // `orchestrator_delegate` / `orchestrator_targets` consult; upstream's
+        // spawn pool (`SubagentConfigurationStore.spawnableAgentIDs`) is not
+        // read by this Mac's Orchestrator, so it is not written. Admitted cloud
+        // models and per-agent permissions stay in Settings → Orchestrator:
+        // this tool never admits a model or raises a permission.
+        if let ids = resolvedAgentIDs {
+            var gate4 = DefaultAgentConfigurationStore.load()
+            gate4.delegation.customAgentAllowlist = Set(ids)
+            guard AgentManager.shared.updateDefaultAgentConfiguration(gate4) else {
+                return ConfigApplyResult(
+                    section: "delegation", target: "delegation", status: .failed,
+                    message: "spawnable_agents: the Orchestrator's delegation settings could not be saved.")
+            }
+            let manager = AgentManager.shared
+            let evaluation = IntelOrchestratorAdmission.evaluate(
+                configuration: gate4.delegation,
+                agents: manager.agents,
+                effectiveModel: { manager.effectiveModel(for: $0) })
+            if evaluation.targets.count < ids.count {
+                hints.append(
+                    "Allowed agents saved, but only \(evaluation.targets.count) of \(ids.count) can be "
+                        + "delegated to right now (a target also needs its model admitted in "
+                        + "Settings → Orchestrator; this tool does not admit models): "
+                        + evaluation.blocked.joined(separator: " "))
+            }
+        }
+        if desired.hasStoreOnlyDelegationKeys {
+            hints.append(
+                "Stored only: the other delegation keys are not read by the Orchestrator on this Mac "
+                    + "yet; its delegation limits are set in Settings → Orchestrator.")
+        }
         _ = SubagentConfigurationStore.mutate { config in
             if let v = desired.localTextEnabled { config.localTextDelegationEnabled = v }
             if let raw = desired.applescriptExecutionMode,
@@ -748,7 +783,6 @@ enum ConfigApplier {
             {
                 config.defaultAppleScriptExecutionMode = mode
             }
-            if let ids = resolvedAgentIDs { config.spawnableAgentIDs = ids }
             if let refs = resolvedWorkspaceRefs {
                 config.spawnableWorkspaceAgents = refs
                 // Listing a shared agent explicitly clears its removal

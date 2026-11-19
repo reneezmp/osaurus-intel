@@ -66,10 +66,12 @@ enum ConfigRisk {
     /// `spawn_agent` away from the Orchestrator until an agent is added
     /// back — the silent-empty-pool failure this card must name.
     static func emptiesSpawnPool(removed: Int, customAgents: Int) -> String {
-        "Empties the Orchestrator's spawn pool (`spawnable_agents` replaces the whole list; "
-            + "\(removed) spawnable agent\(removed == 1 ? "" : "s") removed, \(customAgents) custom "
-            + "agent\(customAgents == 1 ? "" : "s") exist) — the Orchestrator loses `spawn_agent` "
-            + "and cannot delegate until an agent is listed again."
+        // Intel: the list is the Orchestrator's Gate 4 allowlist, and the
+        // delegation tool is `orchestrator_delegate`, not upstream's `spawn_agent`.
+        "Empties the Orchestrator's allowed-agents list (`spawnable_agents` replaces the whole list; "
+            + "\(removed) allowed agent\(removed == 1 ? "" : "s") removed, \(customAgents) custom "
+            + "agent\(customAgents == 1 ? "" : "s") exist) — the Orchestrator can no longer delegate "
+            + "(`orchestrator_delegate`) until an agent is listed again."
     }
     static func emptiesWorkspaceSpawnPool(removed: Int) -> String {
         "Removes every teammate agent from the Orchestrator's pool (`spawnable_workspace_agents` "

@@ -176,7 +176,7 @@ struct ConfigAppCoveragePlannerTests {
 
     /// `spawnable_agents` is a replace-list: `[]` wipes the pool. With a
     /// member in the pool the plan must carry a named high-risk line so the
-    /// approval card says the Orchestrator loses `spawn_agent` — the silent
+    /// approval card says the Orchestrator can no longer delegate — the silent
     /// empty-pool state found live on a 14-agent Mac.
     @Test
     func emptyingTheSpawnPool_isFlaggedHighRisk() async throws {
@@ -190,8 +190,12 @@ struct ConfigAppCoveragePlannerTests {
         )
         AgentManager.shared.add(agent)
         // Upstream's `add` also joins the Default spawn pool (#2498); Intel does
-        // not (`W-subagents`), so the pool membership is set up here.
-        _ = SubagentConfigurationStore.mutate { $0.spawnableAgentIDs.append(agent.id) }
+        // not. On Intel `spawnable_agents` IS the Orchestrator's Gate 4
+        // allowlist (stage 4), so the membership is set up there and restored.
+        let originalGate4 = DefaultAgentConfigurationStore.load()
+        var gate4 = originalGate4
+        gate4.delegation.customAgentAllowlist.insert(agent.id)
+        DefaultAgentConfigurationStore.save(gate4)
         var thrown: Error?
         do {
             let before = ConfigExporter.export().delegation?.spawnableAgents ?? []
@@ -220,6 +224,7 @@ struct ConfigAppCoveragePlannerTests {
             thrown = error
         }
         _ = await AgentManager.shared.delete(id: agent.id)
+        DefaultAgentConfigurationStore.save(originalGate4)
         if let thrown { throw thrown }
         // The shape a delegation read embeds spells out the replace semantics.
         let shape = ConfigManifest.renderedSchemaSections(only: [.delegation])
