@@ -1566,6 +1566,7 @@ private struct SessionRow: View {
         case .watcher: return theme.successColor
         case .selfSchedule: return theme.warningColor.opacity(0.9)
         case .imported: return theme.accentColorLight.opacity(0.7)
+        case .delegation: return theme.accentColorLight.opacity(0.6)
         }
     }
 
@@ -1597,6 +1598,8 @@ private struct SessionRow: View {
             return Text("Self-scheduled", bundle: .module)
         case .imported:
             return Text("Imported", bundle: .module)
+        case .delegation:
+            return Text("Delegated", bundle: .module)
         }
     }
 

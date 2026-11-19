@@ -1808,6 +1808,11 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
     /// 311f327c. Continues as a normal chat; the source tag keeps
     /// provenance visible in the sidebar.
     case imported
+    /// Upstream `spawn_agent` delegation (W-subagents): an orchestrating
+    /// agent dispatched a headless chat of the TARGET agent. One fresh
+    /// session per delegation call. Upstream also has `.workspace`
+    /// (`W-workspaces-sharing`) and `.channel` (`W-channels`), not on Intel.
+    case delegation
 
     var iconName: String {
         switch self {
@@ -1818,6 +1823,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .watcher: return "eye.fill"
         case .selfSchedule: return "alarm.fill"
         case .imported: return "square.and.arrow.down.fill"
+        case .delegation: return "arrow.triangle.branch"
         }
     }
 
@@ -1830,6 +1836,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .watcher: return "Watcher"
         case .selfSchedule: return "Self-scheduled"
         case .imported: return "Imported"
+        case .delegation: return "Orchestrator"
         }
     }
 
@@ -1844,6 +1851,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .watcher: return "watcher"
         case .selfSchedule: return "self-scheduled"
         case .imported: return "imported"
+        case .delegation: return "delegated"
         }
     }
 }

@@ -20,6 +20,10 @@ struct AgentLoopIterationInput {
 }
 
 enum AgentLoopBudget {
+    /// Upstream's canonical per-turn response reservation
+    /// (`DelegatedRunContract.toolResultAllowancePerTurn`); same value as
+    /// `IntelContextBudget.defaultResponseReservation`.
+    static let defaultResponseReservation = IntelContextBudget.defaultResponseReservation
     static let fallbackContextWindow = IntelWireHistoryTrim.fallbackContextWindow
 
     /// The model catalog, else Settings' Context Length, else 128k (the

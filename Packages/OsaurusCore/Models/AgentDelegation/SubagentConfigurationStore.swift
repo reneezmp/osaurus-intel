@@ -11,14 +11,10 @@ enum SubagentConfigurationStore {
     private nonisolated(unsafe) static var overrideDirectory: URL?
     private nonisolated(unsafe) static var cachedSnapshot: SubagentConfiguration?
     private nonisolated(unsafe) static var snapshotRevision: UInt64 = 0
-    // Intel: the spawn authority snapshots come with the spawn kind
-    // (`W-subagents`, docs/SUBAGENTS_INTEL.md); the revisions stay.
-    #if !OSAURUS_INTEL
     private nonisolated(unsafe) static var cachedSpawnSharedAuthority:
         SpawnSharedConfigurationAuthority?
     private nonisolated(unsafe) static var cachedSpawnDefaultAuthority:
         SpawnDefaultConfigurationAuthority?
-    #endif
     private nonisolated(unsafe) static var spawnSharedAuthorityRevision: UInt64 = 0
     private nonisolated(unsafe) static var spawnDefaultAuthorityRevision: UInt64 = 0
     private static let snapshotLock = NSLock()
@@ -34,10 +30,8 @@ enum SubagentConfigurationStore {
         overrideDirectory = url
         cachedSnapshot = nil
         snapshotRevision &+= 1
-        #if !OSAURUS_INTEL
         cachedSpawnSharedAuthority = nil
         cachedSpawnDefaultAuthority = nil
-        #endif
         spawnSharedAuthorityRevision &+= 1
         spawnDefaultAuthorityRevision &+= 1
         snapshotLock.unlock()
@@ -297,7 +291,6 @@ enum SubagentConfigurationStore {
         _ configuration: SubagentConfiguration,
         recordingChange: Bool
     ) {
-        #if !OSAURUS_INTEL
         let shared = configuration.spawnSharedAuthority
         let defaultAuthority = configuration.spawnDefaultAuthority
 
@@ -315,7 +308,6 @@ enum SubagentConfigurationStore {
         }
         cachedSpawnSharedAuthority = shared
         cachedSpawnDefaultAuthority = defaultAuthority
-        #endif
     }
 
     /// Monotonic ABA-safe generation for execution-time authorization.
@@ -424,10 +416,8 @@ enum SubagentConfigurationStore {
         snapshotLock.lock()
         cachedSnapshot = nil
         snapshotRevision &+= 1
-        #if !OSAURUS_INTEL
         cachedSpawnSharedAuthority = nil
         cachedSpawnDefaultAuthority = nil
-        #endif
         spawnSharedAuthorityRevision &+= 1
         spawnDefaultAuthorityRevision &+= 1
         snapshotLock.unlock()

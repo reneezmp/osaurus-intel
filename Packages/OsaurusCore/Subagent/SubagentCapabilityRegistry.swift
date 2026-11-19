@@ -400,7 +400,9 @@ public enum SubagentToolVisibility {
         perAgentEnabled: Bool,
         perAgentTargets: [UUID]
     ) -> [UUID] {
-        if isDefault { return config.spawnableAgentIDs }
+        // Intel (W-subagents): the Orchestrator's pool IS its Gate 4 allowlist,
+        // not the stored spawn pool (`IntelSpawnPool`).
+        if isDefault { return IntelSpawnPool.defaultLauncherAgentIDs(storedPool: config.spawnableAgentIDs) }
         return perAgentEnabled ? perAgentTargets : []
     }
 

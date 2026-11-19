@@ -1243,9 +1243,6 @@ struct SubagentConfiguration: Codable, Equatable, Sendable {
 
 }
 
-// Intel (docs/SUBAGENTS_INTEL.md): the spawn authority snapshots below come
-// with the spawn kind (`W-subagents`); they read agent fields Intel lacks.
-#if !OSAURUS_INTEL
 /// Process-wide settings that can change whether or how any local Spawn job
 /// reaches execution. Kept separate from the Default launcher's pool so a
 /// Default-only edit does not invalidate an in-flight custom-agent spawn.
@@ -1426,6 +1423,8 @@ struct SpawnTargetAuthority: Equatable, Sendable {
     let systemPrompt: String
     let defaultModel: String?
     let temperature: Float?
+    let maxTokens: Int?
+    let generationSettings: AgentGenerationSettings?
     let toolsEnabled: Bool
     let toolSelectionMode: ToolSelectionMode?
     let manualToolNames: [String]?
@@ -1438,13 +1437,13 @@ struct SpawnTargetAuthority: Equatable, Sendable {
     let renderChartEnabled: Bool
     let speakEnabled: Bool
     let searchMemoryEnabled: Bool
-    let calculatorEnabled: Bool
-    let artifactsEnabled: Bool
     let webSearchEnabled: Bool
     let selfSchedulingEnabled: Bool
-    let knowledgeEnabled: Bool
-    let knowledgeCollectionIDs: [UUID]
-    let knowledgeCuratorEnabled: Bool
+    // Intel: agents carry no knowledge settings (W-subagents stage 1);
+    // upstream's knowledgeEnabled / knowledgeCollectionIDs /
+    // knowledgeCuratorEnabled return if the item that adds them does.
+    let calculatorEnabled: Bool
+    let artifactsEnabled: Bool
 
     init(_ agent: Agent) {
         id = agent.id
@@ -1452,6 +1451,8 @@ struct SpawnTargetAuthority: Equatable, Sendable {
         systemPrompt = agent.systemPrompt
         defaultModel = agent.defaultModel
         temperature = agent.temperature
+        maxTokens = agent.maxTokens
+        generationSettings = agent.generationSettings
         toolsEnabled = agent.toolsEnabled
         toolSelectionMode = agent.toolSelectionMode
         manualToolNames = agent.manualToolNames
@@ -1464,14 +1465,9 @@ struct SpawnTargetAuthority: Equatable, Sendable {
         renderChartEnabled = agent.settings.renderChartEnabled
         speakEnabled = agent.settings.speakEnabled
         searchMemoryEnabled = agent.settings.searchMemoryEnabled
-        calculatorEnabled = agent.settings.calculatorEnabled
-        artifactsEnabled = agent.settings.artifactsEnabled
         webSearchEnabled = agent.settings.webSearchEnabled
         selfSchedulingEnabled = agent.settings.selfSchedulingEnabled
-        knowledgeEnabled = agent.settings.knowledgeEnabled
-        knowledgeCollectionIDs = agent.settings.knowledgeCollectionIds
-        knowledgeCuratorEnabled =
-            agent.settings.knowledgeCuratorEnabled
+        calculatorEnabled = agent.settings.calculatorEnabled
+        artifactsEnabled = agent.settings.artifactsEnabled
     }
 }
-#endif
