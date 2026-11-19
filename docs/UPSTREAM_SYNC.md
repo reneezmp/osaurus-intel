@@ -187,6 +187,8 @@ mdat and live-folder checks).
 - **Bundles** (`W-osaurus-bundles`, 2026-11-19): Agents → Bundles,
   `/admin/import/*`, `osaurus import`. Found on the way: the CLI package does
   not build (`W-cli-build`).
+- **Provider slice 2** (5d rows 6–8, 15, 33, 34): tool schemas narrowed for
+  strict providers, tolerant SSE framing, tool-call slots without `index`.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

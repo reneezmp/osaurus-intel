@@ -3591,3 +3591,12 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] With the app quit, `osaurus serve` starts the Intel app (not anything from Homebrew).
 - [ ] `osaurus import validate --from <bundle folder>` validates the test bundle from the Bundles checks without applying anything.
 
+
+## Provider slice 2: wire safety (2026-11-19)
+
+`W-cov-reaudit` 5d (`COV_REAUDIT_STAGE5D_PROVIDER.md` rows 6–8, 15, 33, 34). Not in candidate 68.
+
+- [ ] With an MCP server or plugin whose tool schema has a top-level `anyOf` or `enum` enabled, chat with a Router, Claude and OpenAI model: each answers instead of failing with `invalid_function_parameters`.
+- [ ] A local or compatible server (for example LM Studio or llama.cpp) streams replies normally, and two tool calls in one turn stay two separate calls with their own arguments.
+- [ ] A provider error shows its message (no raw page of HTML or JSON longer than a line or two).
+- [ ] A provider with a custom header still works; a header value containing a line break is dropped rather than sent.
