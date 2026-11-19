@@ -34,7 +34,9 @@ The document has these sections (plus `version`):
 - `schedules`: scheduled agent runs (interval, daily, weekly, cron).
 - `watchers`: folder watchers that trigger an agent.
 
-Not available on this Mac yet: channels, harness runtimes, local models, agent skills lists, agent templates, and sandbox network keys. A document that uses one of them is refused with a message naming the key.
+Agent templates: `osaurus_config` action `templates` lists the templates the user left visible to the Orchestrator. `plan` / `apply` with `template: "<name>"` (and optional `overrides`: `name`, `description`, `system_prompt`, `model`, `capabilities`) builds the agent from a template; it is planned and approved like any other change, and the new agent records the template in `source_template`. `export` with `save_as` saves a YAML document in `~/.osaurus/templates`, which `template` also names. Templates never carry secrets.
+
+Not available on this Mac yet: channels, harness runtimes, local models, agent skills lists, knowledge switches, and sandbox network keys. A document that uses one of them is refused with a message naming the key.
 
 ## Delegation
 

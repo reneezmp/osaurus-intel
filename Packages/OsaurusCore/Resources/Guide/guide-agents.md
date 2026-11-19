@@ -13,6 +13,7 @@ Agents are the core of Osaurus. Each agent has its own system prompt, default mo
 - Settings… (⌘,) → Agents → create, edit, duplicate, or delete agents. Onboarding creates your first one.
 - Switch agents from the agent menu in the chat window; each agent can have its own chat tabs.
 - A new agent can start from a specialty (Assistant, Writer, Researcher, Coder, Productivity), which fills in the system prompt and a routing description.
+- **Templates.** Agents → Templates opens the template gallery: built-in templates (Cloud Agent, Local Agent, Sub Agent) and your own. **Use Template** shows exactly what would be created (changes, risks, notes) and creates the agent only when you click Create Agent. **Save an Agent as Template** snapshots an agent without secrets, saved answers or absolute paths. **Export File** writes a `.osaurustemplate` file (signed with your Osaurus ID when this Mac has one); **Import Template** reads a file you choose or drop and shows it for review first. Importing only saves the template: nothing runs and no agent exists until you use it. Local Agent and Sub Agent use your default model on this Mac (there are no on-device models here). The first-run setup wizard for templates is not available on this build.
 
 ## An agent's settings
 
