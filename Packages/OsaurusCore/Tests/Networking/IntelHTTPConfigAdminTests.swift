@@ -198,6 +198,62 @@ struct IntelHTTPConfigAdminTests {
         #expect(unknown.status == 404)
     }
 
+    // MARK: - HTTP: a web page in the user's browser is not a local tool
+
+    @Test func browserCallersAreRefused() {
+        func refused(
+            host: String? = "127.0.0.1:1337", origin: String? = nil, site: String? = nil,
+            allowed: [String] = []
+        ) -> Bool {
+            ConfigAdminEndpoint.browserRefusal(
+                host: host, origin: origin, secFetchSite: site, allowedOrigins: allowed) != nil
+        }
+        // Local tools.
+        #expect(!refused())
+        #expect(!refused(host: "localhost:1337"))
+        #expect(!refused(host: "LOCALHOST"))
+        #expect(!refused(host: "[::1]:1337"))
+        #expect(!refused(site: "none"))
+        // A page on another site, and `*` does not admit it.
+        #expect(refused(origin: "https://evil.example"))
+        #expect(refused(origin: "https://evil.example", allowed: ["*"]))
+        #expect(refused(origin: "null"))
+        #expect(refused(site: "cross-site"))
+        #expect(refused(site: "same-site"))
+        // DNS rebinding: the page's own name reaches this socket.
+        #expect(refused(host: "evil.example:1337"))
+        #expect(refused(host: "127.0.0.1.evil.example"))
+        #expect(refused(host: "localhost.evil.example:1337"))
+        #expect(refused(host: "127.0.0.1:1337@evil.example"))
+        #expect(refused(host: "[::1].evil.example"))
+        #expect(refused(host: nil))
+        // An origin the owner listed by name is the one exception.
+        #expect(!refused(origin: "https://tool.example", allowed: ["https://tool.example"]))
+    }
+
+    @Test func browserOriginGetsNoConfigOverHTTP() async throws {
+        await SubagentStoreTestLock.shared.acquire()
+        defer { SubagentStoreTestLock.shared.release() }
+        let server = try await startConfigAdminTestServer(validator: .empty)
+        defer { Task { await server.shutdown() } }
+        let before = await Self.currentBudget()
+        let target = await Self.otherBudget()
+        let origin = ["Origin": "https://evil.example"]
+
+        let export = try await server.send("GET", "/admin/config/export", headers: origin)
+        #expect(export.status == 403)
+        #expect(!export.body.contains("version"))
+        let crossSite = try await server.send(
+            "GET", "/admin/config/export", headers: ["Sec-Fetch-Site": "cross-site"])
+        #expect(crossSite.status == 403)
+        let apply = try await server.send(
+            "POST", "/admin/config/apply",
+            json: String(decoding: Self.requestJSON(Self.budgetDocument(target)), as: UTF8.self),
+            headers: origin)
+        #expect(apply.status == 403)
+        #expect(await Self.currentBudget() == before)
+    }
+
     /// A key-holding caller that arrives through the relay tunnel is not on
     /// the physical loopback address: refused, even with the owner's key.
     @Test func relayedCallerIsRefusedEvenWithTheOwnerKey() async throws {

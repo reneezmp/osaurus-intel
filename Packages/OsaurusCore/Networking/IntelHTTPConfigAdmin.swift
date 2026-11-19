@@ -13,7 +13,8 @@
 //  relay tunnel or a paired peer can never rewrite this Mac. On top of the
 //  general gate (access key when `LocalAPIKeyPolicy` is on, agent-scoped keys
 //  never reach `/admin/*`). Intel refuses Secure Channel calls too: they are
-//  remote by definition.
+//  remote by definition. Browser callers are refused as well (`browserRefusal`):
+//  a web page also connects over loopback.
 //
 //  Where Intel differs from upstream, on purpose (owner policy, 2026-11-18:
 //  nothing reconfigures this Mac without the user's approval): upstream's
@@ -54,6 +55,51 @@ enum ConfigAdminEndpoint {
     /// Request envelope cap: the document itself is capped at
     /// `OsaurusConfigTool.maxDocumentBytes`; allow JSON overhead beyond it.
     static var envelopeLimit: Int { OsaurusConfigTool.maxDocumentBytes + 64 * 1024 }
+
+    /// Why a request that looks like it came from a web page is refused, or
+    /// nil for a local tool. `Host` must name this Mac (DNS rebinding sends the
+    /// attacker's name, with no `Origin` on a same-origin GET); a browser
+    /// `Origin` must be listed by name in Allowed Origins (`*` does not count);
+    /// `Sec-Fetch-Site: cross-site` / `same-site` is refused unless so listed.
+    static func browserRefusal(
+        host: String?,
+        origin: String?,
+        secFetchSite: String?,
+        allowedOrigins: [String]
+    ) -> String? {
+        let message = "Browser requests to /admin/config/* are refused."
+        guard let host, isLoopbackHost(host) else { return message }
+        if let origin {
+            return LocalAPIKeyPolicy.isExplicitlyAllowedOrigin(origin, allowedOrigins: allowedOrigins)
+                ? nil : message
+        }
+        if let site = secFetchSite?.lowercased(), site == "cross-site" || site == "same-site" {
+            return message
+        }
+        return nil
+    }
+
+    /// `localhost`, `127.0.0.1` or `[::1]`, with or without a port.
+    static func isLoopbackHost(_ host: String) -> Bool {
+        let value = host.trimmingCharacters(in: .whitespaces).lowercased()
+        let name: String
+        if value.hasPrefix("[") {
+            guard let end = value.firstIndex(of: "]") else { return false }
+            name = String(value[value.startIndex ... end])
+            let rest = value[value.index(after: end)...]
+            guard rest.isEmpty || isPortSuffix(rest) else { return false }
+        } else {
+            let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+            guard parts.count <= 2, let first = parts.first else { return false }
+            if parts.count == 2, parts[1].isEmpty || !parts[1].allSatisfy(\.isNumber) { return false }
+            name = String(first)
+        }
+        return name == "localhost" || name == "127.0.0.1" || name == "[::1]"
+    }
+
+    private static func isPortSuffix(_ text: Substring) -> Bool {
+        text.count > 1 && text.first == ":" && text.dropFirst().allSatisfy(\.isNumber)
+    }
 
     static func queryParameter(_ name: String, in uri: String) -> String? {
         guard let q = uri.split(separator: "?").dropFirst().first else { return nil }
@@ -291,6 +337,20 @@ extension HTTPHandler {
             return true
         }
 
+        // A web page open in the user's browser also connects over loopback,
+        // and without `LocalAPIKeyPolicy` the general gate lets it through with
+        // `Access-Control-Allow-Origin: *`. Refuse browser callers here,
+        // whatever that policy says (Intel, 2026-11-18).
+        if let refusal = ConfigAdminEndpoint.browserRefusal(
+            host: head.headers.first(name: "Host"),
+            origin: head.headers.first(name: "Origin"),
+            secFetchSite: head.headers.first(name: "Sec-Fetch-Site"),
+            allowedOrigins: configuration.allowedOrigins
+        ) {
+            refuse(.forbidden, refusal)
+            return true
+        }
+
         if head.method == .POST {
             if requestBodyData().count > ConfigAdminEndpoint.envelopeLimit {
                 refuse(
@@ -298,9 +358,12 @@ extension HTTPHandler {
                     "Request body too large (max \(ConfigAdminEndpoint.envelopeLimit / 1024) KB).")
                 return true
             }
-            if let contentType = head.headers.first(name: "Content-Type"),
-                !contentType.lowercased().contains("application/json")
-            {
+            // Required, not just checked when present: a page can POST a body
+            // with no Content-Type without triggering a CORS preflight.
+            guard
+                let contentType = head.headers.first(name: "Content-Type"),
+                contentType.lowercased().contains("application/json")
+            else {
                 refuse(.unsupportedMediaType, "POST /admin/config/* expects Content-Type: application/json.")
                 return true
             }
