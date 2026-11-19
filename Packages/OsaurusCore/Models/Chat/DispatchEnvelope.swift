@@ -13,11 +13,9 @@
 //  Intel port of upstream's file (`W-chat-ux`). Kinds with a producer on
 //  Intel today:
 //  - self-scheduled runs (`NextRunScheduler`, upstream preamble);
-//  - watcher runs, parsed from Intel's current watcher framing
-//    (`WatcherManager.firstRunFraming` / `followUpFraming` /
-//    `idempotencyFooter`). Upstream's newer watcher prompt (watched-folder
-//    line, changed paths) arrives with the watcher upgrade; the `.watcherRun`
-//    fields for it are kept so the badges light up then.
+//  - watcher runs (`WatcherManager.buildDispatchPrompt`, upstream #2628: the
+//    watched-folder line, changed paths and guidance fragments), plus the
+//    pre-#2628 framing for chats stored before it.
 //  Staged until their producers land: channel messages (`W-channels`),
 //  delegated tasks (upstream `AgentDelegationDispatcher`'s contract; Intel's
 //  Orchestrator delegation is a one-shot with no visible delegate chat) and
@@ -158,22 +156,98 @@ struct DispatchEnvelope: Equatable, Sendable {
         )
     }
 
-    // MARK: Watcher run (Intel framing)
+    // MARK: Watcher run
 
-    /// `<instructions><firstRunFraming | followUpFraming><idempotencyFooter>`,
-    /// as `WatcherManager.buildDispatchPrompt` writes it.
     private static func parseWatcher(_ text: String) -> (kind: Kind, instructions: String)? {
-        let footer = WatcherManager.idempotencyFooter
-        guard text.hasSuffix(footer) else { return nil }
-        let body = text.dropLast(footer.count)
-        let framings: [(String, Int)] = [
-            (WatcherManager.firstRunFraming, 1), (WatcherManager.followUpFraming, 2),
-        ]
-        for (framing, iteration) in framings where body.hasSuffix(framing) {
-            let instructions = String(body.dropLast(framing.count))
+        parseCurrentWatcher(text) ?? parseLegacyWatcher(text)
+    }
+
+    private static func parseCurrentWatcher(_ text: String) -> (kind: Kind, instructions: String)? {
+        // Peel the fixed guidance paragraphs off the end, innermost last.
+        var body = Substring(text)
+        let organized = "\n" + WatcherManager.alreadyOrganizedGuidance + "\n"
+        guard body.hasSuffix(organized) else { return nil }
+        body = body.dropLast(organized.count)
+
+        var iteration: Int?
+        let first = "\n" + WatcherManager.firstIterationGuidance + "\n"
+        let followUp = "\n" + WatcherManager.followUpIterationGuidance + "\n"
+        if body.hasSuffix(first) {
+            body = body.dropLast(first.count)
+            iteration = 1
+        } else if body.hasSuffix(followUp) {
+            body = body.dropLast(followUp.count)
+            iteration = 2
+        } else {
+            return nil
+        }
+
+        // Optional changed-path block: header line, "- `path`" lines, and an
+        // overflow line. It always follows the folder line / instructions.
+        var changedPaths: [String] = []
+        var overflow = 0
+        let changedMarker = "\n" + WatcherManager.changedSinceHeader + "\n"
+        if let range = body.range(of: changedMarker, options: .backwards) {
+            for line in body[range.upperBound...].split(separator: "\n", omittingEmptySubsequences: true) {
+                let s = String(line)
+                if s.hasPrefix("- `"), s.hasSuffix("`") {
+                    changedPaths.append(String(s.dropFirst(3).dropLast()))
+                } else if s.hasPrefix(WatcherManager.changedPathOverflowPrefix),
+                    s.hasSuffix(WatcherManager.changedPathOverflowSuffix)
+                {
+                    let digits = s.dropFirst(WatcherManager.changedPathOverflowPrefix.count)
+                        .dropLast(WatcherManager.changedPathOverflowSuffix.count)
+                    overflow = Int(digits) ?? 0
+                }
+            }
+            // Keep the newline that separated instructions from the block; it
+            // is peeled below with the folder line / bare separator.
+            body = body[..<range.lowerBound] + "\n"
+        }
+
+        // Folder line ("\n\n<prefix><path>\n") or the bare "\n" separator.
+        var watchedFolder: String?
+        let folderMarker = "\n\n" + WatcherManager.watchedFolderLinePrefix
+        if let range = body.range(of: folderMarker, options: .backwards) {
+            let after = body[range.upperBound...]
+            if let lineEnd = after.firstIndex(of: "\n") {
+                watchedFolder = String(after[..<lineEnd])
+            } else {
+                watchedFolder = String(after)
+            }
+            body = body[..<range.lowerBound]
+        } else if body.hasSuffix("\n") {
+            body = body.dropLast()
+        }
+
+        return (
+            .watcherRun(
+                watchedFolder: watchedFolder,
+                changedPaths: changedPaths,
+                overflowCount: overflow,
+                iteration: iteration
+            ),
+            String(body)
+        )
+    }
+
+    // Intel stored watcher chats with this framing before #2628 (no folder
+    // line, no changed paths); keep showing them as badges.
+    private static let legacyFirstRunFraming =
+        "\n\nChanges were detected in the watched folder. Use `file_read` (which lists a directory when given one) and other file tools to inspect the current state of the directory and take action.\n"
+    private static let legacyFollowUpFraming =
+        "\n\nThis is a follow-up check after a previous organizing pass. Quickly verify the directory state with a single `file_read` call on the folder. If everything looks organized, return immediately without further inspection. Only take action if you see clearly unorganized files.\n"
+    private static let legacyIdempotencyFooter =
+        "\nIf all files are already properly organized, return without making changes. Do not re-organize files that are already in their correct location.\n"
+
+    private static func parseLegacyWatcher(_ text: String) -> (kind: Kind, instructions: String)? {
+        guard text.hasSuffix(legacyIdempotencyFooter) else { return nil }
+        let body = text.dropLast(legacyIdempotencyFooter.count)
+        for (framing, iteration) in [(legacyFirstRunFraming, 1), (legacyFollowUpFraming, 2)]
+        where body.hasSuffix(framing) {
             return (
                 .watcherRun(watchedFolder: nil, changedPaths: [], overflowCount: 0, iteration: iteration),
-                instructions
+                String(body.dropLast(framing.count))
             )
         }
         return nil

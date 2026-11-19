@@ -94,36 +94,82 @@ struct DispatchEnvelopeTests {
         #expect(request.prompt.hasPrefix(NextRunScheduler.selfScheduledRunPrefix))
     }
 
-    // MARK: - Watcher run (Intel framing)
+    // MARK: - Watcher run (upstream #2628 prompt)
+
+    private func watcherPrompt(
+        _ instructions: String, iteration: Int, folder: String?, changed: [String]
+    ) -> String {
+        let watcher = WatcherManager.shared.create(
+            name: "Envelope Probe \(UUID().uuidString.prefix(6))", instructions: instructions,
+            watchPath: folder, isEnabled: false)
+        defer { WatcherManager.shared.delete(id: watcher.id) }
+        return WatcherManager.shared.buildDispatchPrompt(
+            for: watcher, iteration: iteration, resolvedWatchPath: folder, changedPaths: changed)
+    }
 
     @Test
-    func watcherRun_bothIterations() throws {
+    func watcherRun_bothIterationsRoundTripThePromptTheManagerWrites() throws {
         let instructions = "Sort new invoices into Year/Month folders."
-        for (framing, iteration) in [(WatcherManager.firstRunFraming, 1), (WatcherManager.followUpFraming, 2)] {
-            let stored = instructions + framing + WatcherManager.idempotencyFooter
+        for iteration in [1, 2] {
+            let stored = watcherPrompt(
+                instructions, iteration: iteration, folder: "/tmp/inbox", changed: ["a.pdf", "b.pdf (removed)"])
             let env = try #require(DispatchEnvelope.parse(stored, sessionSource: .watcher))
             #expect(env.displayText == instructions)
-            guard case let .watcherRun(_, paths, overflow, it) = env.kind else {
+            guard case let .watcherRun(folder, paths, overflow, it) = env.kind else {
                 Issue.record("expected watcherRun")
                 return
             }
-            #expect(paths.isEmpty && overflow == 0 && it == iteration)
-            #expect(env.badges.map(\.label) == ["Watcher run"])
-            #expect(env.badges.first?.tooltip == (iteration == 1 ? "First pass" : "Follow-up pass"))
+            #expect(folder == "/tmp/inbox")
+            #expect(paths == ["a.pdf", "b.pdf (removed)"] && overflow == 0 && it == iteration)
+            #expect(env.badges.first?.label == "Watcher run")
         }
     }
 
     @Test
+    func watcherRun_overflowAndNoFolderRoundTrip() throws {
+        let cap = WatcherManager.dispatchPromptChangedPathCap
+        let many = (0 ..< cap + 3).map { "f\($0).txt" }
+        let stored = watcherPrompt("Sort.", iteration: 1, folder: "/tmp/inbox", changed: many)
+        let env = try #require(DispatchEnvelope.parse(stored, sessionSource: .watcher))
+        guard case let .watcherRun(_, paths, overflow, _) = env.kind else {
+            Issue.record("expected watcherRun")
+            return
+        }
+        #expect(paths.count == cap && overflow == 3)
+        let bookmarkOnly = watcherPrompt("Sort.", iteration: 2, folder: nil, changed: [])
+        let bare = try #require(DispatchEnvelope.parse(bookmarkOnly, sessionSource: .watcher))
+        #expect(bare.displayText == "Sort.")
+    }
+
+    /// Chats stored before #2628 used a framing with no folder line.
+    @Test
+    func watcherRun_legacyFramingStillParses() throws {
+        let first =
+            "\n\nChanges were detected in the watched folder. Use `file_read` (which lists a directory when given one) and other file tools to inspect the current state of the directory and take action.\n"
+        let footer =
+            "\nIf all files are already properly organized, return without making changes. Do not re-organize files that are already in their correct location.\n"
+        let env = try #require(DispatchEnvelope.parse("Sort." + first + footer, sessionSource: .watcher))
+        #expect(env.displayText == "Sort.")
+        guard case let .watcherRun(folder, paths, _, it) = env.kind else {
+            Issue.record("expected watcherRun")
+            return
+        }
+        #expect(folder == nil && paths.isEmpty && it == 1)
+    }
+
+    @Test
     func watcherFramingOnlyParsesInWatcherSessions() {
-        let stored = "Sort." + WatcherManager.firstRunFraming + WatcherManager.idempotencyFooter
+        let stored = watcherPrompt("Sort.", iteration: 1, folder: "/tmp/inbox", changed: [])
         #expect(DispatchEnvelope.parse(stored, sessionSource: .chat) == nil)
-        // A footer alone (no framing) is left as-is rather than guessed at.
-        #expect(DispatchEnvelope.parse("Hi" + WatcherManager.idempotencyFooter, sessionSource: .watcher) == nil)
+        // The footer alone (no framing) is left as-is rather than guessed at.
+        #expect(
+            DispatchEnvelope.parse("Hi\n" + WatcherManager.alreadyOrganizedGuidance + "\n", sessionSource: .watcher)
+                == nil)
     }
 
     @Test
     func blocksCarryTheEnvelopeAndKeepTheStoredText() {
-        let stored = "Sort." + WatcherManager.firstRunFraming + WatcherManager.idempotencyFooter
+        let stored = watcherPrompt("Sort.", iteration: 1, folder: "/tmp/inbox", changed: [])
         let turn = ChatTurn(role: .user, content: stored)
         let block = BlockMemoizer().unrolledBlocks(from: [turn], sessionSource: .watcher)
             .first { $0.id.hasPrefix("user-") }

@@ -553,17 +553,30 @@ public final class WatcherManager: ObservableObject {
                     break
                 }
 
-                // Compute change count before overwriting lastKnown. The diff
+                // Compute the change set before overwriting lastKnown. The diff
                 // builds path sets over every entry, which is slow enough on
                 // large folders to hang the UI, so it runs off the main actor
-                // like the capture.
+                // like the capture. The PATHS are kept, not just the count
+                // (#2628): they anchor the dispatch prompt (a run that is only
+                // told "changes were detected" has introspected its own agent
+                // home instead of the watched folder, live).
+                let changedPaths: [String]
                 let changeCount: Int
                 if let known = self.lastKnownFingerprints[watcherId] {
-                    changeCount = await Task.detached(priority: .userInitiated) {
-                        fingerprint.diff(from: known).totalCount
+                    let diff = await Task.detached(priority: .userInitiated) {
+                        fingerprint.diff(from: known)
                     }.value
+                    changeCount = diff.totalCount
+                    // Removed paths are marked so the model is never invited
+                    // to `file_read` a file that no longer exists and then
+                    // narrate a spurious missing-file problem.
+                    changedPaths =
+                        (Array(diff.added.union(diff.modified))
+                            + diff.removed.map { "\($0) (removed)" })
+                        .sorted()
                 } else {
                     changeCount = fingerprint.entries.count
+                    changedPaths = []
                 }
 
                 // Store the fingerprint that triggered this dispatch as lastKnown.
@@ -576,7 +589,13 @@ public final class WatcherManager: ObservableObject {
 
                 print("[Osaurus] [\(watcher.name)] phase → processing (iteration \(iteration), \(changeCount) changes)")
 
-                let prompt = self.buildDispatchPrompt(for: watcher, iteration: iteration)
+                let resolvedWatchPath = self.resolveWatchPath(for: watcher) ?? watcher.watchPath
+                let prompt = self.buildDispatchPrompt(
+                    for: watcher,
+                    iteration: iteration,
+                    resolvedWatchPath: resolvedWatchPath,
+                    changedPaths: changedPaths
+                )
 
                 let request = DispatchRequest(
                     prompt: prompt,
@@ -587,7 +606,7 @@ public final class WatcherManager: ObservableObject {
                     // watcher and the dispatched chat must share the same
                     // folder root; passing only the display path made a
                     // relaunch-created watcher lose its working context.
-                    folderPath: self.resolveWatchPath(for: watcher) ?? watcher.watchPath,
+                    folderPath: resolvedWatchPath,
                     folderBookmark: watcher.watchBookmark,
                     source: .watcher,
                     externalSessionKey: watcher.id.uuidString
@@ -675,26 +694,89 @@ public final class WatcherManager: ObservableObject {
 
     // MARK: - Prompt Builder
 
-    /// Build the dispatch prompt. The AI gets the full directory tree via
-    /// FolderContext when the folder is set, so we only need to provide
-    /// the user's instructions and the idempotency footer.
-    private func buildDispatchPrompt(for watcher: Watcher, iteration: Int = 1) -> String {
+    /// How many changed paths the dispatch prompt names before summarizing
+    /// the remainder. Enough to make every ordinary event fully explicit;
+    /// bounded so a bulk copy of thousands of files cannot flood the prompt.
+    static let dispatchPromptChangedPathCap = 20
+
+    /// One changed-path line for the dispatch prompt. Filenames are
+    /// untrusted external input (watched folders are commonly fed by other
+    /// programs and people): APFS names may legally contain newlines and
+    /// other control characters, which could otherwise terminate the list
+    /// format and read as injected instructions. Control characters are
+    /// stripped and the name is backtick-quoted as data.
+    static func promptLine(forChangedPath path: String) -> String {
+        let cleaned = String(
+            path.unicodeScalars.map { scalar in
+                CharacterSet.controlCharacters.contains(scalar) ? " " : Character(scalar)
+            })
+        return "- `\(cleaned)`\n"
+    }
+
+    /// Build the dispatch prompt (upstream #2628). The AI gets the full
+    /// directory tree via FolderContext when the folder is set, but the
+    /// prompt must still NAME the watched folder and the changed files. Live
+    /// failure without the anchor: a watcher agent ran in an execution mode
+    /// rooted elsewhere, read its own agent home, and reported "the monitored
+    /// folder is empty" while the real watched folder held the files. The
+    /// changed-path list also makes the Watchers guide's "receives the
+    /// recently changed files" promise true.
+    ///
+    /// `resolvedWatchPath` is the RESOLVED path from the dispatch site (a
+    /// bookmark-only GUI watcher has `watcher.watchPath == nil`; interpolating
+    /// the optional shipped `Optional("...")` into the anchor upstream).
+    /// Internal (not private) so the prompt-anchoring contract is unit-testable.
+    func buildDispatchPrompt(
+        for watcher: Watcher,
+        iteration: Int = 1,
+        resolvedWatchPath: String? = nil,
+        changedPaths: [String] = []
+    ) -> String {
         var prompt = watcher.instructions
 
-        prompt += iteration == 1 ? Self.firstRunFraming : Self.followUpFraming
-        prompt += Self.idempotencyFooter
+        if let anchor = resolvedWatchPath ?? watcher.watchPath, !anchor.isEmpty {
+            prompt += "\n\n" + Self.watchedFolderLinePrefix + anchor + "\n"
+        } else {
+            prompt += "\n"
+        }
+        if !changedPaths.isEmpty {
+            let shown = changedPaths.prefix(Self.dispatchPromptChangedPathCap)
+            prompt += Self.changedSinceHeader + "\n"
+            for path in shown {
+                prompt += Self.promptLine(forChangedPath: path)
+            }
+            let overflow = changedPaths.count - shown.count
+            if overflow > 0 {
+                prompt += Self.changedPathOverflowPrefix + "\(overflow)" + Self.changedPathOverflowSuffix + "\n"
+            }
+        }
+
+        if iteration == 1 {
+            prompt += "\n" + Self.firstIterationGuidance + "\n"
+        } else {
+            prompt += "\n" + Self.followUpIterationGuidance + "\n"
+        }
+
+        prompt += "\n" + Self.alreadyOrganizedGuidance + "\n"
+
         return prompt
     }
 
-    // Fixed framing fragments, shared with `DispatchEnvelope`, which hides
-    // them for display so the producer and the parser cannot drift apart.
-    // Byte-for-byte the historical text.
-    nonisolated static let firstRunFraming =
-        "\n\nChanges were detected in the watched folder. Use `file_read` (which lists a directory when given one) and other file tools to inspect the current state of the directory and take action.\n"
-    nonisolated static let followUpFraming =
-        "\n\nThis is a follow-up check after a previous organizing pass. Quickly verify the directory state with a single `file_read` call on the folder. If everything looks organized, return immediately without further inspection. Only take action if you see clearly unorganized files.\n"
-    nonisolated static let idempotencyFooter =
-        "\nIf all files are already properly organized, return without making changes. Do not re-organize files that are already in their correct location.\n"
+    // MARK: - Dispatch prompt fragments
+
+    /// Fixed fragments of the watcher dispatch prompt. Shared with
+    /// `DispatchEnvelope`, which strips them for display, so the producer and
+    /// the parser can never drift apart.
+    nonisolated static let watchedFolderLinePrefix = "Watched folder (work HERE, not in any other directory): "
+    nonisolated static let changedSinceHeader = "Changed since the last check:"
+    nonisolated static let changedPathOverflowPrefix = "…and "
+    nonisolated static let changedPathOverflowSuffix = " more changed file(s)."
+    nonisolated static let firstIterationGuidance =
+        "Changes were detected in the watched folder. Use `file_read` (which lists a directory when given one) and other file tools to inspect the current state of the directory and take action."
+    nonisolated static let followUpIterationGuidance =
+        "This is a follow-up check after a previous organizing pass. Quickly verify the directory state with a single `file_read` call on the folder. If everything looks organized, return immediately without further inspection. Only take action if you see clearly unorganized files."
+    nonisolated static let alreadyOrganizedGuidance =
+        "If all files are already properly organized, return without making changes. Do not re-organize files that are already in their correct location."
 }
 
 // MARK: - FSEvents Callback

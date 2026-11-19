@@ -141,8 +141,14 @@ public final class ExecutionContext: ObservableObject {
 
     /// Begin execution with the given prompt.
     public func start(prompt: String) async {
-        await activateFolderContextIfNeeded()
-        chatSession.send(prompt)
+        let folderFailure = await activateFolderContextIfNeeded()
+        // The dispatch NAMED a folder and that folder cannot be read (#2628).
+        // Proceeding silently produced the live Watcher failure: the run fell
+        // back to another directory and reported "the monitored folder is
+        // empty" over a folder full of files. The run still executes (the
+        // result must reach the watcher log/UI), but the model is told the
+        // truth up front so it reports the real problem.
+        chatSession.send(folderFailure.map { $0 + "\n\n" + prompt } ?? prompt)
         // M13 Schedules follow-up (Renée 2026-06-04): persist the row now so it
         // appears in the chat sidebar the moment the run starts (the sidebar
         // observes `ChatSessionsManager.$sessions`). `send` only auto-saves
@@ -155,7 +161,9 @@ public final class ExecutionContext: ObservableObject {
     }
 
     /// Resolve the stored bookmark and set the work folder context before execution.
-    private func activateFolderContextIfNeeded() async {
+    /// Returns nil on success (or when no folder was requested); on failure a
+    /// prompt preamble stating which folder could not be read.
+    private func activateFolderContextIfNeeded() async -> String? {
         #if OSAURUS_INTEL
         // Intel app is not sandboxed, so its durable authority is a raw path.
         // Mount it on THIS chat session rather than only in the process-global
@@ -169,12 +177,13 @@ public final class ExecutionContext: ObservableObject {
                 path: folderPath
             )
             if mounted == nil {
-                print("[ExecutionContext] Scheduled folder is unavailable: \(folderPath)")
+                print("[ExecutionContext] Dispatch folder is unavailable: \(folderPath)")
+                return Self.folderUnreadablePreamble(path: folderPath)
             }
         }
-        return
+        return nil
         #else
-        guard let bookmark = folderBookmark else { return }
+        guard let bookmark = folderBookmark else { return nil }
         do {
             var isStale = false
             let url = try URL(
@@ -185,13 +194,30 @@ public final class ExecutionContext: ObservableObject {
             )
             guard !isStale else {
                 print("[ExecutionContext] Folder bookmark is stale, skipping")
-                return
+                return nil
             }
             await FolderContextService.shared.setFolder(url)
         } catch {
             print("[ExecutionContext] Failed to resolve folder bookmark: \(error)")
         }
+        return nil
         #endif
+    }
+
+    /// Fixed fragments of the folder-unreadable preamble (upstream #2628).
+    nonisolated static let folderUnreadablePreamblePrefix = "IMPORTANT — the configured folder for this task, '"
+    nonisolated static let folderUnreadablePreambleSuffix =
+        "', could not "
+        + "be read (it is missing, not a directory, or macOS denied access). "
+        + "Do NOT inspect other directories in its place and do NOT report the "
+        + "folder as empty. Report this access problem as the outcome and stop; "
+        + "the user can restore access by re-picking the folder where it was "
+        + "set (the Watcher or Schedule that owns it)."
+
+    /// The preamble prepended to a dispatched prompt when its named folder
+    /// could not be restored (see `activateFolderContextIfNeeded`).
+    nonisolated static func folderUnreadablePreamble(path: String) -> String {
+        folderUnreadablePreamblePrefix + path + folderUnreadablePreambleSuffix
     }
 
     /// Poll until execution completes or the task is cancelled.
