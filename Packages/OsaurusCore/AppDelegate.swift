@@ -161,7 +161,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // already-present provider, so fresh/restored identities otherwise
             // showed every custom provider while silently omitting Osaurus.
             Task { @MainActor in
-                await RemoteProviderManager.shared.connectOsaurusRouterIfPossible()
+                // Bounded retry on transient failures (offline launch, 5xx,
+                // 429 with Retry-After), as upstream's launch connect.
+                await RemoteProviderManager.shared.connectOsaurusRouterWithRetry()
                 // Upstream (`W-media-generation`): the Osaurus Cloud media
                 // catalog (signed, fails closed without an identity), then
                 // any paid video job that was still running at quit.

@@ -324,9 +324,53 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     /// Upstream's classification, for the errors Intel's discovery throws.
     static func isTransientConnectError(_ error: Error) -> Bool {
         if let urlError = error as? URLError { return isTransientURLErrorCode(urlError.code) }
+        // A typed 429 / 503 that outlived its bounded retry is still transient.
+        if let cloud = error as? CloudChatError, case .rateLimited = cloud { return true }
+        if let routerError = error as? OsaurusRouterAPIError {
+            switch routerError {
+            case .transport, .invalidResponse, .rateLimited:
+                return true
+            case .server(_, _, let status):
+                return status >= 500
+            case .noIdentity, .firstActionPending, .invalidURL, .unauthorized,
+                .belowMinimumTopUp, .insufficientFunds, .accountFrozen,
+                .paidWebDisabled, .idempotencyConflict:
+                return false
+            }
+        }
         let ns = error as NSError
         if ns.domain == NSURLErrorDomain { return isTransientURLErrorCode(URLError.Code(rawValue: ns.code)) }
         return false
+    }
+
+    /// True when an OAuth token-refresh failure means the stored tokens are
+    /// permanently dead (`invalid_grant` / `invalid_token` on HTTP 400/401)
+    /// and the user must sign in again (upstream, verbatim).
+    nonisolated static func isPermanentOAuthFailure(_ error: Error) -> Bool {
+        let message: String
+        switch error {
+        case OpenAICodexOAuthError.tokenRequestFailed(let m): message = m
+        case XAIOAuthError.tokenRequestFailed(let m): message = m
+        default: return false
+        }
+        let lowered = message.lowercased()
+        guard lowered.contains("http 400") || lowered.contains("http 401") else { return false }
+        return lowered.contains("invalid_grant") || lowered.contains("invalid_token")
+    }
+
+    /// Permanent OAuth failure: clear the dead tokens and set a durable
+    /// `requiresAuth` state so the UI offers "Sign in again" (upstream).
+    func handlePermanentOAuthFailure(providerId: UUID) {
+        RemoteProviderKeychain.deleteOAuthTokens(for: providerId)
+        var state = providerStates[providerId] ?? RemoteProviderState(providerId: providerId)
+        state.requiresAuth = true
+        state.isConnected = false
+        state.isConnecting = false
+        state.lastError = L("Session expired — please sign in again.")
+        state.lastFailureWasTransient = false
+        state.discoveredModels = []
+        providerStates[providerId] = state
+        notifyModelsChanged()
     }
 
     /// Mark every enabled provider as "connected" so the Providers tab
@@ -416,29 +460,46 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         } else if mediaModelCatalogs[provider.id] != nil {
             mediaModelCatalogs.removeValue(forKey: provider.id)
         }
-        guard let url = provider.url(for: "/models") else { return ([], [:]) }
+        guard let url = provider.url(for: "/models") else { throw URLError(.badURL) }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.timeoutInterval = 20
-        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+        for (k, v) in headers where IntelProviderDiscoveryExtras.isSafeHeader(name: k, value: v) {
+            req.setValue(v, forHTTPHeaderField: k)
+        }
         // A transport failure (offline, DNS, timeout) is thrown, as upstream:
         // the provider shows the error instead of "connected, 0 models", and
         // a transient one is retried when the network returns (#2415).
-        let (data, response) = try await GlobalProxySettings.makeSession().data(for: req)
-        guard let http = response as? HTTPURLResponse else { return ([], [:]) }
+        let (data, response) = try await discoveryTransport(req)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        // Upstream: typed rate limit / unavailable before the generic decode,
+        // so the connect phase can honour Retry-After with a bounded retry.
+        // Discovery is an idempotent GET, so a plain 503 is retryable too.
+        if let limited = IntelTransportRetry.rateLimited(from: http) { throw limited }
+        if http.statusCode == 503 { throw CloudChatError.rateLimited(retryAfter: nil, statusCode: 503) }
         guard (200...299).contains(http.statusCode) else {
-            // Upstream: an MCP server URL pasted as an API provider 404s on
-            // `/models`; say so instead of showing a connected provider with
-            // no models. Any other HTTP error keeps Intel's empty result.
+            // Upstream: a manual-model fallback for servers without a usable
+            // `/models`; an MCP server URL pasted as an API provider says so;
+            // any other HTTP error throws the provider's own message instead of
+            // leaving a connected provider with no models (a bad key).
+            if let manual = IntelProviderDiscoveryExtras.manualModelFallback(
+                providerType: provider.providerType, statusCode: http.statusCode,
+                manualModelIds: provider.manualModelIds)
+            {
+                return (manual, [:])
+            }
             if await IntelProviderDiscoveryExtras.looksLikeMCPServer(
-                providerType: provider.providerType, baseURL: provider.baseURL, headers: headers)
+                providerType: provider.providerType, baseURL: provider.baseURL, headers: headers,
+                transport: discoveryTransport)
             {
                 throw IntelProviderDiscoveryExtras.MCPEndpointDetected()
             }
-            return ([], [:])
+            throw IntelProviderDiscoveryExtras.RequestFailed(
+                message: IntelProviderDiscoveryExtras.discoveryErrorMessage(
+                    statusCode: http.statusCode, body: data))
         }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], [:]) }
-        if provider.providerType == .anthropic, json["data"] is [[String: Any]] {
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        if provider.providerType == .anthropic, json?["data"] is [[String: Any]] {
             // Anthropic's Models API publishes per-model thinking/effort
             // capabilities and `max_input_tokens`; keep both for the picker
             // and the request builder (upstream #3229).
@@ -449,30 +510,119 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
                 return (infos.map(\.id).sorted(), AnthropicModelCatalog.contextLengths(of: infos))
             }
         }
-        if let arr = json["data"] as? [[String: Any]] {
-            var ids: [String] = []
-            var lengths: [String: Int] = [:]
-            for entry in arr {
-                guard let id = entry["id"] as? String else { continue }
-                ids.append(id)
-                if let n = Self.advertisedContextLength(in: entry) {
-                    lengths[id] = n
-                }
-            }
-            // Upstream: Fireworks' `/models` lists only the account's own
-            // deployments; merge the serverless catalog after them.
-            if IntelProviderDiscoveryExtras.isFireworksProvider(provider) {
-                let merged = await IntelProviderDiscoveryExtras.augmentFireworks(
-                    discovered: ids.sorted(), headers: headers)
-                return (merged, lengths)
-            }
-            return (ids.sorted(), lengths)
+        let decoded = try IntelProviderDiscoveryExtras.decodeModelList(
+            data: data, providerType: provider.providerType, manualModelIds: provider.manualModelIds)
+        // Upstream: Fireworks' `/models` lists only the account's own
+        // deployments; merge the serverless catalog after them.
+        if IntelProviderDiscoveryExtras.isFireworksProvider(provider) {
+            let merged = await IntelProviderDiscoveryExtras.augmentFireworks(
+                discovered: decoded.ids.sorted(), headers: headers)
+            return (merged, decoded.contextLengths)
         }
-        if let arr = json["models"] as? [[String: Any]] {
-            let ids = arr.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }.sorted()
-            return (ids, [:])
+        return (decoded.ids.sorted(), decoded.contextLengths)
+    }
+
+    // MARK: - Bounded rate-limit retry (upstream `withRateLimitRetry`)
+
+    /// Total attempts (including the first) for connect-phase discovery that
+    /// answers 429 / 503.
+    static let connectRateLimitMaxAttempts = 3
+    /// Ceiling on any single Retry-After / backoff wait, so a hostile
+    /// `Retry-After: 86400` cannot pin the connect task.
+    static let connectRateLimitMaxDelay: TimeInterval = 15
+    /// Base delay of the exponential backoff between connect attempts.
+    static let osaurusRouterConnectRetryBaseDelay: TimeInterval = 1.0
+    /// Total attempts (including the first) for the Router connect.
+    static let osaurusRouterConnectMaxAttempts = 3
+    /// Test seam: replaces the real backoff sleep.
+    var testRetrySleepOverride: (@MainActor (TimeInterval) async -> Void)?
+    /// Test seam: the `/models` transport (tests never reach the network).
+    var discoveryTransport: IntelProviderDiscoveryExtras.Transport = IntelProviderDiscoveryExtras.defaultTransport
+    /// Test seam: the signed Router catalog fetch.
+    var testRouterModelsOverride: (@MainActor () async throws -> [OsaurusRouterModel])?
+
+    private func sleepForRetry(_ delay: TimeInterval) async {
+        if let testRetrySleepOverride {
+            await testRetrySleepOverride(delay)
+        } else {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
-        return ([], [:])
+    }
+
+    /// Bounded retry for the idempotent discovery GET. Retries only a typed
+    /// rate limit (429, or 503), waiting `max(Retry-After, backoff)` capped at
+    /// `connectRateLimitMaxDelay`; everything else propagates immediately.
+    func withRateLimitRetry<T: Sendable>(_ operation: @MainActor () async throws -> T) async throws -> T {
+        var attempt = 1
+        while true {
+            do {
+                return try await operation()
+            } catch let error as CloudChatError {
+                guard case .rateLimited(let retryAfter, _) = error,
+                    attempt < Self.connectRateLimitMaxAttempts
+                else { throw error }
+                let backoff = Self.osaurusRouterConnectRetryBaseDelay * pow(2.0, Double(attempt - 1))
+                await sleepForRetry(min(max(retryAfter ?? backoff, backoff), Self.connectRateLimitMaxDelay))
+                attempt += 1
+            }
+        }
+    }
+
+    /// A server-provided Retry-After hint from a typed rate-limit error.
+    static func retryAfterHint(from error: Error?) -> TimeInterval? {
+        if let cloud = error as? CloudChatError, case .rateLimited(let retryAfter, _) = cloud {
+            return retryAfter
+        }
+        if let router = error as? OsaurusRouterAPIError, case .rateLimited(let retryAfter) = router {
+            return retryAfter.flatMap(TimeInterval.init)
+        }
+        return nil
+    }
+
+    /// Discover a provider's models with the bounded retry and merge the
+    /// typed model ids (upstream `connect`). An Azure deployment list that
+    /// cannot be fetched still connects on its typed ids.
+    private func discoverModels(
+        for provider: RemoteProvider
+    ) async throws -> (models: [String], contextLengths: [String: Int]) {
+        let found: (models: [String], contextLengths: [String: Int])
+        do {
+            found = try await withRateLimitRetry { try await self.probeModelsDiscovery(for: provider) }
+        } catch {
+            guard provider.providerType == .azureOpenAI, !provider.manualModelIds.isEmpty else { throw error }
+            found = ([], [:])
+        }
+        return (provider.mergedModelIds(discovered: found.models), found.contextLengths)
+    }
+
+    /// Run discovery for one provider and record the outcome in its state:
+    /// connected with its models, or disconnected with the real error and the
+    /// transient flag (so the network-recovery sweep can retry it).
+    private func applyDiscovery(for provider: RemoteProvider) async {
+        do {
+            let (models, contextLengths) = try await discoverModels(for: provider)
+            var state = providerStates[provider.id] ?? RemoteProviderState(providerId: provider.id)
+            state.isConnected = true
+            state.isConnecting = false
+            state.lastError = nil
+            state.lastFailureWasTransient = false
+            state.requiresAuth = false
+            state.discoveredModels = models
+            state.lastConnectedAt = Date()
+            providerStates[provider.id] = state
+            customProviderContextLengths[provider.id] = contextLengths
+            NSLog("[RemoteProviderManager] \(provider.name): discovered \(models.count) model(s) → \(models)")
+        } catch {
+            var state = providerStates[provider.id] ?? RemoteProviderState(providerId: provider.id)
+            state.isConnected = false
+            state.isConnecting = false
+            state.lastError = error.localizedDescription
+            state.lastFailureWasTransient = Self.isTransientConnectError(error)
+            // Upstream: a failed discovery leaves no stale rows in the picker.
+            state.discoveredModels = []
+            providerStates[provider.id] = state
+            mediaModelCatalogs.removeValue(forKey: provider.id)
+        }
     }
 
     /// Probe one enabled provider and cache its models into
@@ -483,62 +633,27 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         guard let provider = configuration.providers.first(where: { $0.id == providerId }),
             provider.enabled
         else { return }
-        do {
-            let (models, contextLengths) = try await probeModelsDiscovery(for: provider)
-            var state = providerStates[providerId] ?? RemoteProviderState(providerId: providerId)
-            state.isConnected = true
-            state.lastError = nil
-            state.lastFailureWasTransient = false
-            state.discoveredModels = models
-            state.lastConnectedAt = Date()
-            providerStates[providerId] = state
-            customProviderContextLengths[providerId] = contextLengths
-            NSLog("[RemoteProviderManager] \(provider.name): discovered \(models.count) model(s) → \(models)")
-            notifyModelsChanged()
-        } catch {
-            var state = providerStates[providerId] ?? RemoteProviderState(providerId: providerId)
-            state.isConnected = false
-            state.lastError = error.localizedDescription
-            state.lastFailureWasTransient = Self.isTransientConnectError(error)
-            providerStates[providerId] = state
-            notifyModelsChanged()
-        }
+        await applyDiscovery(for: provider)
+        notifyModelsChanged()
     }
 
-    /// Probe every enabled provider. Called at launch, when the Providers tab
-    /// appears (so a late-started local server is picked up), and after any
-    /// provider mutation.
+    /// Probe every enabled provider, in parallel (upstream `connectEnabledProviders`:
+    /// N providers reach the picker in ~max(latency), and the Router's retry
+    /// backoff no longer delays the others). Called at launch, when the
+    /// Providers tab appears (so a late-started local server is picked up),
+    /// and after any provider mutation.
     func refreshAllModels() async {
         let enabled = configuration.providers.filter { $0.enabled }
-        for provider in enabled {
-            // The Osaurus Router's catalog lives behind an EIP-191-signed account
-            // API (GET /models at the host root), not the plain unsigned /models
-            // probe `probeModelsDiscovery` does — an unsigned probe just 404s/401s, leaving
-            // the router with zero models until the Credits tab happened to run the
-            // signed fetch. Route it through the signed path so the catalog (and
-            // its pricing/vision metadata) populates at launch like every other
-            // provider. (Fixes: only DeepSeek showed in the picker on a fresh start.)
-            if provider.providerType == .osaurusRouter {
-                await connectOsaurusRouterIfPossible()
-                continue
-            }
-            do {
-                let (models, contextLengths) = try await probeModelsDiscovery(for: provider)
-                var state = providerStates[provider.id] ?? RemoteProviderState(providerId: provider.id)
-                state.isConnected = true
-                state.lastError = nil
-                state.lastFailureWasTransient = false
-                state.discoveredModels = models
-                state.lastConnectedAt = Date()
-                providerStates[provider.id] = state
-                customProviderContextLengths[provider.id] = contextLengths
-                NSLog("[RemoteProviderManager] \(provider.name): discovered \(models.count) model(s) → \(models)")
-            } catch {
-                var state = providerStates[provider.id] ?? RemoteProviderState(providerId: provider.id)
-                state.isConnected = false
-                state.lastError = error.localizedDescription
-                state.lastFailureWasTransient = Self.isTransientConnectError(error)
-                providerStates[provider.id] = state
+        await withTaskGroup(of: Void.self) { group in
+            for provider in enabled {
+                // The Osaurus Router's catalog lives behind an EIP-191-signed account
+                // API (GET /models at the host root), not the plain unsigned /models
+                // probe: route it through the signed path (with bounded retry).
+                if provider.providerType == .osaurusRouter {
+                    group.addTask { await self.connectOsaurusRouterWithRetry() }
+                } else {
+                    group.addTask { await self.applyDiscovery(for: provider) }
+                }
             }
         }
         notifyModelsChanged()
@@ -577,21 +692,76 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     /// this through `RemoteProviderService.connect`; Intel registers the provider
     /// directly so `CloudChatEngine` resolves the router endpoint + signed auth.
     func connectOsaurusRouterIfPossible() async {
+        try? await connectOsaurusRouter()
+    }
+
+    /// One Router connect attempt (upstream `connect` for the managed router):
+    /// success marks it connected with its catalog; failure leaves a real
+    /// `lastError`, `isConnected == false` and the transient flag (so the
+    /// network-recovery sweep retries a launch that was offline), then throws.
+    /// The catalog fetch is an unbilled signed GET, so retrying it is free.
+    func connectOsaurusRouter() async throws {
         guard isOsaurusRouterEnabled else { return }
         if !configuration.providers.contains(where: { $0.id == Self.osaurusRouterProviderId }) {
             configuration.add(Self.makeManagedOsaurusRouterProvider())
         }
         var state = providerStates[Self.osaurusRouterProviderId]
             ?? RemoteProviderState(providerId: Self.osaurusRouterProviderId)
-        state.isConnected = true
-        if let models = try? await OsaurusRouterAPIClient().models() {
+        // Another path is already connecting: don't pile on a duplicate.
+        guard !state.isConnecting else { return }
+        state.isConnecting = true
+        state.lastError = nil
+        providerStates[Self.osaurusRouterProviderId] = state
+        do {
+            let models: [OsaurusRouterModel]
+            if let override = testRouterModelsOverride {
+                models = try await override()
+            } else {
+                models = try await OsaurusRouterAPIClient().models()
+            }
+            state.isConnecting = false
+            state.isConnected = true
             state.discoveredModels = models.map(\.id).sorted()
             state.lastConnectedAt = Date()
+            state.lastError = nil
+            state.lastFailureWasTransient = false
+            state.requiresAuth = false
             routerModelMetadata = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+            providerStates[Self.osaurusRouterProviderId] = state
+            seedStarterFavoritesFromOsaurusRouterCatalog()
+            notifyModelsChanged()
+        } catch {
+            state.isConnecting = false
+            state.isConnected = false
+            state.lastError = error.localizedDescription
+            state.lastFailureWasTransient = Self.isTransientConnectError(error)
+            state.discoveredModels = []
+            providerStates[Self.osaurusRouterProviderId] = state
+            notifyModelsChanged()
+            throw error
         }
-        providerStates[Self.osaurusRouterProviderId] = state
-        seedStarterFavoritesFromOsaurusRouterCatalog()
-        notifyModelsChanged()
+    }
+
+    /// Launch entry point (upstream `connectOsaurusRouterWithRetry`): bounded
+    /// retry on transient failures only (offline, 5xx, 429), waiting at least
+    /// the server's `Retry-After` (capped at 15 s). Terminal failures (no
+    /// identity, auth, other 4xx) stop at once.
+    func connectOsaurusRouterWithRetry(
+        maxAttempts: Int = RemoteProviderManager.osaurusRouterConnectMaxAttempts
+    ) async {
+        let attempts = max(1, maxAttempts)
+        for attempt in 1 ... attempts {
+            do {
+                try await connectOsaurusRouter()
+                return
+            } catch {
+                guard Self.isTransientConnectError(error), attempt < attempts else { return }
+                let backoff = Self.osaurusRouterConnectRetryBaseDelay * pow(2.0, Double(attempt - 1))
+                await sleepForRetry(min(max(Self.retryAfterHint(from: error) ?? 0, backoff), Self.connectRateLimitMaxDelay))
+                // Another path may have connected while we waited.
+                if providerStates[Self.osaurusRouterProviderId]?.isConnected == true { return }
+            }
+        }
     }
 
     /// The picker's provider prefix (upstream `pickerPrefix(for:)`), used by
@@ -738,7 +908,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         isOsaurusRouterEnabled = enabled
 
         if enabled {
-            Task { await connectOsaurusRouterIfPossible() }
+            Task { await connectOsaurusRouterWithRetry() }
         } else {
             configuration.providers.removeAll { $0.id == Self.osaurusRouterProviderId }
             providerStates.removeValue(forKey: Self.osaurusRouterProviderId)
@@ -842,7 +1012,24 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         providerStates[providerId]?.isConnecting = false
         notifyModelsChanged()
     }
-    func disconnect(providerId: UUID) {}
+    /// Upstream `disconnect`: the provider stops being connected and its
+    /// models, media catalog and context windows are dropped, so the
+    /// Providers tab shows "Disconnected" and the picker loses its rows.
+    /// Intel has no provider session object to cancel. "Reconnect" (or the
+    /// next refresh) runs discovery again.
+    func disconnect(providerId: UUID) {
+        if var state = providerStates[providerId] {
+            state.isConnected = false
+            state.isConnecting = false
+            state.discoveredModels = []
+            providerStates[providerId] = state
+        }
+        mediaModelCatalogs.removeValue(forKey: providerId)
+        customProviderContextLengths.removeValue(forKey: providerId)
+        AnthropicModelCatalog.remove(providerId: providerId)
+        if providerId == Self.osaurusRouterProviderId { routerModelMetadata = [:] }
+        notifyModelsChanged()
+    }
     func reconnect(providerId: UUID) async throws { try await connect(providerId: providerId) }
 
     /// AgentDetailView's per-agent model picker calls `findService` to
@@ -959,9 +1146,11 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.timeoutInterval = 30
-        for (k, v) in testHeaders { req.setValue(v, forHTTPHeaderField: k) }
+        for (k, v) in testHeaders where IntelProviderDiscoveryExtras.isSafeHeader(name: k, value: v) {
+            req.setValue(v, forHTTPHeaderField: k)
+        }
 
-        let (data, response) = try await GlobalProxySettings.makeSession().data(for: req)
+        let (data, response) = try await discoveryTransport(req)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             if let manual = IntelProviderDiscoveryExtras.manualModelFallback(
                 providerType: providerType, statusCode: http.statusCode, manualModelIds: manualModelIds)
@@ -969,26 +1158,22 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
                 return manual
             }
             if await IntelProviderDiscoveryExtras.looksLikeMCPServer(
-                providerType: providerType, baseURL: tempProvider.baseURL, headers: testHeaders)
+                providerType: providerType, baseURL: tempProvider.baseURL, headers: testHeaders,
+                transport: discoveryTransport)
             {
                 throw IntelProviderDiscoveryExtras.MCPEndpointDetected()
             }
-            throw NSError(
-                domain: "RemoteProvider",
-                code: http.statusCode,
-                userInfo: [NSLocalizedDescriptionKey: "Test failed — HTTP \(http.statusCode)"]
-            )
+            // Upstream: the provider's own message, not a bare status.
+            throw IntelProviderDiscoveryExtras.RequestFailed(
+                message: IntelProviderDiscoveryExtras.discoveryErrorMessage(
+                    statusCode: http.statusCode, body: data))
         }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return []
-        }
-        if let arr = json["data"] as? [[String: Any]] {
-            return arr.compactMap { $0["id"] as? String }.sorted()
-        }
-        if let arr = json["models"] as? [[String: Any]] {
-            return arr.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }.sorted()
-        }
-        return []
+        // Upstream: Gemini keeps only `generateContent` models (prefix
+        // stripped); a body that is not a model list fails unless typed ids
+        // exist, instead of a passing test with no models.
+        let decoded = try IntelProviderDiscoveryExtras.decodeModelList(
+            data: data, providerType: providerType, manualModelIds: manualModelIds)
+        return decoded.ids.sorted()
     }
 }
 
