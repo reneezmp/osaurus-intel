@@ -3531,3 +3531,12 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Set `file_write` to Ask, request two writes in one turn and Deny the first: the second shows as skipped, the run ends with the rejection message, and no second prompt appears.
 - [ ] Start a batch with a slow command plus a read and press Stop: the run ends, no further model request is sent, and no error line appears.
 - [ ] Ask it to load a capability and use it in the same turn: it still works.
+
+## Engine slice 8: desktop automation failures (2026-11-18)
+
+`W-cov-reaudit` 5c (`COV_REAUDIT_STAGE5C_ENGINE.md` row 30). Not in candidate 68.
+
+- [ ] Ask for an AppleScript that macOS refuses (choose Don't Allow on the Automation prompt): the turn ends with "The requested action was not completed." and the model doesn't start a second automation attempt.
+- [ ] A later message in the same chat works normally.
+- [ ] Ask a Mac question through `mac_query` with Automation allowed: a normal answer.
+- [ ] An AppleScript request with missing arguments gets one correction turn and the run continues.
