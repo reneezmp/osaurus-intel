@@ -66,7 +66,9 @@ public struct AppControl {
         }
         if !launched {
             fputs(
-                "Could not launch Osaurus.app. Install it with Homebrew: brew install --cask osaurus\n",
+                // Intel: Homebrew's `osaurus` cask is upstream's Apple Silicon app.
+                "Could not launch Osaurus.app. Download the Intel build from "
+                    + "https://github.com/reneezmp/osaurus-intel/releases\n",
                 stderr
             )
             return
