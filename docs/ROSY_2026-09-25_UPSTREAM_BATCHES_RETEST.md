@@ -3575,10 +3575,19 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 
 ## Bundles (2026-11-19)
 
-`W-osaurus-bundles`. Not in candidate 68. The `osaurus import` command can't be tested until the CLI builds (`W-cli-build`); use the in-app sheet.
+`W-osaurus-bundles`. Not in candidate 68. The `osaurus import` command needs the CLI from this build (`W-cli-build`, fixed 2026-11-19).
 
 - [ ] Make a bundle folder: `osaurus-bundle.json` with `format` `osaurus.bundle`, `format_version` 1, `id` `com.example.test`, a name, version `1.0.0`, one skill `{ "name": "notes", "path": "skills/notes" }` and one agent `agents/helper.json` (`{ "name": "Helper", "system_prompt": "Be brief." }`), plus `skills/notes/SKILL.md`.
 - [ ] Agents → Bundles → Choose Bundle Folder: it is validated and queued, and nothing is applied yet. Remove from Queue works.
 - [ ] Queue it again and Apply: the result shows `skill/notes: done` and `agent/Helper: done`; Helper is in Agents and notes in Skills. Applying the same folder again shows `unchanged`.
 - [ ] Add a stdio MCP server to the manifest (`"mcp_servers": [{"name":"Echo","transport":"stdio","command":"/usr/bin/true"}]`) and queue it: a red line says it launches a local process. Remove it from the queue: Settings → MCP has no "Echo".
 - [ ] `curl -s -X POST http://127.0.0.1:<port>/admin/import/plan -d '{}'` answers 415; with `-H 'Content-Type: application/json'` it answers 400 asking for `bundle_path`; with `-H 'Origin: https://example.com'` it answers 403.
+
+## Command-line tool builds again (2026-11-19)
+
+`W-cli-build`. Not in candidate 68.
+
+- [ ] `osaurus version` and `osaurus doctor` run and describe this Intel install.
+- [ ] With the app quit, `osaurus serve` starts the Intel app (not anything from Homebrew).
+- [ ] `osaurus import validate --from <bundle folder>` validates the test bundle from the Bundles checks without applying anything.
+

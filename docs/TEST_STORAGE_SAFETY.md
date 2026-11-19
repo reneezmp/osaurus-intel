@@ -555,3 +555,10 @@ including all `A…` suites, Apple tools and `MockAppleScriptWorld`). Accepted f
 that merge: a full run with `'^(?!.*BackgroundTaskAgentGroupClose).*$'` passed
 (5779 tests) plus that suite alone (3 tests). Use the same pair when the
 watchdog exits 124 on this test, and say so in the report.
+
+**CLI package tests (2026-11-19).** The gate covers `Packages/OsaurusCore` only.
+For `Packages/OsaurusCLI` use the same environment (fresh `OSAURUS_TEST_ROOT`,
+`OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1`, `lockf`, stdin from `/dev/null`) and two
+passes: `swift test --arch x86_64 --no-parallel` for XCTest, and a pass without
+`--arch` for Swift Testing (the arm64 testing helper cannot load an x86_64
+bundle on the build Mac).
