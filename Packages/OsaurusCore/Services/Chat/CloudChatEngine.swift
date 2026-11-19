@@ -226,8 +226,12 @@ func extractAPIErrorMessage(_ body: String) -> String {
             return msg
         }
         if let msg = json["message"] as? String, !msg.isEmpty { return msg }
+        // Alternative format: {"detail": "..."} (FastAPI-style gateways).
+        if let detail = json["detail"] as? String, !detail.isEmpty { return detail }
     }
-    return trimmed
+    // Raw fallback, capped like upstream `extractErrorMessage`: an HTML
+    // gateway page must not fill the chat.
+    return trimmed.count > 200 ? String(trimmed.prefix(200)) + "..." : trimmed
 }
 
 /// The upstream provider's message from an OpenRouter error's
@@ -678,17 +682,46 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
     /// OpenAI-compatible `tools` array from the request's tool specs. The
     /// JSON-Schema `parameters` come through `JSONValue.anyValue`.
-    static func encodeTools(_ tools: [Tool]?) -> [[String: Any]]? {
+    static func encodeTools(_ tools: [Tool]?, stripRestrictedTopLevelKeys: Bool = false) -> [[String: Any]]? {
         guard let tools, !tools.isEmpty else { return nil }
         return tools.map { tool in
             var fn: [String: Any] = ["name": tool.function.name]
             if let desc = tool.function.description { fn["description"] = desc }
-            let params =
+            var params =
                 tool.function.parameters?.withEmptyPropertiesIfMissing
                 ?? .object(["type": .string("object"), "properties": .object([:])])
+            if stripRestrictedTopLevelKeys { params = strippingRestrictedTopLevelSchemaKeys(params) }
             fn["parameters"] = params.anyValue
             return ["type": "function", "function": fn]
         }
+    }
+
+    /// Top-level JSON-Schema keywords that strict function-schema validators
+    /// reject (upstream `RemoteProviderService.restrictedTopLevelSchemaKeys`).
+    private static let restrictedTopLevelSchemaKeys: Set<String> = [
+        "oneOf", "anyOf", "allOf", "enum", "const", "not",
+    ]
+
+    /// Upstream `enforcesTopLevelParameterSchemaRestrictions` (#3266): Router,
+    /// Anthropic, Azure, Codex and openai.com 400 a tool whose top-level
+    /// `parameters` has `anyOf` / `enum` / ... Local validation keeps the full
+    /// schema; only the copy on the wire is narrowed.
+    nonisolated static func enforcesTopLevelParameterSchemaRestrictions(
+        providerType: RemoteProviderType, host: String
+    ) -> Bool {
+        switch providerType {
+        case .azureOpenAI, .openAICodex, .anthropic, .osaurusRouter: return true
+        default: break
+        }
+        let normalizedHost = host.lowercased()
+        return normalizedHost == "api.openai.com" || normalizedHost.hasSuffix(".openai.com")
+    }
+
+    /// Strip only the top-level offenders; everything nested is preserved.
+    static func strippingRestrictedTopLevelSchemaKeys(_ parameters: JSONValue) -> JSONValue {
+        guard case .object(let object) = parameters else { return parameters }
+        let sanitized = object.filter { !restrictedTopLevelSchemaKeys.contains($0.key) }
+        return sanitized.count == object.count ? parameters : .object(sanitized)
     }
 
     /// Venice's own request settings (upstream
@@ -870,6 +903,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         var usesAnthropicWire: Bool { provider?.providerType == .anthropic }
         /// Gemini `streamGenerateContent` wire (`IntelGeminiAdapter`).
         var usesGeminiWire: Bool { provider?.providerType == .gemini }
+        /// Upstream #3266: strict targets reject top-level `anyOf` / `enum` / ...
+        var restrictsTopLevelToolSchema: Bool {
+            if isCodex || isOsaurusRouter { return true }
+            guard let provider else { return false }
+            return ChatEngine.enforcesTopLevelParameterSchemaRestrictions(
+                providerType: provider.providerType, host: provider.host)
+        }
     }
 
     /// Resolve the endpoint + headers for `model`. On Intel a request can route
@@ -1292,8 +1332,6 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         if IntelClaudeCodeService.handles(resolvedModel) {
             return try await IntelClaudeCodeService.shared.streamChat(request: request)
         }
-        let toolSpecs = Self.encodeTools(request.tools)
-
         guard let endpoint = try await resolveEndpoint(forModel: resolvedModel) else {
             throw EngineError(
                 message:
@@ -1301,6 +1339,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             )
         }
         try checkRouterSpendAuthorization(endpoint)
+        let toolSchemaStrict = endpoint.restrictsTopLevelToolSchema
+        let toolSpecs = Self.encodeTools(request.tools, stripRestrictedTopLevelKeys: toolSchemaStrict)
         let usesResponsesLite = endpoint.isCodex
             && OpenAICodexOAuthService.usesResponsesLite(modelId: endpoint.modelId)
         let responsesLiteSessionId = usesResponsesLite
@@ -1851,7 +1891,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             : endpoint.url
                         var urlRequest = URLRequest(url: URL(string: requestURL)!)
                         urlRequest.httpMethod = "POST"
-                        for (k, v) in try await self.requestHeaders(for: endpoint) { urlRequest.setValue(v, forHTTPHeaderField: k) }
+                        // Upstream `isSafeHeader` (#3266): a custom header with CR/LF or control characters is dropped, not sent.
+                        for (k, v) in try await self.requestHeaders(for: endpoint)
+                        where IntelProviderDiscoveryExtras.isSafeHeader(name: k, value: v) { urlRequest.setValue(v, forHTTPHeaderField: k) }
                         if let responsesLiteSessionId {
                             urlRequest.setValue(responsesLiteSessionId, forHTTPHeaderField: "session-id")
                             urlRequest.setValue(responsesLiteSessionId, forHTTPHeaderField: "x-session-affinity")
@@ -1953,6 +1995,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // with tool calls pending means the arguments were cut.
                         var roundFinishReason: String?
                         var announcedNames: Set<Int> = []
+                        var slotResolver = IntelToolCallSlotResolver()
 
                         // Router billing (upstream `RemoteProviderService`):
                         // however this round's stream ends, a connected Router
@@ -2117,6 +2160,24 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 return
                             }
 
+                            // Upstream `resolveAccumulatedToolCall` at `response.completed`
+                            // (#3266): a call whose arguments are not valid JSON is
+                            // quarantined (never run, never put in history); the round is
+                            // re-asked twice, uncharged, then reported. Same as the
+                            // chat-completions path below.
+                            if let cut = finalized.completion.toolCalls.first(where: {
+                                IntelTransportRetry.argumentsAreMalformed($0.arguments)
+                            }) {
+                                NSLog("[CloudChatEngine] Discarding malformed Responses tool call '\(cut.name)' (\(cut.arguments.utf8.count) bytes)")
+                                continuation.yield(StreamingToolHint.encode(""))
+                                if mayRetryTransient() {
+                                    transientRetries += 1
+                                    pendingHarnessNotices = roundNotices
+                                    round -= 1
+                                    continue
+                                }
+                                throw CloudChatError.truncatedToolCall(toolName: cut.name, finishMarker: "response.completed")
+                            }
                             // Intel desktop subagent step: hand the proposed
                             // calls back instead of running them.
                             if request.stopAtToolCalls {
@@ -2214,7 +2275,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 )
                                 if let adopted = await Self.adoptingLoadedTools(from: loadBuffer, into: activeTools) {
                                     activeTools = adopted
-                                    liveToolSpecs = Self.encodeTools(adopted)
+                                    liveToolSpecs = Self.encodeTools(adopted, stripRestrictedTopLevelKeys: toolSchemaStrict)
                                 }
                                 insightToolCalls.append(
                                     ToolCallLog(
@@ -2449,23 +2510,35 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         var geminiTranslator: IntelGeminiSSETranslator? =
                             endpoint.usesGeminiWire ? IntelGeminiSSETranslator() : nil
                         do {  // upstream transient retry (row 11); not re-indented, to keep the diff small
-                        lineLoop: for try await rawLine in asyncBytes.lines {
+                        // Upstream #3266: the compiled `OpenAICompatibleStreamFramer`
+                        // turns bytes into event payloads (`data:` without a space,
+                        // CR / CRLF; Router also raw JSON lines and split `data:`
+                        // lines). Native wires translate line by line.
+                        let framing: OpenAICompatibleStreamFramer.Options =
+                            endpoint.isOsaurusRouter ? .routerCompatible : .strict
+                        let translate: ((String) throws -> [String])? =
+                            anthropicTranslator != nil
+                            ? { try anthropicTranslator!.translate($0) }
+                            : geminiTranslator != nil ? { try geminiTranslator!.translate($0) } : nil
+                        let events = IntelSSEEventSequence(
+                            base: asyncBytes, options: framing,
+                            onLine: { wireProbe.appendResponseChunk($0) }, translate: translate)
+                        lineLoop: for try await dataStr in events {
                             try Task.checkCancellation()
-                            wireProbe.appendResponseChunk(Data((rawLine + "\n").utf8))
-                            let translatedLines: [String]
-                            if anthropicTranslator != nil {
-                                translatedLines = try anthropicTranslator!.translate(rawLine)
-                            } else if geminiTranslator != nil {
-                                translatedLines = try geminiTranslator!.translate(rawLine)
-                            } else {
-                                translatedLines = [rawLine]
-                            }
-                            for line in translatedLines {                                guard line.hasPrefix("data: ") else { continue }
-                                let dataStr = String(line.dropFirst(6))
-                                if dataStr == "[DONE]" { break lineLoop }
+                                if dataStr.trimmingCharacters(in: .whitespacesAndNewlines) == "[DONE]" { break lineLoop }
 
-                                guard let chunkData = dataStr.data(using: .utf8),
-                                    let json = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any]
+                                // Router-compatible: one JSON payload split across several
+                                // `data:` lines is retried with the framing CR/LF removed.
+                                var chunkData = dataStr.data(using: .utf8) ?? Data()
+                                var parsedJSON = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any]
+                                if parsedJSON == nil,
+                                    let repaired = OpenAICompatibleStreamFramer.repairedSplitDataJSONPayload(
+                                        chunkData, options: framing)
+                                {
+                                    chunkData = repaired
+                                    parsedJSON = try? JSONSerialization.jsonObject(with: repaired) as? [String: Any]
+                                }
+                                guard let json = parsedJSON
                                 else {
                                     // Shape only — never log payload bytes; SSE frames carry
                                     // the user's conversation content.
@@ -2552,14 +2625,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 // Accumulate streamed tool calls (M12 Gap 3).
                                 if let tcs = delta["tool_calls"] as? [[String: Any]] {
                                     for tc in tcs {
-                                        let idx = tc["index"] as? Int ?? 0
+                                        let callId = (tc["id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                                        let idx = slotResolver.resolve(
+                                            explicitIndex: tc["index"] as? Int, callId: callId,
+                                            accumulatedSlots: Set(partials.keys))
                                         var partial = partials[idx] ?? PartialToolCall()
                                         if let id = tc["id"] as? String, !id.isEmpty { partial.id = id }
                                     if let signature = tc[IntelGeminiAdapter.thoughtSignatureKey] as? String {
                                         partial.thoughtSignature = signature
                                     }
                                         if let fn = tc["function"] as? [String: Any] {
-                                            if let n = fn["name"] as? String, !n.isEmpty { partial.name += n }
+                                            // Set once (upstream #3266): a server that repeats the name per chunk
+                                            // must not produce `file_writefile_write`.
+                                            if let n = fn["name"] as? String, !n.isEmpty, partial.name.isEmpty { partial.name = n }
                                             // Surface the tool name once, BEFORE
                                             // streaming args, so the call card
                                             // appears immediately and the query
@@ -2580,7 +2658,6 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         partials[idx] = partial
                                     }
                                 }
-                            }
                         }
                         } catch let error as URLError
                             where IntelTransportRetry.isTransientStreamDrop(error) && mayRetryTransient()
@@ -2850,7 +2927,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             )
                             if let adopted = await Self.adoptingLoadedTools(from: loadBuffer, into: activeTools) {
                                 activeTools = adopted
-                                liveToolSpecs = Self.encodeTools(adopted)
+                                liveToolSpecs = Self.encodeTools(adopted, stripRestrictedTopLevelKeys: toolSchemaStrict)
                             }
                             insightToolCalls.append(
                                 ToolCallLog(
@@ -3140,7 +3217,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
         var urlRequest = URLRequest(url: URL(string: endpoint.url)!)
         urlRequest.httpMethod = "POST"
-        for (k, v) in try await requestHeaders(for: endpoint) { urlRequest.setValue(v, forHTTPHeaderField: k) }
+        for (k, v) in try await requestHeaders(for: endpoint)
+        where IntelProviderDiscoveryExtras.isSafeHeader(name: k, value: v) { urlRequest.setValue(v, forHTTPHeaderField: k) }
         urlRequest.timeoutInterval = 300
 
         var body: [String: Any] = [
