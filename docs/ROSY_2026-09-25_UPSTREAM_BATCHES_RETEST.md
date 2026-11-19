@@ -3552,3 +3552,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] From another computer, with Expose to Network temporarily on, `/admin/config/export` answers 403. Turn Expose to Network back off.
 - [ ] Create a watcher on a folder and drop two files in: its run names the folder and both files. Delete the folder and trigger it again: the run says the folder could not be read, not that it is empty.
 - [ ] Ask `osaurus_help` (or the Orchestrator) how configuration or automation works: the answer only mentions things this build has.
+
+## Provider slice 1: Router billing (2026-11-19)
+
+`W-cov-reaudit` 5d (`COV_REAUDIT_STAGE5D_PROVIDER.md` rows 1–5). Not in candidate 68.
+
+- [ ] With a Router model, start a new chat: after the title appears, Settings → Credits activity shows the title request, and the balance moves without waiting for a refresh.
+- [ ] Insights for a Codex or OpenAI (API key) chat shows input and output tokens as Reported, not Estimated.
+- [ ] With a nearly empty Router balance, a long answer fails with the out-of-credits notice instead of stopping short with no error.
+- [ ] If a provider sends an error mid-stream, the chat shows that error once, with no silent retries; Credits shows no extra charges for it.
+- [ ] A Claude model that refuses a request shows "Anthropic refused this request…" with its explanation, not an empty reply.

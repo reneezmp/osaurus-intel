@@ -546,3 +546,12 @@ stays silent for 300 seconds it kills only the `swiftpm-testing-helper` of its
 own repo path, keeps the log as `<log>.stalled1`, and retries once with a new
 temp root. A `STALLED:` line followed by a passing second attempt counts as a
 pass, but report it. Two stalled attempts exit 124.
+
+**2026-11-19:** on the provider slice 1 branch the hang hit both watchdog
+attempts (and the agent's first run), always at
+`closeAgentGroup_cancelsActiveFinalizesAllAndSparesOtherAgents`, about 836
+tests in. It did not reproduce with every suite that runs before it (811 tests,
+including all `A…` suites, Apple tools and `MockAppleScriptWorld`). Accepted for
+that merge: a full run with `'^(?!.*BackgroundTaskAgentGroupClose).*$'` passed
+(5779 tests) plus that suite alone (3 tests). Use the same pair when the
+watchdog exits 124 on this test, and say so in the report.

@@ -178,6 +178,10 @@ mdat and live-folder checks).
   from parts waiting on other features. `/admin/config/*` deliberately differs
   from upstream: every apply needs the user's approval in the app, and browser
   callers are refused (a web page also connects over loopback).
+- **Provider slice 1** (5d rows 1–5, 2026-11-19): Router one-shots stream
+  with the billing summary and key, Responses usage is reported,
+  `clamp_to_balance: false`, in-stream error frames and Anthropic refusals fail
+  the turn instead of being retried and billed.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
