@@ -389,6 +389,15 @@ struct IntelAnthropicSSETranslator {
             }
             // The output cap ended the message: say so in the OpenAI shape, so
             // a tool call cut off mid-arguments is refused (upstream #2108).
+            // Anthropic's safeguard blocks a turn with `stop_reason: "refusal"` and
+            // zero content blocks. Without this it ends as an empty turn that is
+            // retried (upstream `handleAnthropicEvent`): fail with its explanation.
+            if (event["delta"] as? [String: Any])?["stop_reason"] as? String == "refusal" {
+                let details = (event["delta"] as? [String: Any])?["stop_details"] as? [String: Any]
+                let explanation = (details?["explanation"] as? String) ?? "no explanation provided by the provider"
+                throw CloudChatError.streamErrorFrame(
+                    "Anthropic refused this request (stop_reason=refusal): " + explanation)
+            }
             if (event["delta"] as? [String: Any])?["stop_reason"] as? String == "max_tokens" {
                 return [Self.line(["choices": [["index": 0, "delta": [String: Any](), "finish_reason": "length"]]])]
             }

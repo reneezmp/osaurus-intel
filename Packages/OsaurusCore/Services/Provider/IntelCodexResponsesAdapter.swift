@@ -314,9 +314,38 @@ struct IntelCodexResponsesToolResult: Equatable {
     let output: String
 }
 
+/// `response.usage` of a completed Responses round.
+struct IntelCodexResponsesUsage: Equatable {
+    let inputTokens: Int
+    let outputTokens: Int
+    /// `input_tokens_details.cached_tokens`, clamped to the input count.
+    let cachedInputTokens: Int?
+
+    /// Upstream `captureOpenResponsesUsage`.
+    init?(response: [String: Any]) {
+        guard let usage = response["usage"] as? [String: Any],
+            let input = usage["input_tokens"] as? Int,
+            let output = usage["output_tokens"] as? Int
+        else { return nil }
+        inputTokens = input
+        outputTokens = output
+        if let details = usage["input_tokens_details"] as? [String: Any],
+            let cached = details["cached_tokens"] as? Int
+        {
+            cachedInputTokens = min(max(0, cached), input)
+        } else {
+            cachedInputTokens = nil
+        }
+    }
+}
+
 struct IntelCodexResponsesCompletion {
     let outputItems: [[String: Any]]
     let toolCalls: [IntelCodexResponsesToolCall]
+    /// Provider-reported usage from `response.usage` (upstream
+    /// `captureOpenResponsesUsage`): nil unless both `input_tokens` and
+    /// `output_tokens` are integers, so a round never reports half a count.
+    var usage: IntelCodexResponsesUsage? = nil
 
     /// Returns the exact completed output items (including encrypted reasoning)
     /// followed by results for every completed function call. This is the input
@@ -519,7 +548,8 @@ struct IntelCodexResponsesSSEDecoder {
                 calls.append(try toolCall(from: item, context: "response.output[\(index)]"))
             }
         }
-        completed = IntelCodexResponsesCompletion(outputItems: output, toolCalls: calls)
+        completed = IntelCodexResponsesCompletion(
+            outputItems: output, toolCalls: calls, usage: IntelCodexResponsesUsage(response: response))
     }
 
     private mutating func validateOutputItem(_ item: [String: Any], outputIndex: Int, emissions: inout [String], capture: Bool) throws {

@@ -121,9 +121,14 @@ enum CloudChatError: LocalizedError {
     /// Upstream's `streamingError` for a tool call whose arguments were cut
     /// off mid-stream (the call is quarantined, never run).
     case truncatedToolCall(toolName: String, finishMarker: String)
+    /// Upstream `RemoteProviderServiceError.requestFailed` for an error frame
+    /// the provider streamed inside a 200 response (`tryDecodeStreamError`).
+    case streamErrorFrame(String)
 
     var errorDescription: String? {
         switch self {
+        case let .streamErrorFrame(message):
+            return L("Request failed: \(ProviderDiagnosticRedactor.safe(message, maxLength: 500))")
         case let .rateLimited(retryAfter, statusCode):
             let condition =
                 statusCode == 503
@@ -1200,6 +1205,78 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return key
     }
 
+    /// Upstream `RemoteProviderService.oneShotRequiresStreaming` (#3266 line):
+    /// providers whose backend only serves streaming responses, so one-shot
+    /// requests (titles, follow-ups, memory, compaction, delegation) must
+    /// stream and collect the visible text. The native Osaurus agent and the
+    /// streaming-first Osaurus Router return a `stream:false` body that is
+    /// not a decodable chat completion (and never carries the Router billing
+    /// summary); the ChatGPT/Codex backend rejects `stream:false` with HTTP 400.
+    nonisolated static func oneShotRequiresStreaming(
+        providerType: RemoteProviderType, authType: RemoteProviderAuthType
+    ) -> Bool {
+        switch providerType {
+        case .osaurus, .osaurusRouter, .openAICodex:
+            return true
+        default:
+            return authType == .openAICodexOAuth
+        }
+    }
+
+    /// Upstream `buildURLRequest`: Router requests carry
+    /// `clamp_to_balance: false` so a thin balance fails explicitly with
+    /// 402 INSUFFICIENT_FUNDS instead of the Router silently shrinking the
+    /// token cap. Router only (other providers may 422 on unknown fields);
+    /// set before the idempotency fingerprint and the body signature.
+    nonisolated static func applyRouterClampPolicy(to body: inout [String: Any], isOsaurusRouter: Bool) {
+        guard isOsaurusRouter else { return }
+        body["clamp_to_balance"] = false
+    }
+
+    /// Upstream `tryDecodeStreamError`: a structured error a provider streams
+    /// inside a 200 response. The Router envelope reads "CODE: message" (so a
+    /// Router out-of-credits frame reaches the out-of-credits notice, which
+    /// matches `INSUFFICIENT_FUNDS`); any OpenAI-compatible `{"error":{"message"}}`
+    /// reads as its message. Nil for a normal chunk.
+    nonisolated static func tryDecodeStreamError(_ json: [String: Any], isOsaurusRouter: Bool) -> String? {
+        guard let error = json["error"] as? [String: Any],
+            let message = error["message"] as? String
+        else { return nil }
+        if isOsaurusRouter, let code = error["code"] as? String {
+            return "\(code): \(message)"
+        }
+        return message
+    }
+
+    /// Signs a Router request. Tests replace it so no identity or keychain is
+    /// touched; production always uses `OsaurusRouterAuthSigner`.
+    nonisolated(unsafe) static var routerSignerOverride:
+        (@Sendable (inout URLRequest, Data?) async throws -> Void)? = nil
+
+    /// Where Router billing facts go. Tests replace both so the shared account
+    /// service never fetches a balance (network, identity) from a fixture run.
+    struct RouterAccountHooks: Sendable {
+        var noteSummary: @Sendable (OsaurusRouterSummaryEvent.Summary) -> Void
+        var reconcileWithoutSummary: @Sendable () -> Void
+
+        static let live = RouterAccountHooks(
+            noteSummary: { summary in
+                Task { @MainActor in OsaurusRouterAccountService.shared.noteRouterSummary(summary) }
+            },
+            reconcileWithoutSummary: {
+                Task { @MainActor in OsaurusRouterAccountService.shared.reconcileAfterStreamWithoutSummary() }
+            })
+    }
+    nonisolated(unsafe) static var routerAccountHooks = RouterAccountHooks.live
+
+    nonisolated static func signRouterRequest(_ request: inout URLRequest) async throws {
+        if let override = routerSignerOverride {
+            try await override(&request, request.httpBody)
+        } else {
+            try await OsaurusRouterAuthSigner().sign(request: &request, body: request.httpBody)
+        }
+    }
+
     nonisolated static func wireToolChoice(_ choice: ToolChoiceOption?) -> Any {
         switch choice {
         case nil, .some(.auto): return "auto"
@@ -1763,6 +1840,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         }
 
                         // Router only, inside the signed body (upstream Classic).
+                        Self.applyRouterClampPolicy(to: &body, isOsaurusRouter: endpoint.isOsaurusRouter)
                         routerRequestKey = try Self.applyRouterIdempotency(
                             to: &body, isOsaurusRouter: endpoint.isOsaurusRouter,
                             base: idempotencyBase, round: round, recoveryOrdinal: recoveryOrdinal)
@@ -1801,8 +1879,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         urlRequest.httpBody = urlRequest.httpBody.map { ToolWirePropertyOrder.apply(to: $0) }
                         // Osaurus Router: EIP-191 wallet-sign the request body.
                         if endpoint.isOsaurusRouter {
-                            try await OsaurusRouterAuthSigner().sign(
-                                request: &urlRequest, body: urlRequest.httpBody)
+                            try await Self.signRouterRequest(&urlRequest)
                         }
                         NSLog("[CloudChatEngine] Request body: model=\(resolvedModel) round=\(round) tools=\(liveToolSpecs?.count ?? 0)")
                         if let httpBody = urlRequest.httpBody {
@@ -1886,9 +1963,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         var routerSummarySeen = false
                         defer {
                             if endpoint.isOsaurusRouter, !routerSummarySeen {
-                                Task { @MainActor in
-                                    OsaurusRouterAccountService.shared.reconcileAfterStreamWithoutSummary()
-                                }
+                                Self.routerAccountHooks.reconcileWithoutSummary()
                             }
                         }
 
@@ -1923,6 +1998,17 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             }
                             finalized = try decoder.finish()
                             transientRetries = 0
+                            // Upstream `captureOpenResponsesUsage`: the provider's own
+                            // counts for this round (Insights "Reported", API usage).
+                            if let usage = finalized.completion.usage {
+                                promptTokens = usage.inputTokens
+                                completionTokens = usage.outputTokens
+                                roundPromptTokens = usage.inputTokens
+                                roundCompletionTokens = usage.outputTokens
+                                NSLog(
+                                    "[CloudChatEngine] Responses usage in=\(usage.inputTokens) out=\(usage.outputTokens) cached=\(usage.cachedInputTokens ?? -1) round=\(round)"
+                                )
+                            }
                             for emission in finalized.emissions {
                                 totalChunks += 1
                                 captureResponseText(emission)
@@ -2389,6 +2475,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     continue
                                 }
 
+                                // Upstream `tryDecodeStreamError`: an error frame inside
+                                // a 200 stream fails the turn with its message; it must
+                                // not become an empty round that is retried (and billed).
+                                if let streamError = Self.tryDecodeStreamError(
+                                    json, isOsaurusRouter: endpoint.isOsaurusRouter)
+                                {
+                                    NSLog("[CloudChatEngine] In-stream error frame")
+                                    throw CloudChatError.streamErrorFrame(streamError)
+                                }
+
                                 // DeepSeek's final usage chunk (from stream_options) carries
                                 // the prompt-cache split. Log it so cache hit/miss is
                                 // measurable per request in Console.app.
@@ -2412,9 +2508,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     let summary = Self.routerSummary(fromFrame: json, data: chunkData)
                                 {
                                     routerSummarySeen = true
-                                    Task { @MainActor in
-                                        OsaurusRouterAccountService.shared.noteRouterSummary(summary)
-                                    }
+                                    Self.routerAccountHooks.noteSummary(summary)
                                     var billingSummary = RouterBillingSummary(summary)
                                     if billingSummary.requestId == nil {
                                         billingSummary.requestId = routerRequestKey
@@ -3010,8 +3104,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         try checkRouterSpendAuthorization(endpoint)
 
         // Native wires answer one-shots through the streaming path (their
-        // non-streaming bodies are not chat-completions JSON).
-        if endpoint.usesResponsesWire || endpoint.usesAnthropicWire || endpoint.usesGeminiWire {
+        // non-streaming bodies are not chat-completions JSON). So do the
+        // Router, Osaurus and Codex providers (upstream
+        // `oneShotRequiresStreaming`): the Router's billing summary frame only
+        // arrives on a stream, and `streamChat` carries the stable
+        // `idempotency_key` and the connect retry.
+        let oneShotStreams =
+            endpoint.provider.map {
+                Self.oneShotRequiresStreaming(providerType: $0.providerType, authType: $0.authType)
+            } ?? false
+        if oneShotStreams || endpoint.usesResponsesWire || endpoint.usesAnthropicWire || endpoint.usesGeminiWire {
             let stream = try await streamChat(request: request)
             var content = ""
             for try await delta in stream where !StreamingToolHint.isSentinel(delta) {
@@ -3086,7 +3188,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         urlRequest.httpBody = urlRequest.httpBody.map { ToolWirePropertyOrder.apply(to: $0) }
         // Osaurus Router: EIP-191 wallet-sign the request body.
         if endpoint.isOsaurusRouter {
-            try await OsaurusRouterAuthSigner().sign(request: &urlRequest, body: urlRequest.httpBody)
+            try await Self.signRouterRequest(&urlRequest)
         }
 
         // Insights: one row per one-shot request (titles, follow-ups, memory,
