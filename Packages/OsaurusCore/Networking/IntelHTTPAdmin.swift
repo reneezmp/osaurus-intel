@@ -18,8 +18,9 @@
 //
 //  Who may call: what the gate lets through. Loopback callers and master
 //  keys; agent-scoped keys never reach `/admin/*` (the stage 1 gate).
-//  `/admin/config/*` is `W-declarative-config`, `/admin/import/*`
-//  `W-osaurus-bundles`.
+//  `/admin/config/*` is `IntelHTTPConfigAdmin.swift` (W-declarative-config
+//  stage 5: physical loopback only, every apply approved in the app),
+//  `/admin/import/*` is `W-osaurus-bundles`.
 //
 
 import Foundation
@@ -28,6 +29,7 @@ import NIOHTTP1
 
 extension HTTPHandler {
     func routeAdminRequest(context: ChannelHandlerContext, head: HTTPRequestHead, path: String) -> Bool {
+        if routeConfigAdminRequest(context: context, head: head, path: path) { return true }
         switch (head.method, path) {
         case (.GET, "/admin/cache-stats"):
             sendResponse(context: context, status: .ok, headers: jsonHeaders(), body: Self.cacheStatsBody())

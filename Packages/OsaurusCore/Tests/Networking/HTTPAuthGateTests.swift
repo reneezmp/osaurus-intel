@@ -588,7 +588,7 @@ struct HTTPAuthGateTests {
 
     /// Setting off (every existing install): a key-less loopback caller and a
     /// local browser page keep today's access and `*` CORS.
-    @Test(.disabled("/admin/config with W-declarative-config (the /agents and /mcp/tools half runs in IntelHTTPAgentRoutesTests)")) func localKeyPolicyOff_keepsKeylessLoopbackAccess() async throws {
+    @Test func localKeyPolicyOff_keepsKeylessLoopbackAccess() async throws {
         let server = try await startAuthTestServer(validator: .forAlice(), trustLoopback: true)
         defer { Task { await server.shutdown() } }
 
