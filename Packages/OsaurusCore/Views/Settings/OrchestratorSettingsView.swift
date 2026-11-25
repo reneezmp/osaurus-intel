@@ -22,6 +22,11 @@ struct OrchestratorSettingsView: View {
     @State private var loaded = false
     @State private var saveError: String?
     @State private var saveTask: Task<Void, Never>?
+    /// Main-chat Spawn policy (permission, limits, model override), backed by
+    /// `SubagentConfigurationStore` and saved immediately on change, not
+    /// through the debounced identity path (W-subagents stage 5).
+    @State private var subagentConfiguration = SubagentConfigurationStore.snapshot()
+    @State private var subagentConfigurationBaseline = SubagentConfigurationStore.snapshot()
 
     private var theme: ThemeProtocol { themeManager.currentTheme }
 
@@ -42,6 +47,7 @@ struct OrchestratorSettingsView: View {
                     identitySection
                     generationSection
                     delegationSection
+                    SubagentSettingsSection(configuration: $subagentConfiguration)
                     declarativeConfigurationSection
                 }
                 .padding(24)
@@ -62,6 +68,21 @@ struct OrchestratorSettingsView: View {
         .onAppear(perform: load)
         .onReceive(ModelPickerItemCache.shared.$items) { pickerItems = $0 }
         .onChange(of: formSnapshot) { _ in scheduleSave() }
+        // Spawn knobs persist immediately; the three-way merge keeps an
+        // "Always Allow" decision made in a live permission card (upstream).
+        .onChange(of: subagentConfiguration) { newValue in
+            let saved = SubagentConfigurationStore.saveEditorSnapshot(
+                newValue, loadedBaseline: subagentConfigurationBaseline)
+            subagentConfigurationBaseline = saved
+            if saved != newValue { subagentConfiguration = saved }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .subagentConfigurationChanged)) { _ in
+            let latest = SubagentConfigurationStore.snapshot()
+            let reconciled = SubagentConfiguration.mergingEditorSnapshot(
+                subagentConfiguration, loadedBaseline: subagentConfigurationBaseline, live: latest)
+            subagentConfigurationBaseline = latest
+            if reconciled != subagentConfiguration { subagentConfiguration = reconciled }
+        }
         .onDisappear(perform: flushSave)
     }
 
@@ -232,6 +253,9 @@ struct OrchestratorSettingsView: View {
         maxTokens = config.maxTokens.map { String($0) } ?? ""
         delegation = config.delegation
         saveError = nil
+        let latestSubagents = SubagentConfigurationStore.snapshot()
+        subagentConfigurationBaseline = latestSubagents
+        subagentConfiguration = latestSubagents
         loaded = true
         Task { await ModelPickerItemCache.shared.prewarmModelCache() }
     }

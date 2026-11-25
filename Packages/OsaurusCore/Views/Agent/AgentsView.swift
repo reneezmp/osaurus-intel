@@ -2372,6 +2372,11 @@ struct AgentDetailView: View {
             theme: theme
         )
 
+        IntelSpawnAbilitySection(
+            agentId: agent.id,
+            theme: theme
+        )
+
         // Per-agent built-in tool switches (upstream #3307): a lean surface
         // by default, specialist tools opt in. Redaction Tools are not on Intel.
         if agent.id != Agent.defaultId {
@@ -2502,7 +2507,7 @@ struct AgentDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 abilityUnavailableRow(
                     title: "Native subagents",
-                    description: "Computer Use, Browser Use, Spawn, image, video, and AppleScript helpers are unavailable on this Intel build.",
+                    description: "Computer Use is unavailable on this Intel build. Subagent delegation, Browser Use, image, video, and AppleScript are configured in this agent's Abilities tab.",
                     icon: "person.2.wave.2"
                 )
             }
