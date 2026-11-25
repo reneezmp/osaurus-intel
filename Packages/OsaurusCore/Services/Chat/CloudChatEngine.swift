@@ -261,7 +261,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     private let model: String
     private let apiBase: String
     private let providerOverride: RemoteProvider?
-    private let session: URLSession
+    /// A caller-supplied session (tests, URLProtocol fixtures). When nil the
+    /// engine builds its own through `GlobalProxySettings.makeSession`, as
+    /// upstream's `RemoteProviderService.init` does (row 19, stage 5d).
+    private let injectedSession: URLSession?
+    private var ownedSessions: [String: URLSession] = [:]
     private let credentials: IntelCodexCredentials
     private let xaiCredentials: IntelXAICredentials
     private var codexResponsesLiteSessionIds: [String: String] = [:]
@@ -324,7 +328,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         source: InferenceSource = .httpAPI,
         model: String = "deepseek-v4-pro",
         provider: RemoteProvider? = nil,
-        session: URLSession = .shared,
+        session: URLSession? = nil,
         credentials: IntelCodexCredentials = .shared,
         xaiCredentials: IntelXAICredentials = .shared
     ) {
@@ -332,9 +336,28 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         self.source = source
         self.model = model
         self.providerOverride = provider
-        self.session = session
+        self.injectedSession = session
         self.credentials = credentials
         self.apiBase = "https://api.deepseek.com/v1/chat/completions"
+    }
+
+    deinit {
+        for owned in ownedSessions.values { owned.finishTasksAndInvalidate() }
+    }
+
+    /// Upstream `RemoteProviderService.init` builds the chat session with
+    /// `GlobalProxySettings.makeSession(base:)`, so chat honours the global
+    /// proxy like discovery and Test do. Sessions are cached per proxy
+    /// endpoint (a proxy change builds a fresh one and drains the old).
+    func transportSession(for provider: RemoteProvider?) -> URLSession {
+        if let injectedSession { return injectedSession }
+        let key = GlobalProxySettings.currentProxyCacheKey()
+        if let existing = ownedSessions[key] { return existing }
+        for old in ownedSessions.values { old.finishTasksAndInvalidate() }
+        ownedSessions.removeAll()
+        let fresh = GlobalProxySettings.makeSession(base: .default)
+        ownedSessions[key] = fresh
+        return fresh
     }
 
     /// Keep Intel's replacement engine visible in Insights just like the
@@ -2004,7 +2027,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // retried (200 / 800 ms) before any byte arrives; the same signed
                         // request, Router `idempotency_key` included, is re-sent.
                         let (asyncBytes, response) = try await IntelTransportRetry.connectWithRetry(
-                            session: self.session, urlRequest: urlRequest)
+                            session: self.transportSession(for: endpoint.provider), urlRequest: urlRequest)
                         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
                         if response is HTTPURLResponse {
                             let accepted = (200...299).contains(statusCode)
@@ -3409,7 +3432,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: urlRequest)
+            (data, response) = try await transportSession(for: endpoint.provider).data(for: urlRequest)
         } catch {
             activity.finish(response: nil, wireResponse: nil, error: error)
             throw error
