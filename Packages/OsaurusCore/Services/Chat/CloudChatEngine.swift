@@ -351,13 +351,44 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// endpoint (a proxy change builds a fresh one and drains the old).
     func transportSession(for provider: RemoteProvider?) -> URLSession {
         if let injectedSession { return injectedSession }
-        let key = GlobalProxySettings.currentProxyCacheKey()
+        let configuration = Self.sessionConfiguration(for: provider)
+        let key =
+            "\(GlobalProxySettings.currentProxyCacheKey())|\(configuration.timeoutIntervalForRequest)"
+            + "|\(configuration.timeoutIntervalForResource)"
         if let existing = ownedSessions[key] { return existing }
-        for old in ownedSessions.values { old.finishTasksAndInvalidate() }
-        ownedSessions.removeAll()
-        let fresh = GlobalProxySettings.makeSession(base: .default)
+        // A proxy change makes every older key stale: drain them. A timeout
+        // change for the same proxy only adds an entry (the engine is short
+        // lived and `deinit` drains all of them).
+        let proxyPrefix = "\(GlobalProxySettings.currentProxyCacheKey())|"
+        for (oldKey, old) in ownedSessions where !oldKey.hasPrefix(proxyPrefix) {
+            old.finishTasksAndInvalidate()
+            ownedSessions[oldKey] = nil
+        }
+        let fresh = GlobalProxySettings.makeSession(base: configuration)
         ownedSessions[key] = fresh
         return fresh
+    }
+
+    /// Upstream `RemoteProviderService.init`: request timeout is
+    /// `max(provider.timeout, 300)` (thinking models and slow local prefill
+    /// can stay silent for minutes), resource timeout `max(timeout * 2, 600)`;
+    /// Disable Timeout lifts both to `RemoteProvider.unboundedTimeout`.
+    /// Providerless engines keep the fixed 300 / 600.
+    static func requestTimeout(for provider: RemoteProvider?) -> TimeInterval {
+        guard let provider else { return 300 }
+        return provider.disableTimeout ? RemoteProvider.unboundedTimeout : max(provider.timeout, 300)
+    }
+
+    static func sessionConfiguration(for provider: RemoteProvider?) -> URLSessionConfiguration {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = requestTimeout(for: provider)
+        if let provider {
+            config.timeoutIntervalForResource =
+                provider.disableTimeout ? RemoteProvider.unboundedTimeout : max(provider.timeout * 2, 600)
+        } else {
+            config.timeoutIntervalForResource = 600
+        }
+        return config
     }
 
     /// Keep Intel's replacement engine visible in Insights just like the
@@ -1978,11 +2009,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             urlRequest.setValue(OpenAICodexOAuthService.codexClientVersion, forHTTPHeaderField: "version")
                             urlRequest.setValue("true", forHTTPHeaderField: "x-openai-internal-codex-responses-lite")
                         }
-                        // Intel keeps its fixed 300 s between bytes (the per-provider
-                        // Timeout slider isn't honoured yet, `W-providers-ux`); a
-                        // provider set to Disable Timeout gets upstream's 24 h ceiling.
-                        urlRequest.timeoutInterval =
-                            endpoint.provider?.disableTimeout == true ? RemoteProvider.unboundedTimeout : 300
+                        // Upstream: `max(provider.timeout, 300)` between bytes, the 24 h
+                        // ceiling when the provider has Disable Timeout on.
+                        urlRequest.timeoutInterval = Self.requestTimeout(for: endpoint.provider)
                         // CANONICAL (sorted-key) serialization — bare JSONSerialization emits
         // keys in hash order, which differs across app launches (and can differ
         // per nested dict), changing the request bytes for a logically-identical
@@ -3319,7 +3348,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         urlRequest.httpMethod = "POST"
         for (k, v) in try await requestHeaders(for: endpoint)
         where IntelProviderDiscoveryExtras.isSafeHeader(name: k, value: v) { urlRequest.setValue(v, forHTTPHeaderField: k) }
-        urlRequest.timeoutInterval = 300
+        urlRequest.timeoutInterval = Self.requestTimeout(for: endpoint.provider)
 
         var body: [String: Any] = [
             "model": endpoint.modelId,

@@ -75,4 +75,80 @@ struct IntelChatTransportTests {
         let used = await engine.transportSession(for: Self.provider())
         #expect(used === injected)
     }
+
+    // MARK: Row 20
+
+    @Test("Request and resource timeouts follow upstream: max(timeout, 300), max(2x, 600), unbounded when disabled")
+    func timeoutValues() {
+        #expect(ChatEngine.requestTimeout(for: Self.provider(timeout: 60)) == 300)
+        #expect(ChatEngine.requestTimeout(for: Self.provider(timeout: 900)) == 900)
+        #expect(
+            ChatEngine.requestTimeout(for: Self.provider(timeout: 60, disableTimeout: true))
+                == RemoteProvider.unboundedTimeout)
+        #expect(ChatEngine.requestTimeout(for: nil) == 300)
+
+        let low = ChatEngine.sessionConfiguration(for: Self.provider(timeout: 60))
+        #expect(low.timeoutIntervalForRequest == 300)
+        #expect(low.timeoutIntervalForResource == 600)
+        let high = ChatEngine.sessionConfiguration(for: Self.provider(timeout: 900))
+        #expect(high.timeoutIntervalForRequest == 900)
+        #expect(high.timeoutIntervalForResource == 1800)
+        let off = ChatEngine.sessionConfiguration(for: Self.provider(timeout: 900, disableTimeout: true))
+        #expect(off.timeoutIntervalForRequest == RemoteProvider.unboundedTimeout)
+        #expect(off.timeoutIntervalForResource == RemoteProvider.unboundedTimeout)
+    }
+
+    @Test("The engine's own session carries the provider's timeouts")
+    func engineSessionCarriesTimeouts() async throws {
+        try await Self.withProxyRoot(proxy: nil) {
+            let provider = Self.provider(timeout: 900)
+            let engine = ChatEngine(provider: provider)
+            let session = await engine.transportSession(for: provider)
+            #expect(session.configuration.timeoutIntervalForRequest == 900)
+            #expect(session.configuration.timeoutIntervalForResource == 1800)
+        }
+    }
+
+    @Test("Streaming and completeChat requests use the provider's request timeout")
+    func requestsCarryTimeout() async throws {
+        for (provider, expected) in [
+            (Self.provider(timeout: 60), 300.0),
+            (Self.provider(timeout: 900), 900.0),
+            (Self.provider(timeout: 60, disableTimeout: true), RemoteProvider.unboundedTimeout),
+        ] {
+            TimeoutCaptureProtocol.reset()
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [TimeoutCaptureProtocol.self]
+            let engine = ChatEngine(provider: provider, session: URLSession(configuration: configuration))
+            let request = ChatCompletionRequest(
+                model: "fixture-model", messages: [ChatMessage(role: "user", content: "hi")])
+            let stream = try await engine.streamChat(request: request)
+            for try await _ in stream {}
+            _ = try? await engine.completeChat(request: request)
+            let seen = TimeoutCaptureProtocol.timeouts()
+            #expect(seen.count >= 1)
+            #expect(seen.allSatisfy { $0 == expected })
+        }
+    }
+}
+
+private final class TimeoutCaptureProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var seen: [TimeInterval] = []
+    static func reset() { lock.lock(); seen = []; lock.unlock() }
+    static func timeouts() -> [TimeInterval] { lock.lock(); defer { lock.unlock() }; return seen }
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "fixture.invalid" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.lock.lock()
+        Self.seen.append(request.timeoutInterval)
+        Self.lock.unlock()
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/event-stream"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("data: [DONE]\n\n".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
