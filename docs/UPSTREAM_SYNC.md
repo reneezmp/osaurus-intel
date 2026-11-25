@@ -198,6 +198,17 @@ mdat and live-folder checks).
   429/503 retry, Router connect retry, Gemini list filter, SuperGrok refresh.
 - **Subagents stage 3** (2026-11-25): the Orchestrator and allowed agents can
   `spawn_agent` a remote (cloud-model) child; first visible subagent step.
+- **Provider slice 6** (5d rows 21–22): API and plugin sampling, `stop` and
+  JSON mode reach providers.
+- **Incident, 2026-11-25:** the subagents stage 3 commit (`758d3da05`, built by
+  cherry-picking an old WIP onto a newer base) silently reverted provider slice
+  5's code in `CloudChatEngine.swift` and deleted `IntelChatTransportTests.swift`;
+  the full suite still passed because the test went with it. Slice 6's rebase
+  surfaced it (a test referencing the deleted file). Slice 5 was re-applied
+  (`ca3f69b38`, `873b53294`) and the combined tree passed 6,016 tests. Lead
+  rule since: before merging, `git diff intel-fork --name-status` must show no
+  `D` or reverted file outside the task's scope, and any `-` lines in files
+  outside the task's area are read.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

@@ -3647,3 +3647,11 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Remove the model's admission, or the agent from the allowlist, and try again: the refusal names Settings → Orchestrator and no model call is made.
 - [ ] Set one of the target agent's tools to Ask: the delegated run asks before using it instead of running it silently.
 - [ ] A delegation requested through an external or HTTP chat is refused.
+
+## Provider slice 6: API parameters (2026-11-25)
+
+`W-cov-reaudit` 5d (`COV_REAUDIT_STAGE5D_PROVIDER.md` rows 21–22). Not in candidate 69. Needs the local API on (turn it off afterwards).
+
+- [ ] `POST /v1/chat/completions` with `"temperature": 0` twice gives near-identical answers; with `"stop": ["\n"]` the answer ends at the first line.
+- [ ] `"response_format": {"type": "json_object"}` (asking for JSON) returns valid JSON with an OpenAI, Gemini or Router model.
+- [ ] App chat answers the same as before (its sampling comes from the agent settings).
