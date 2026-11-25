@@ -1467,6 +1467,13 @@ enum ConfigPlanner {
                 "(note) spawnable_agents sets the Orchestrator's allowed agents; a cloud model "
                     + "must also be admitted in Settings → Orchestrator before it can delegate to them.")
         }
+        let live = desired.spawnAgentDelegationKeys
+        if !live.isEmpty {
+            changes.append(
+                "(note) \(live.joined(separator: ", ")) apply to spawn_agent (the launcher's spawn "
+                    + "permission and child limits); admitted models and each agent's permission mode "
+                    + "stay in Settings → Orchestrator, and the stricter permission wins.")
+        }
         if desired.hasStoreOnlyDelegationKeys {
             changes.append(
                 "(note) the other delegation keys are stored only: the Orchestrator on this Mac "

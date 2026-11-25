@@ -559,6 +559,16 @@ enum ConfigApplier {
                     "subagents.agents: no agent named \(missing.map { "`\($0)`" }.joined(separator: ", ")) here.")
             }
         }
+        if section.enabled == true || section.agents != nil {
+            // Intel (W-subagents stage 4): the per-agent keys are the launcher
+            // toggle and list `spawn_agent` reads for a custom agent (stored on
+            // the agent, default off). They never widen Gate 4: each target's
+            // model must also be an admitted cloud model, and every run asks
+            // per the permission settings.
+            outcome.notes.append(
+                "subagents: this agent can delegate only to the listed agents whose model is an "
+                    + "admitted cloud model (Settings → Orchestrator); every run still asks for permission.")
+        }
         if let models = section.models, !models.isEmpty {
             outcome.notes.append(
                 "subagents.models was removed: create an agent with that model "
@@ -782,6 +792,12 @@ enum ConfigApplier {
                         + "Settings → Orchestrator; this tool does not admit models): "
                         + evaluation.blocked.joined(separator: " "))
             }
+        }
+        let live = desired.spawnAgentDelegationKeys
+        if !live.isEmpty {
+            hints.append(
+                "Applies to spawn_agent: \(live.joined(separator: ", ")). Admitted models and each "
+                    + "agent's permission mode stay in Settings → Orchestrator, and the stricter permission wins.")
         }
         if desired.hasStoreOnlyDelegationKeys {
             hints.append(

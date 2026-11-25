@@ -47,7 +47,8 @@ delegation:
 
 - `spawnable_agents` is the Orchestrator's list of allowed custom agents (Settings → Orchestrator → Delegation). It replaces the whole list, so list every agent to keep; `[]` empties it, which the plan flags as high risk. Built-in agents and the Default agent are rejected.
 - Listing an agent does not make it runnable by itself: its exact model must also be admitted. Admitting a cloud model, the permission modes and the child limits are Settings-only choices; `osaurus_config` never changes them, and the apply result says how many of the listed agents are actually runnable and why not.
-- The other `delegation` keys (budgets, `permission_defaults`, local text, AppleScript mode and so on) are accepted and stored, but this Mac's Orchestrator doesn't read them yet; the plan marks them "stored only".
+- `permission_defaults.spawn` and the child budgets `budget_max_tokens`, `budget_max_turns`, `budget_max_seconds` and `budget_max_remote_parallel_spawns` apply to `spawn_agent` (the plan says so). Admitted models and each agent's permission mode stay in Settings → Orchestrator, and the stricter permission wins. The remaining `delegation` keys (local text, AppleScript mode, local parallelism, other permission kinds and so on) are accepted and stored, but this Mac's Orchestrator doesn't read them; the plan marks them "stored only".
+- A custom agent's own `subagents` keys (`enabled`, `agents`) decide which agents it may delegate to with `spawn_agent` (off by default). They never widen the Orchestrator's list, each target's model must be an admitted cloud model, and every run still asks for permission.
 - A new agent created by `agents` is not added to the list. List it under `delegation.spawnable_agents` in the same document (the list applies after `agents`) or add it in Settings → Orchestrator.
 
 ## Semantics

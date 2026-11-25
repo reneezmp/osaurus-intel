@@ -182,15 +182,77 @@ struct OrchestratorSpawnableAgentsMappingTests {
         }
     }
 
-    @Test func otherDelegationKeysAreLabelledStoredOnly() async throws {
+    @Test func keysNothingReadsAreLabelledStoredOnly() async throws {
+        var document = OsaurusConfigDocument()
+        var section = DelegationSection()
+        let current = await MainActor.run { ConfigExporter.export().delegation?.budgetMaxParallelSpawns }
+        section.budgetMaxParallelSpawns = current == 3 ? 2 : 3
+        section.permissionDefaults = ["image": "deny"]
+        document.delegation = section
+        #expect(section.hasStoreOnlyDelegationKeys)
+        #expect(section.spawnAgentDelegationKeys.isEmpty)
+        let plan = try await MainActor.run { try ConfigPlanner.plan(document: document, prune: false) }
+        let lines = plan.actions.flatMap(\.changes)
+        #expect(lines.contains { $0.contains("stored only") }, "\(lines)")
+        #expect(!lines.contains { $0.contains("apply to spawn_agent") }, "\(lines)")
+    }
+
+    /// Since W-subagents stage 4 `spawn_agent` reads the launcher's spawn
+    /// permission and the child budgets, so those keys are no longer "stored
+    /// only" and the plan says what they reach.
+    @Test func keysSpawnAgentReadsAreLabelledAsApplying() async throws {
         var document = OsaurusConfigDocument()
         var section = DelegationSection()
         let current = await MainActor.run { ConfigExporter.export().delegation?.budgetMaxTokens }
         section.budgetMaxTokens = current == 4096 ? 2048 : 4096
+        section.budgetMaxRemoteParallelSpawns = 2
+        section.permissionDefaults = ["spawn": "ask"]
         document.delegation = section
+        #expect(!section.hasStoreOnlyDelegationKeys)
+        #expect(
+            section.spawnAgentDelegationKeys
+                == [
+                    "permission_defaults.spawn", "budget_max_tokens",
+                    "budget_max_remote_parallel_spawns",
+                ])
         let plan = try await MainActor.run { try ConfigPlanner.plan(document: document, prune: false) }
         let lines = plan.actions.flatMap(\.changes)
-        #expect(lines.contains { $0.contains("stored only") }, "\(lines)")
+        #expect(lines.contains { $0.contains("apply to spawn_agent") }, "\(lines)")
+        #expect(!lines.contains { $0.contains("stored only") }, "\(lines)")
+    }
+
+    /// The per-agent `subagents` keys land on the agent's own fields (the
+    /// launcher toggle and list `spawn_agent` reads for a custom agent) and
+    /// never touch Gate 4.
+    @Test func perAgentSubagentsKeysMapOntoTheAgentNotGate4() async throws {
+        await SubagentStoreTestLock.shared.acquire()
+        defer { SubagentStoreTestLock.shared.release() }
+        let launcherName = "S4Launcher-\(UUID().uuidString.prefix(6))"
+        let workerName = "S4Worker-\(UUID().uuidString.prefix(6))"
+        let gate4Before = DefaultAgentConfigurationStore.load().delegation
+        var document = OsaurusConfigDocument()
+        var worker = AgentEntry(name: workerName)
+        worker.systemPrompt = "Does delegated work"
+        var launcher = AgentEntry(name: launcherName)
+        launcher.systemPrompt = "Delegates"
+        var subagents = AgentSubagentsEntry()
+        subagents.enabled = true
+        subagents.agents = [workerName]
+        launcher.subagents = subagents
+        document.agents = [worker, launcher]
+        let results = await ConfigApplier.apply(document: document, prune: false)
+        let note = results.first { $0.target == launcherName }?.message ?? ""
+        #expect(note.contains("admitted cloud model"), "\(results)")
+        let (enabled, listed, ids) = await MainActor.run { () -> (Bool?, [UUID]?, [UUID]) in
+            let manager = AgentManager.shared
+            let l = manager.agents.first { $0.name == launcherName }
+            let w = manager.agents.first { $0.name == workerName }
+            return (l?.settings.spawnDelegationEnabled, l?.settings.spawnableAgentIDs, [l?.id, w?.id].compactMap { $0 })
+        }
+        #expect(enabled == true)
+        #expect(listed?.count == 1)
+        #expect(DefaultAgentConfigurationStore.load().delegation == gate4Before)
+        for id in ids { _ = await AgentManager.shared.delete(id: id) }
     }
 
     // MARK: - #3227 orchestrator_spawnable on creation

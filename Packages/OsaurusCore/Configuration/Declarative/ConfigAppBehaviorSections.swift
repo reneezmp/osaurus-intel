@@ -86,16 +86,48 @@ public struct DelegationSection: Codable, Equatable, Sendable {
     public init() {}
 
     /// Intel (stage 4): keys that only reach upstream's subagent store, which
-    /// this Mac's Orchestrator does not consult (its Gate 4 limits live in
-    /// Settings → Orchestrator). `spawnable_agents` is NOT one of them: it maps
-    /// onto the Gate 4 allowlist.
+    /// this Mac's Orchestrator does not consult. `spawnable_agents` is NOT one
+    /// of them: it maps onto the Gate 4 allowlist. Since W-subagents stage 4
+    /// `spawn_agent` reads the stored launcher defaults, so these no longer
+    /// count (see `spawnAgentDelegationKeys`): `permission_defaults.spawn` and
+    /// the child budgets for tokens, turns, seconds and remote parallelism.
+    /// What stays stored only: the local-model keys (Intel runs no local
+    /// workers), AppleScript mode, teammates' workspaces (not on Intel), the
+    /// RAM preflight and coexistence, local parallelism, and permission kinds
+    /// other than `spawn`.
     var hasStoreOnlyDelegationKeys: Bool {
         localTextEnabled != nil || applescriptExecutionMode != nil
             || spawnableWorkspaceAgents != nil || workspaceAutoJoin != nil
-            || permissionDefaults != nil || budgetMaxTokens != nil || budgetMaxTurns != nil
-            || budgetMaxSeconds != nil || budgetMaxParallelSpawns != nil
-            || budgetMaxRemoteParallelSpawns != nil || ramSafetyPreflight != nil
+            || storeOnlyPermissionKinds.isEmpty == false
+            || budgetMaxParallelSpawns != nil || ramSafetyPreflight != nil
             || coexistenceEnabled != nil
+    }
+
+    /// Permission kinds listed in `permission_defaults` that nothing on this
+    /// Mac reads (every kind but `spawn`).
+    var storeOnlyPermissionKinds: [String] {
+        (permissionDefaults ?? [:]).keys
+            .map { $0.lowercased() }
+            .filter { $0 != SubagentCapabilityRegistry.spawn.id }
+            .sorted()
+    }
+
+    /// Keys the Orchestrator's `spawn_agent` reads at run time (stage 3 reads
+    /// the launcher's stored spawn permission and child budgets; Gate 4's
+    /// admitted models and per-pair permission modes still apply on top, and
+    /// the stricter permission wins). Names as written in the document.
+    var spawnAgentDelegationKeys: [String] {
+        var keys: [String] = []
+        if let defaults = permissionDefaults,
+            defaults.keys.contains(where: { $0.lowercased() == SubagentCapabilityRegistry.spawn.id })
+        {
+            keys.append("permission_defaults.spawn")
+        }
+        if budgetMaxTokens != nil { keys.append("budget_max_tokens") }
+        if budgetMaxTurns != nil { keys.append("budget_max_turns") }
+        if budgetMaxSeconds != nil { keys.append("budget_max_seconds") }
+        if budgetMaxRemoteParallelSpawns != nil { keys.append("budget_max_remote_parallel_spawns") }
+        return keys
     }
 
     /// Removed keys present in this section, as `key → replacement` hints.
