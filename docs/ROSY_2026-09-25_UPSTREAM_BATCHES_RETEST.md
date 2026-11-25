@@ -3637,3 +3637,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Set a global proxy (Settings → network/proxy) to a proxy you control: chat requests go through it. Remove it and chat works directly again.
 - [ ] Set a provider's Timeout to its maximum and ask for a long answer from a slow model: the reply isn't cut off early. With Disable Timeout on, a very slow reply still finishes.
 - [ ] With an unreachable proxy, chat fails with a network error instead of hanging.
+
+## Subagents: spawn_agent (2026-11-25)
+
+`W-subagents` stage 3. Not in candidate 69. Cloud-model children only.
+
+- [ ] Settings → Orchestrator: allow one custom agent and admit its cloud model. In a chat, ask for a small research task to be delegated: a permission card appears (Ask), and the child's result comes back in the reply.
+- [ ] Choose Deny on the card: the agent reports the refusal and no child run starts. Choose Always Allow: the next delegation doesn't ask again.
+- [ ] Remove the model's admission, or the agent from the allowlist, and try again: the refusal names Settings → Orchestrator and no model call is made.
+- [ ] Set one of the target agent's tools to Ask: the delegated run asks before using it instead of running it silently.
+- [ ] A delegation requested through an external or HTTP chat is refused.
