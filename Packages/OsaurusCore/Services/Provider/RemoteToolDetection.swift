@@ -47,6 +47,7 @@ enum RemoteToolDetection {
         for name in toolNames {
             if let range = window.range(of: #""name"\s*:\s*"\#(name)""#, options: [.regularExpression])
                 ?? window.range(of: #""tool_name"\s*:\s*"\#(name)""#, options: [.regularExpression])
+                ?? window.range(of: #""tool"\s*:\s*"\#(name)""#, options: [.regularExpression])
             {
                 if let jsonRange = findEnclosingJSONObject(around: range.lowerBound, in: window) {
                     let candidate = String(window[jsonRange])
@@ -115,35 +116,39 @@ enum RemoteToolDetection {
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
 
-        // Sorted keys: extracted args become next-turn
-        // `tool_calls[].function.arguments`. See `JSONDeterminism.swift`.
         if let function = obj["function"] as? [String: Any], let name = function["name"] as? String {
-            if let argsString = function["arguments"] as? String { return (name, argsString) }
-            if let argsObj = function["arguments"],
-                let argsData = try? JSONSerialization.data(withJSONObject: argsObj, options: .osaurusCanonical),
-                let argsJSON = String(data: argsData, encoding: .utf8)
-            {
-                return (name, argsJSON)
-            }
+            return argumentsJSON(function["arguments"]).map { (name, $0) }
         }
         if let name = obj["tool_name"] as? String {
-            if let argsString = obj["arguments"] as? String { return (name, argsString) }
-            if let argsObj = obj["arguments"],
-                let argsData = try? JSONSerialization.data(withJSONObject: argsObj, options: .osaurusCanonical),
-                let argsJSON = String(data: argsData, encoding: .utf8)
-            {
-                return (name, argsJSON)
+            return argumentsJSON(obj["arguments"]).map { (name, $0) }
+        }
+        if let name = obj["tool"] as? String {
+            // Result envelopes are not invocations and must not be re-executed.
+            guard obj["ok"] == nil, obj["result"] == nil else { return nil }
+            if let arguments = obj["arguments"] ?? obj["parameters"] {
+                // An explicit invalid value must not fall through to an empty
+                // top-level argument dictionary and execute a different call.
+                return argumentsJSON(arguments).map { (name, $0) }
             }
+            let reserved = Set(["tool", "tool_name", "name", "function", "arguments", "parameters", "type", "id"])
+            return argumentsJSON(obj.filter { !reserved.contains($0.key) }).map { (name, $0) }
         }
         if let name = obj["name"] as? String {
-            if let argsString = obj["arguments"] as? String { return (name, argsString) }
-            if let argsObj = obj["arguments"],
-                let argsData = try? JSONSerialization.data(withJSONObject: argsObj, options: .osaurusCanonical),
-                let argsJSON = String(data: argsData, encoding: .utf8)
-            {
-                return (name, argsJSON)
-            }
+            return argumentsJSON(obj["arguments"]).map { (name, $0) }
         }
         return nil
+    }
+
+    /// Missing/null arguments represent a no-argument call. Preserve encoded
+    /// strings and containers; reject other scalars without invoking Foundation's
+    /// exception-raising top-level JSON writer (`try?` cannot catch that exception).
+    private static func argumentsJSON(_ value: Any?) -> String? {
+        guard let value, !(value is NSNull) else { return "{}" }
+        if let string = value as? String { return string }
+        guard JSONSerialization.isValidJSONObject(value),
+            let data = try? JSONSerialization.data(withJSONObject: value, options: .osaurusCanonical)
+        else { return nil }
+        // Sorted keys: these arguments are replayed in the next turn's history.
+        return String(data: data, encoding: .utf8)
     }
 }

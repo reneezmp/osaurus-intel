@@ -2919,6 +2919,20 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             continue
                         }
 
+                        // Row 25 (upstream `dispatchFinal` fallback): a model with no
+                        // tool-call template (llama.cpp and friends) prints the call
+                        // as JSON in its text. When tools were offered and none was
+                        // streamed, detect it and run it as a call.
+                        if partials.isEmpty, !stopSequences.hit, roundFinishReason != "length",
+                            !request.isToolFreeWrapUp, !(liveToolSpecs?.isEmpty ?? true),
+                            !assistantContent.isEmpty, let offered = activeTools, !offered.isEmpty,
+                            let (name, args) = RemoteToolDetection.detectInlineToolCall(
+                                in: assistantContent, tools: offered)
+                        {
+                            NSLog("[CloudChatEngine] Fallback: detected inline tool call '\(name)' in text")
+                            partials[0] = PartialToolCall(id: Self.mintCallId(), name: name, arguments: args)
+                        }
+
                         // Upstream #2108: the output cap ended the round while
                         // tool arguments were still streaming. Running the call
                         // would hand the tool truncated (or empty) arguments.
