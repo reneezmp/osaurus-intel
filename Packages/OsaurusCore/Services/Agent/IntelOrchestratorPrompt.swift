@@ -20,11 +20,27 @@ enum IntelOrchestratorPrompt {
         var purpose: String = ""
     }
 
+    /// Where deliverables go and how the Orchestrator reads them (upstream
+    /// `fullDeliverablesLine`, W-subagents stage 5). While `spawn_agent` is
+    /// offered the Orchestrator's folder tools are narrowed to `file_read` /
+    /// `file_search` (`ToolRegistry.orchestratorExcludesWhenDelegating`):
+    /// agents do the writing and shell work. Without a folder neither the
+    /// Orchestrator nor an agent that inherits its folder can read the user's
+    /// files, so a file ask is answered honestly instead of delegated in vain.
+    /// Intel's Folder chip is the only way to set the Orchestrator's folder.
+    static func deliverablesLine(folderReadable: Bool) -> String {
+        if folderReadable {
+            return "Deliverables live in the working folder: delegated agents write files there (an agent without a folder of its own inherits this one) and the result's `artifact_paths` lists what they wrote. You can only read the folder, with `file_read` (several at once with `paths`) and `file_search`; you never write, edit, copy, or run commands there yourself, so hand that work to an agent. Never ask an agent to paste a whole file back."
+        }
+        return "No working folder is set on this chat: neither you nor an agent you delegate to can read or keep the user's files (an agent without a folder of its own inherits this one). If the ask is about files on disk, say so and tell the user to pick a folder with the Folder chip in the chat first; do not delegate it. Otherwise agents return results in their summary."
+    }
+
     static func compose(
         agentID: UUID,
         editablePrompt: String,
         delegationTargets: [DelegationTarget] = [],
-        spawnAgentAvailable: Bool = false
+        spawnAgentAvailable: Bool = false,
+        folderReadable: Bool = false
     ) -> String {
         guard agentID == Agent.defaultId else { return editablePrompt }
 
@@ -43,6 +59,7 @@ enum IntelOrchestratorPrompt {
             role = role.replacingOccurrences(
                 of: "Delegation is available only through `orchestrator_delegate`. Delegate only to a custom agent and cloud model the user explicitly admitted in Orchestrator settings. Each child is fresh, standalone, tool-free, limited to one turn, bounded by input, token, output, and timeout limits, cancellable, and returned only as inline text. Never claim that a child chat, file, background task, nested delegation, or durable artifact was created.",
                 with: "Delegation is available only through `spawn_agent`. It reaches only a custom agent the user explicitly allowed in Orchestrator settings, on a cloud model the user admitted; the user's permission setting for that agent (Ask by default) is applied before every run, and a run uses their cloud account. A delegated agent runs as its own chat with its own tools and returns a short result plus a `session_id`. Creating an agent does not make it delegable: it joins your list only when a `delegation.spawnable_agents` apply is approved, and its model must still be admitted by the user. Never claim a delegation ran, or that a file or chat exists, unless `spawn_agent` returned it.")
+            role += "\n\n" + deliverablesLine(folderReadable: folderReadable)
         } else if delegationTargets.isEmpty {
             role += """
 

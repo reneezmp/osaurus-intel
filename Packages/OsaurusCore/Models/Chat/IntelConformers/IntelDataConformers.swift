@@ -2900,11 +2900,15 @@ final class SystemPromptComposer: @unchecked Sendable {
         let spawnVisible =
             !s.spawnTargets.runnableAgentIDs.isEmpty
             && ChatExecutionContext.currentSessionSource != .delegation
+        // Stage 5: the Orchestrator's folder tools narrow to read-only
+        // (`file_read` / `file_search`) while agents can do the folder work.
+        let narrowsFolderTools = id == Agent.defaultId && spawnVisible
         let basePrompt = IntelOrchestratorPrompt.compose(
             agentID: id,
             editablePrompt: s.editablePrompt,
             delegationTargets: s.delegationTargets,
-            spawnAgentAvailable: spawnVisible
+            spawnAgentAvailable: spawnVisible,
+            folderReadable: folderContext != nil && !toolsDisabled && !s.agentToolsDisabled
         )
         let folder = folderContext
         let enabledToolNames = s.enabledToolNames
@@ -2947,7 +2951,21 @@ final class SystemPromptComposer: @unchecked Sendable {
         // tool directives that anchor this on Apple Silicon live in excluded
         // files, so we add a firm, recency-positioned directive here.
         let toolDirective: String
-        if folder != nil && folderToolsAvailable {
+        if folder != nil && folderToolsAvailable && narrowsFolderTools {
+            // Stage 5: the Orchestrator only reads; naming write/shell tools
+            // it no longer has would invite fabricated calls.
+            toolDirective = """
+
+                ## Tool Use (MANDATORY)
+                You have REAL read-only tools that run on the user's actual filesystem: \
+                `file_read` (reads a file or lists a directory) and `file_search`. To read, \
+                list, or search files you MUST emit the matching tool call and use its \
+                returned result. NEVER fabricate, guess, or simulate file names or file \
+                contents — if you have not called the tool this turn, you do not know the \
+                answer. Writing, editing, and shell work in the folder is done by the \
+                agents you delegate to with `spawn_agent`, not by you.
+                """
+        } else if folder != nil && folderToolsAvailable {
             toolDirective = """
 
                 ## Tool Use (MANDATORY)
@@ -3062,6 +3080,12 @@ final class SystemPromptComposer: @unchecked Sendable {
             let allSpecs = chainedSpecs.filter { (spec: Tool) -> Bool in
                 let name = spec.function.name
                 if isDelegatedChild, SubagentCapabilityRegistry.isExcludedFromDelegatedChild(name) { return false }
+                // Stage 5: agents do the folder work; the Orchestrator only reads.
+                if narrowsFolderTools,
+                    ToolRegistry.orchestratorExcludesWhenDelegating(name, folderToolNames: folderToolNames)
+                {
+                    return false
+                }
                 if name == ToolRegistry.imageToolName { return imageEnabled }
                 if name == ToolRegistry.videoToolName { return videoEnabled }
                 if ToolRegistry.appleScriptToolNames.contains(name) { return appleScriptEnabled }

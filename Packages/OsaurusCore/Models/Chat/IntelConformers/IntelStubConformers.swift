@@ -2191,6 +2191,22 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         return nil
     }
 
+    /// W-subagents stage 5 (upstream `orchestratorExcludedToolNames`): once
+    /// `spawn_agent` is offered the Orchestrator reads its working folder
+    /// (`file_read` / `file_search`) to brief agents and read their
+    /// deliverables, and agents do the writing, shell, git and file-history
+    /// work there. So every other folder tool, and `share_artifact` (agents
+    /// deliver files themselves), leaves the Orchestrator's schema. Applies
+    /// only to the Default agent and only while delegation is offered; with
+    /// no runnable target the Orchestrator keeps its full folder tools.
+    static func orchestratorExcludesWhenDelegating(
+        _ name: String,
+        folderToolNames: Set<String>
+    ) -> Bool {
+        if name == "share_artifact" { return true }
+        return folderToolNames.contains(name) && !["file_read", "file_search"].contains(name)
+    }
+
     static let orchestratorOnlyToolNames: Set<String> = [
         OsaurusConfigTool.toolName,
         IntelOrchestratorDelegationTool.toolName,
