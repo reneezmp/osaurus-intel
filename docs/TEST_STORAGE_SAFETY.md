@@ -562,3 +562,15 @@ For `Packages/OsaurusCLI` use the same environment (fresh `OSAURUS_TEST_ROOT`,
 passes: `swift test --arch x86_64 --no-parallel` for XCTest, and a pass without
 `--arch` for Swift Testing (the arm64 testing helper cannot load an x86_64
 bundle on the build Mac).
+
+## The gate script lives in the repo (2026-11-25)
+
+The session scratchpad copy of the gate was wiped twice. It is now
+`scripts/test/gate.sh` (and `gate_pty.sh`, which runs it under a pty and falls
+back to plain): `REPO=<worktree> scripts/test/gate.sh <label> [filter]`, logs in
+`$GATE_LOG_DIR` (default `/tmp/osaurus-gate`). It keeps every rule above: a
+fresh temp root deleted after each attempt, keychain off, `--no-parallel`,
+stdin from `/dev/null`, the machine-wide `lockf` lock, the 300-second stall
+watchdog with one retry, and the identity mdat and live-folder checks. The
+porting agents' shared brief is `docs/AGENT_PORT_BRIEF.md`.
+
