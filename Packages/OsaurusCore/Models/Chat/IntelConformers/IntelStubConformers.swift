@@ -1360,6 +1360,8 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             IntelOrchestratorTargetsTool(),
             // Upstream's in-app guide (`osaurus_help`, W-ui-misc).
             OsaurusHelpTool(),
+            // Read-only configuration snapshot (W-subagents stage 4).
+            OsaurusInspectTool(),
         ]
         for tool in tools {
             toolsByName[tool.name] = tool
@@ -2194,6 +2196,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         IntelOrchestratorDelegationTool.toolName,
         IntelOrchestratorTargetsTool.toolName,
         OsaurusHelpTool.toolName,
+        OsaurusInspectTool.toolName,
     ]
 
     static func isAdmittedBySeededAllowlist(
