@@ -1586,6 +1586,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         wireMessages = IntelImageInputFallback.strippingImages(wireMessages)
                     }
                     var retriedWithoutImages = false
+                    var imagePolicyCache: [String: String] = [:]
                     // Upstream `ChatView.maxTransientRetries`: a round cut off before
                     // anything was shown is re-asked up to twice, uncharged. Reset
                     // whenever a round finishes, so a later failure gets a fresh budget.
@@ -1714,12 +1715,29 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 pendingHarnessNotices.insert(Self.contextNearLimitNotice, at: 0)
                             }
                         }
+                        // Row 31: the Router's strictest shared history shape
+                        // (prefill dropped, string assistant content, no audio /
+                        // video, no images for a model the catalog lists as
+                        // text-only), before the transient notices.
+                        var outboundMessages = IntelToolImageWire.preparedForSend(
+                            sendMessages, keepsImagesInToolResults: endpoint.usesAnthropicWire)
+                        if endpoint.isOsaurusRouter {
+                            let catalogVision = await IntelRouterWire.catalogSupportsImageInput(endpoint.modelId)
+                            outboundMessages = IntelRouterWire.compatibleMessages(
+                                outboundMessages,
+                                modelSupportsImageInput: catalogVision
+                                    && !IntelImageInputFallback.isRejected(
+                                        provider: endpoint.providerLabel, model: endpoint.modelId))
+                        }
+                        // Row 32 (upstream `RemoteImagePayloadPolicy.prepared`): attached
+                        // images are sized (2048 px, 4 MB) and their MIME fixed here,
+                        // the one send path every remote wire shares. Local only.
+                        outboundMessages = RemoteImagePayloadPolicy.preparedWireMessages(
+                            outboundMessages, cache: &imagePolicyCache)
                         var body: [String: Any] = [
                             "model": endpoint.modelId,
                             "messages": Self.appendingTransientNotices(
-                                pendingHarnessNotices,
-                                to: IntelToolImageWire.preparedForSend(
-                                    sendMessages, keepsImagesInToolResults: endpoint.usesAnthropicWire)),
+                                pendingHarnessNotices, to: outboundMessages),
                             "stream": true,
                         ]
                         let roundNotices = pendingHarnessNotices

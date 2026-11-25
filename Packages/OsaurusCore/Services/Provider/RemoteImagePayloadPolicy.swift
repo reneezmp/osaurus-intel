@@ -1,7 +1,8 @@
 //
 //  RemoteImagePayloadPolicy.swift
-//  Intel: image-size helpers only (used by file_read OCR/loading). Upstream
-//  also rewrites vision message parts, which Intel's text-only chat lacks.
+//  Intel: image-size helpers (used by file_read) plus, since 5d row 32, the
+//  send-time policy for user attachments on Intel's wire dictionaries
+//  (`preparedWireMessages`; upstream's `prepared` works on `ChatMessage`).
 //  osaurus
 //
 //  Client-side sizing for images bound to REMOTE providers.
@@ -42,7 +43,72 @@ enum RemoteImagePayloadPolicy {
     static let jpegQuality = 0.85
 
     /// Rewrite every oversized or mislabeled `data:` image part in the
-    /// outbound messages. Messages without image parts are returned as-is.
+    /// outbound wire messages (Intel's form of upstream `prepared`; the
+    /// cloud engine calls it where the request body is built, so every
+    /// remote wire sees the same images). Messages without image parts are
+    /// returned as-is; an image already seen keeps its first rewrite.
+    static func preparedWireMessages(
+        _ messages: [[String: Any]], cache: inout [String: String]
+    ) -> [[String: Any]] {
+        messages.map { message in
+            guard var parts = message["content"] as? [[String: Any]],
+                parts.contains(where: { ($0["type"] as? String) == "image_url" })
+            else { return message }
+            var changed = false
+            for index in parts.indices {
+                guard (parts[index]["type"] as? String) == "image_url",
+                    var image = parts[index]["image_url"] as? [String: Any],
+                    let url = image["url"] as? String
+                else { continue }
+                let rewritten: String
+                if let known = cache[url] {
+                    rewritten = known
+                } else {
+                    rewritten = preparedDataURL(url)
+                    cache[url] = rewritten
+                }
+                if rewritten != url {
+                    image["url"] = rewritten
+                    parts[index]["image_url"] = image
+                    changed = true
+                }
+            }
+            guard changed else { return message }
+            var out = message
+            out["content"] = parts
+            return out
+        }
+    }
+
+    /// Rewrite a single `data:` image URI per the policy. Plain http(s) URLs
+    /// and anything unparsable are returned unchanged — a bad part should
+    /// degrade to the provider's own error, never crash the send.
+    static func preparedDataURL(_ url: String) -> String {
+        guard url.hasPrefix("data:image/"),
+            let commaIndex = url.firstIndex(of: ",")
+        else { return url }
+        let base64 = String(url[url.index(after: commaIndex)...])
+        guard let bytes = Data(base64Encoded: base64), !bytes.isEmpty else { return url }
+
+        guard let source = CGImageSourceCreateWithData(bytes as CFData, nil) else { return url }
+        let actualMime = mime(of: source) ?? "image/png"
+        let longSide = longestSide(of: source)
+
+        let oversized = (longSide ?? 0) > maxLongSidePixels || bytes.count > maxEncodedBytes
+        if oversized, let jpeg = downsizedJPEG(from: source), jpeg.count < bytes.count {
+            return "data:image/jpeg;base64," + jpeg.base64EncodedString()
+        }
+
+        // Small enough to ship untouched — but fix a mislabeled container so
+        // strict providers don't 400 on a JPEG marked image/png.
+        let header = url[url.index(url.startIndex, offsetBy: "data:".count)..<commaIndex]
+        let labeled = header.split(separator: ";").first.map(String.init) ?? "image/png"
+        if labeled != actualMime {
+            return "data:\(actualMime);base64," + base64
+        }
+        return url
+    }
+
     /// Downscale arbitrary encoded image bytes to the wire budget as JPEG.
     /// Used by the composer's attach path for files over its inline cap —
     /// attach a usable rendition instead of silently dropping the file.
