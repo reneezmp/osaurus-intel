@@ -209,6 +209,8 @@ mdat and live-folder checks).
   rule since: before merging, `git diff intel-fork --name-status` must show no
   `D` or reverted file outside the task's scope, and any `-` lines in files
   outside the task's area are read.
+- **Subagents stage 4** (2026-11-25): `osaurus_inspect`, template setup
+  gate for `spawn_agent`, declarative delegation budgets live.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

@@ -3655,3 +3655,12 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] `POST /v1/chat/completions` with `"temperature": 0` twice gives near-identical answers; with `"stop": ["\n"]` the answer ends at the first line.
 - [ ] `"response_format": {"type": "json_object"}` (asking for JSON) returns valid JSON with an OpenAI, Gemini or Router model.
 - [ ] App chat answers the same as before (its sampling comes from the agent settings).
+
+## Subagents stage 4 (2026-11-25)
+
+`W-subagents` stage 4. Not in candidate 69.
+
+- [ ] Ask the Orchestrator "what agents and providers do I have?": it answers from `osaurus_inspect` and shows no keys or tokens.
+- [ ] Create an agent from a template that needs setup and try to delegate to it: `spawn_agent` refuses and says the setup isn't finished.
+- [ ] Through the Orchestrator, set a delegation budget (for example a lower max turns) and approve it: the next delegated run respects it.
+- [ ] Creating a new agent through the Orchestrator doesn't make it delegable on its own; it still has to be allowed in Settings → Orchestrator.
