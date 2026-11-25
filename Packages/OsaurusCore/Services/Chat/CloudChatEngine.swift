@@ -3109,9 +3109,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // Images a tool staged (`file_read` on a picture) ride
                             // with its result when the model takes images (upstream
                             // `ToolResultMediaBridge`).
+                            // #2936: the card and task state keep the full `spawn_result`;
+                            // the model reads the compact form (`IntelSpawnResultWire`).
+                            let wireResult = await IntelSpawnResultWire.modelVisible(
+                                name: call.name, result: result, modelID: resolvedModel)
                             wireMessages.append(
                                 IntelToolImageWire.toolMessage(
-                                    callId: callId, toolName: call.name, result: result,
+                                    callId: callId, toolName: call.name,
+                                    result: wireResult,
                                     imagesEnabled: ChatExecutionContext.toolResultImagesEnabled))
                             roundOutcomes.append(
                                 IntelToolOutcome(

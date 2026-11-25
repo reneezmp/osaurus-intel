@@ -410,14 +410,17 @@ final class TextSubagentKind: SubagentKind, @unchecked Sendable {
             continueSessionId: continueSessionId,
             freshSessionId: freshSessionId
         )
-        return result(from: outcome, resolved: resolved, targetAgentId: targetAgentId, feed: feed)
+        let artifactPaths = await SpawnResultCompaction.artifactPaths(forWorkerSession: outcome.sessionId)
+        return result(
+            from: outcome, resolved: resolved, targetAgentId: targetAgentId, feed: feed,
+            artifactPaths: artifactPaths)
     }
 
     /// The `spawn_result` payload (upstream's envelope; Intel has no
     /// residency, so `handoff` is false and `residency_mode` is `none`).
     private func result(
         from outcome: AgentDelegationOutcome, resolved: ResolvedModel, targetAgentId: UUID,
-        feed: SubagentFeed
+        feed: SubagentFeed, artifactPaths: [String] = []
     ) -> SubagentResult {
         let digest = outcome.finalText
         let capped =
@@ -456,6 +459,12 @@ final class TextSubagentKind: SubagentKind, @unchecked Sendable {
             print(
                 "[TextSubagentKind] worker \(resolvedAgentName) (\(outcome.sessionId.uuidString)) "
                     + "used NEEDS INPUT off-prefix; needs_input stays false")
+        }
+        // Deliverables (#2936): the files the child's session wrote (its
+        // file-change journal, net of reverts), as paths the parent can
+        // `file_read` instead of asking for the content in the digest.
+        if !artifactPaths.isEmpty {
+            payload["artifact_paths"] = artifactPaths
         }
         var usage: [String: Any] = [:]
         if let completionTokens = outcome.completionTokens {
