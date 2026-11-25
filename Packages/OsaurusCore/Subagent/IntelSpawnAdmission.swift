@@ -171,9 +171,17 @@ enum IntelSpawnAdmission {
     @MainActor
     static func targetFacts(_ id: UUID) -> TargetFacts? {
         guard let agent = AgentManager.shared.agent(for: id) else { return nil }
-        return TargetFacts(
+        return targetFacts(agent)
+    }
+
+    /// Agent-instance overload (upstream #3121): callers iterating a snapshot of
+    /// `AgentManager.agents` pass the record they already hold, so each target
+    /// costs no second `@Published` array read.
+    @MainActor
+    static func targetFacts(_ agent: Agent) -> TargetFacts {
+        TargetFacts(
             id: agent.id, name: agent.name, isBuiltIn: agent.isBuiltIn,
-            effectiveModel: AgentManager.shared.effectiveModel(for: agent.id))
+            effectiveModel: AgentManager.shared.effectiveModel(for: agent))
     }
 
     /// Request-local target availability for the schema enum and the prompt
@@ -184,11 +192,16 @@ enum IntelSpawnAdmission {
     @MainActor
     static func resolveTargets(launcherID: UUID) -> SpawnTargetAvailabilitySnapshot {
         let facts = liveFacts(launcherID: launcherID)
-        let manager = AgentManager.shared
+        // Snapshot the @Published array once (upstream #3121); the per-target
+        // lookups below read this copy instead of `agents` again.
+        var snapshot: [UUID: Agent] = [:]
+        for agent in AgentManager.shared.agents where snapshot[agent.id] == nil {
+            snapshot[agent.id] = agent
+        }
         let targets = facts.pool.map { id -> SpawnAgentTarget in
-            let target = targetFacts(id)
+            let agent = snapshot[id]
+            let target = agent.map { targetFacts($0) }
             let verdict = evaluate(facts, targetID: id, target: target)
-            let agent = manager.agent(for: id)
             let model: String? = {
                 if case .success(let admitted) = verdict { return admitted.model }
                 return target?.effectiveModel

@@ -205,7 +205,7 @@ struct IntelOrchestratorDelegationTool: OsaurusTool, PermissionedTool {
                     agentID: agent.id,
                     isBuiltIn: agent.isBuiltIn,
                     systemPrompt: manager.effectiveSystemPrompt(for: agent.id),
-                    effectiveModel: manager.effectiveModel(for: agent.id),
+                    effectiveModel: manager.effectiveModel(for: agent),
                     effectiveTemperature: manager.effectiveTemperature(for: agent.id),
                     effectiveMaxTokens: manager.effectiveMaxTokens(for: agent.id)
                 )

@@ -910,6 +910,24 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         return ChatConfigurationStore.load().defaultModel ?? defaultModel
     }
 
+    /// Agent-instance overload (upstream #3121): pass a pre-fetched `Agent`
+    /// from a snapshot of `agents` to skip the `resolvedAgent` lookup and the
+    /// `@Published` array read it costs per call. Same result as
+    /// `effectiveModel(for: agent.id)` for a record that is in `agents`.
+    func effectiveModel(for agent: Agent) -> String? {
+        if agent.id == Agent.defaultId,
+            let model = DefaultAgentConfigurationStore.load().defaultModel?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            !model.isEmpty
+        {
+            return model
+        }
+        if agent.id != Agent.defaultId, let model = agent.defaultModel, !model.isEmpty {
+            return model
+        }
+        return ChatConfigurationStore.load().defaultModel ?? defaultModel
+    }
+
     func effectiveTemperature(for agentId: UUID) -> Double? {
         if agentId == Agent.defaultId,
             let temperature = DefaultAgentConfigurationStore.load().temperature
