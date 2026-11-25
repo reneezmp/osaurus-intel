@@ -980,6 +980,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         var usesAnthropicWire: Bool { provider?.providerType == .anthropic }
         /// Gemini `streamGenerateContent` wire (`IntelGeminiAdapter`).
         var usesGeminiWire: Bool { provider?.providerType == .gemini }
+        /// Gemini image models (Nano Banana) use non-streaming `generateContent`
+        /// (row 29, upstream `geminiImageGenerateContent`).
+        var usesGeminiImageGeneration: Bool {
+            usesGeminiWire && IntelGeminiAdapter.isImageCapableModel(modelId)
+        }
         /// Upstream #3266: strict targets reject top-level `anyOf` / `enum` / ...
         var restrictsTopLevelToolSchema: Bool {
             if isCodex || isOsaurusRouter { return true }
@@ -2026,7 +2031,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         ? AnthropicReasoningContract.offLevelId
                                         : request.modelOptions?["reasoningEffort"]?.stringValue)
                             } else if endpoint.usesGeminiWire {
-                                body = try IntelGeminiAdapter.makeRequest(chatCompletions: body)
+                                body = try IntelGeminiAdapter.makeRequest(chatCompletions: body, modelOptions: request.modelOptions)
                             } else if let wireMessages = body["messages"] as? [[String: Any]] {
                                 // Anthropic-only field; other chat wires may reject it.
                                 body["messages"] = IntelAnthropicMessagesAdapter.strippingThinkingBlocks(wireMessages)
@@ -2040,13 +2045,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             base: idempotencyBase, round: round, recoveryOrdinal: recoveryOrdinal)
 
                         let requestURL =
-                            endpoint.usesGeminiWire
+                            endpoint.usesGeminiImageGeneration
+                            ? IntelGeminiAdapter.generateURL(modelsEndpoint: endpoint.url, model: endpoint.modelId)
+                            : endpoint.usesGeminiWire
                             ? IntelGeminiAdapter.streamURL(modelsEndpoint: endpoint.url, model: endpoint.modelId)
                             : endpoint.url
                         var urlRequest = URLRequest(url: URL(string: requestURL)!)
                         urlRequest.httpMethod = "POST"
                         // Upstream `isSafeHeader` (#3266): a custom header with CR/LF or control characters is dropped, not sent.
-                        for (k, v) in try await self.requestHeaders(for: endpoint)
+                        for (k, v) in self.addingOpenCodeSession(
+                            try await self.requestHeaders(for: endpoint), endpoint: endpoint, sessionKey: request.session_id)
                         where IntelProviderDiscoveryExtras.isSafeHeader(name: k, value: v) { urlRequest.setValue(v, forHTTPHeaderField: k) }
                         if let responsesLiteSessionId {
                             urlRequest.setValue(responsesLiteSessionId, forHTTPHeaderField: "session-id")
@@ -2705,7 +2713,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         var anthropicTranslator: IntelAnthropicSSETranslator? =
                             endpoint.usesAnthropicWire ? IntelAnthropicSSETranslator() : nil
                         var geminiTranslator: IntelGeminiSSETranslator? =
-                            endpoint.usesGeminiWire ? IntelGeminiSSETranslator() : nil
+                            endpoint.usesGeminiWire
+                            ? IntelGeminiSSETranslator(wholeBody: endpoint.usesGeminiImageGeneration) : nil
                         do {  // upstream transient retry (row 11); not re-indented, to keep the diff small
                         // Upstream #3266: the compiled `OpenAICompatibleStreamFramer`
                         // turns bytes into event payloads (`data:` without a space,
@@ -3487,7 +3496,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
         var urlRequest = URLRequest(url: URL(string: endpoint.url)!)
         urlRequest.httpMethod = "POST"
-        for (k, v) in try await requestHeaders(for: endpoint)
+        for (k, v) in addingOpenCodeSession(
+            try await requestHeaders(for: endpoint), endpoint: endpoint, sessionKey: request.session_id)
         where IntelProviderDiscoveryExtras.isSafeHeader(name: k, value: v) { urlRequest.setValue(v, forHTTPHeaderField: k) }
         urlRequest.timeoutInterval = Self.requestTimeout(for: endpoint.provider)
 
@@ -3801,6 +3811,34 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// `[A-Za-z0-9._:-]{1,200}`; chat ids are UUIDs.
     nonisolated static func promptCacheKey(forSession sessionId: String) -> String {
         "osaurus-session-\(sessionId)"
+    }
+
+    /// OpenCode-hosted endpoints (`opencode.ai` and subdomains), any provider
+    /// type (upstream `isOpenCodeHost`, row 30).
+    nonisolated static func isOpenCodeHost(_ host: String) -> Bool {
+        let normalizedHost = host.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalizedHost == "opencode.ai" || normalizedHost.hasSuffix(".opencode.ai")
+    }
+
+    /// Session affinity header OpenCode Zen / Go require (HTTP 400 without it;
+    /// upstream `opencodeSessionHeaders`).
+    nonisolated static func opencodeSessionHeaders(sessionId: String) -> [String: String] {
+        ["x-opencode-session": sessionId]
+    }
+
+    /// Adds `x-opencode-session` for OpenCode hosts: a stable per-conversation
+    /// id (the same UUIDv7 map Codex affinity uses; a fresh id for a request
+    /// with no conversation). A user-supplied header of that name wins,
+    /// case-insensitively (upstream `buildURLRequest`).
+    private func addingOpenCodeSession(
+        _ headers: [String: String], endpoint: ResolvedEndpoint, sessionKey: String?
+    ) -> [String: String] {
+        guard let host = endpoint.provider?.host ?? URL(string: endpoint.url)?.host, Self.isOpenCodeHost(host),
+            !headers.keys.contains(where: { $0.caseInsensitiveCompare("x-opencode-session") == .orderedSame })
+        else { return headers }
+        return headers.merging(
+            Self.opencodeSessionHeaders(sessionId: codexResponsesLiteSessionId(for: sessionKey))
+        ) { existing, _ in existing }
     }
 
     nonisolated static func isOpenRouterHost(_ host: String) -> Bool {

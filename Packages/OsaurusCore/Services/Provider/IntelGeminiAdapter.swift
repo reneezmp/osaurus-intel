@@ -23,7 +23,15 @@
 //    lines. Thought parts are skipped (as upstream). Each function call
 //    becomes a complete `tool_calls` delta with a generated id and the
 //    signature in `gemini_thought_signature`. A `SAFETY` finish fails the
-//    stream.
+//    stream; `MAX_TOKENS` becomes `finish_reason: "length"` (row 27), so a
+//    cut reply shows the output-limit notice and a call cut mid-arguments is
+//    refused.
+//  - Image models (Nano Banana, row 29; upstream `geminiImageGenerateContent`)
+//    use the non-streaming `generateContent` URL with `responseModalities`
+//    and `imageConfig` from the model options. The translator accepts that
+//    single JSON body (`wholeBody`) and turns inline image parts into the
+//    same data-URI markdown upstream writes (`image|ts:SIG` alt text), which
+//    `makeRequest` converts back to `inlineData` parts on the next turn.
 //
 
 import Foundation
@@ -44,6 +52,19 @@ enum IntelGeminiAdapter {
         model.hasPrefix("models/") ? String(model.dropFirst("models/".count)) : model
     }
 
+    /// Image-capable chat models (upstream `isImageCapableModel`).
+    static func isImageCapableModel(_ modelName: String) -> Bool {
+        Gemini31FlashImageProfile.matches(modelId: modelName) || GeminiProImageProfile.matches(modelId: modelName)
+            || GeminiFlashImageProfile.matches(modelId: modelName)
+    }
+
+    /// `<base>/models/<model>:generateContent` (upstream
+    /// `geminiImageGenerateContent`: image models don't stream).
+    static func generateURL(modelsEndpoint: String, model: String) -> String {
+        let base = modelsEndpoint.hasSuffix("/") ? String(modelsEndpoint.dropLast()) : modelsEndpoint
+        return "\(base)/\(bareModel(model)):generateContent"
+    }
+
     /// `<base>/models/<model>:streamGenerateContent?alt=sse` from the
     /// provider's `/models` endpoint URL.
     static func streamURL(modelsEndpoint: String, model: String) -> String {
@@ -51,7 +72,9 @@ enum IntelGeminiAdapter {
         return "\(base)/\(bareModel(model)):streamGenerateContent?alt=sse"
     }
 
-    static func makeRequest(chatCompletions body: [String: Any]) throws -> [String: Any] {
+    static func makeRequest(
+        chatCompletions body: [String: Any], modelOptions: [String: ModelOptionValue]? = nil
+    ) throws -> [String: Any] {
         let messages = body["messages"] as? [[String: Any]] ?? []
         var contents: [[String: Any]] = []
         var system: [String] = []
@@ -85,7 +108,9 @@ enum IntelGeminiAdapter {
                 flush()
                 var parts: [[String: Any]] = []
                 if let text = IntelAnthropicMessagesAdapter.text(of: message["content"]), !text.isEmpty {
-                    parts.append(["text": text])
+                    // Upstream `extractInlineImages`: an image the model made
+                    // earlier goes back as `inlineData` (with its signature).
+                    parts.append(contentsOf: inlineImageParts(from: text))
                 }
                 for call in message["tool_calls"] as? [[String: Any]] ?? [] {
                     let function = call["function"] as? [String: Any] ?? [:]
@@ -170,8 +195,62 @@ enum IntelGeminiAdapter {
         {
             generation["thinkingConfig"] = thinking
         }
+        // Row 29 (upstream `toGeminiRequest`): image models ask for image
+        // output and take the picker's aspect ratio and resolution.
+        if let model = body["model"] as? String, isImageCapableModel(model) {
+            generation["responseModalities"] =
+                modelOptions?["outputType"]?.stringValue == "imageOnly" ? ["IMAGE"] : ["TEXT", "IMAGE"]
+            let ratio = modelOptions?["aspectRatio"]?.stringValue
+            let size = modelOptions?["imageSize"]?.stringValue
+            var imageConfig: [String: Any] = [:]
+            if let ratio, ratio != "auto" { imageConfig["aspectRatio"] = ratio }
+            if let size, size != "auto" { imageConfig["imageSize"] = size }
+            if !imageConfig.isEmpty { generation["imageConfig"] = imageConfig }
+        }
         if !generation.isEmpty { request["generationConfig"] = generation }
         return request
+    }
+
+    // MARK: - Inline images in history (upstream `imageMarkdown` / `extractInlineImages`)
+
+    /// Markdown for an inline image, the thought signature in the alt text.
+    static func imageMarkdown(mimeType: String, data: String, thoughtSignature: String?) -> String {
+        let alt = thoughtSignature.map { "image|ts:\($0)" } ?? "image"
+        return "\n\n![\(alt)](data:\(mimeType);base64,\(data))\n\n"
+    }
+
+    /// Splits assistant text into `text` and `inlineData` parts, recovering the
+    /// signature from `image|ts:SIG` alt text. Text without a data-URI image
+    /// is one `text` part, unchanged.
+    static func inlineImageParts(from text: String) -> [[String: Any]] {
+        let pattern = #"!\[([^\]]*)\]\(data:([^;]+);base64,([^)]+)\)"#
+        let ns = text as NSString
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+            case let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length)),
+            !matches.isEmpty
+        else { return [["text": text]] }
+        var parts: [[String: Any]] = []
+        var lastEnd = 0
+        for match in matches {
+            if match.range.location > lastEnd {
+                let before = ns.substring(with: NSRange(location: lastEnd, length: match.range.location - lastEnd))
+                if !before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { parts.append(["text": before]) }
+            }
+            let alt = ns.substring(with: match.range(at: 1))
+            var part: [String: Any] = [
+                "inlineData": [
+                    "mimeType": ns.substring(with: match.range(at: 2)), "data": ns.substring(with: match.range(at: 3)),
+                ]
+            ]
+            if alt.hasPrefix("image|ts:") { part["thoughtSignature"] = String(alt.dropFirst("image|ts:".count)) }
+            parts.append(part)
+            lastEnd = match.range.location + match.range.length
+        }
+        if lastEnd < ns.length {
+            let after = ns.substring(from: lastEnd)
+            if !after.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { parts.append(["text": after]) }
+        }
+        return parts.isEmpty ? [["text": text]] : parts
     }
 
     /// `data:<mime>;base64,<data>` → `{mimeType, data}` (upstream reads data
@@ -241,13 +320,31 @@ struct IntelGeminiSSETranslator {
     private var toolCount = 0
     private var promptTokens = 0
     private var completionTokens = 0
+    /// Image models answer `generateContent` with one JSON body instead of an
+    /// SSE stream: lines are gathered until they parse (row 29).
+    private let wholeBody: Bool
+    private var bodyBuffer = ""
+
+    init(wholeBody: Bool = false) { self.wholeBody = wholeBody }
 
     mutating func translate(_ line: String) throws -> [String] {
-        guard line.hasPrefix("data:") else { return [] }
-        let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+        let payload: String
+        if wholeBody {
+            bodyBuffer += line
+            guard bodyBuffer.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("}") else { return [] }
+            payload = bodyBuffer
+        } else {
+            guard line.hasPrefix("data:") else { return [] }
+            payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+        }
         guard let data = payload.data(using: .utf8),
             let chunk = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return [] }
+        bodyBuffer = ""
+        return try translate(chunk: chunk)
+    }
+
+    private mutating func translate(chunk: [String: Any]) throws -> [String] {
         if let error = chunk["error"] as? [String: Any] {
             throw IntelGeminiAdapter.Failure(message: error["message"] as? String ?? "Gemini stream error")
         }
@@ -264,6 +361,16 @@ struct IntelGeminiSSETranslator {
             if part["thought"] as? Bool == true { continue }
             if let text = part["text"] as? String, !text.isEmpty, toolCount == 0 {
                 out.append(Self.chunk(delta: ["content": text]))
+            } else if let inline = part["inlineData"] as? [String: Any],
+                let mime = inline["mimeType"] as? String, let b64 = inline["data"] as? String, toolCount == 0
+            {
+                // Row 29: an image the model made, as the markdown upstream writes.
+                out.append(
+                    Self.chunk(
+                        delta: [
+                            "content": IntelGeminiAdapter.imageMarkdown(
+                                mimeType: mime, data: b64, thoughtSignature: part["thoughtSignature"] as? String)
+                        ]))
             } else if let call = part["functionCall"] as? [String: Any] {
                 let args = call["args"] ?? [String: Any]()
                 let argsData =
@@ -286,6 +393,12 @@ struct IntelGeminiSSETranslator {
         }
         if candidate?["finishReason"] as? String == "SAFETY" {
             throw IntelGeminiAdapter.Failure(message: "Content blocked by safety settings.")
+        }
+        // Row 27 (upstream `handleGeminiEvent`): the output cap is `length` in
+        // the OpenAI vocabulary, so the engine shows its output-limit notice
+        // and refuses a tool call cut off mid-arguments.
+        if candidate?["finishReason"] as? String == "MAX_TOKENS" {
+            out.append(Self.line(["choices": [["index": 0, "delta": [String: Any](), "finish_reason": "length"]]]))
         }
         return out
     }
