@@ -1814,6 +1814,17 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             providerLabel: endpoint.providerLabel,
                             sendsResponsesSamplers: endpoint.usesResponsesWire && !endpoint.isCodex,
                             into: &body)
+                        // JSON mode (upstream `buildChatRequest`, row 22): the
+                        // caller's `json_object` goes to chat-completions wires
+                        // as is, to Gemini as `responseMimeType` and to the OpenAI
+                        // Responses preset as `text.format` (both mapped by their
+                        // adapters). Anthropic has no schema-free equivalent and
+                        // Codex's adapter carries no such field.
+                        if request.response_format?.type == "json_object", !endpoint.usesAnthropicWire,
+                            !endpoint.isCodex
+                        {
+                            body["response_format"] = ["type": "json_object"]
+                        }
                         if let liveToolSpecs {
                             body["tools"] = liveToolSpecs
                             // The caller's choice (an API client's
@@ -1848,9 +1859,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 {
                                     body["max_tokens"] = maxTokens
                                 }
-                                // `text.format` (JSON mode): Intel's ChatCompletionRequest has no
-                                // `response_format` yet (stage 5d slice 6, row 22 adds it); the
-                                // adapter already maps `response_format` once the engine passes it.
+                                // `text.format` (JSON mode): `response_format` is already in
+                                // `body` (set above); the adapter maps it for the OpenAI preset.
                             }
                             // Session-scoped prompt-cache routing for the OpenAI preset
                             // (openai.com only, as upstream's `supportsPromptCacheKey`).

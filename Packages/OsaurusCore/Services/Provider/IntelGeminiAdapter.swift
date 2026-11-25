@@ -156,6 +156,11 @@ enum IntelGeminiAdapter {
         if let topK = body["top_k"] { generation["topK"] = topK }
         if let seed = body["seed"] { generation["seed"] = seed }
         if let stop = body["stop"] { generation["stopSequences"] = stop }
+        // JSON mode (upstream `toGeminiRequest`): `response_format` json_object
+        // becomes `responseMimeType`.
+        if let format = body["response_format"] as? [String: Any], (format["type"] as? String) == "json_object" {
+            generation["responseMimeType"] = "application/json"
+        }
         // Upstream #3115: the picker's effort becomes Gemini's native thinking
         // control, `thinkingLevel` on Gemini 3 and a `thinkingBudget` on 2.5;
         // an effort the model doesn't document sends nothing.

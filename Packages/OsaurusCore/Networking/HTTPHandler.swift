@@ -161,6 +161,12 @@ struct ChatCompletionRequest: Codable, Sendable {
     /// Decoded for API callers; it reaches a cloud provider through
     /// `callerSampling` (`IntelSamplingWire.effectiveSampling`).
     var seed: Int?
+    /// OpenAI JSON mode (upstream `response_format`). Only `json_object` is
+    /// forwarded to a provider (`RequestValidator` rejects other shapes):
+    /// chat-completions wires take it as is, Gemini maps it to
+    /// `responseMimeType`, the OpenAI Responses preset to `text.format`;
+    /// Anthropic has no equivalent and omits it, as upstream.
+    var response_format: ResponseFormat?
     var samplingParametersAreImplicit: Bool = false
     var modelOptions: [String: ModelOptionValue]? = nil
     /// Intel (`W-agent-generation-overrides`, upstream #3233): sampling the
@@ -239,7 +245,7 @@ struct ChatCompletionRequest: Codable, Sendable {
         case model, messages, stream, temperature, max_tokens, top_p
         case stream_options, frequency_penalty, presence_penalty, stop, n
         case tools, tool_choice, session_id
-        case seed
+        case seed, response_format
     }
 
     /// Decoded only (upstream): the phone's fields never reach a provider.
@@ -268,6 +274,7 @@ extension ChatCompletionRequest {
         tool_choice = try container.decodeIfPresent(ToolChoiceOption.self, forKey: .tool_choice)
         session_id = try container.decodeIfPresent(String.self, forKey: .session_id)
         seed = try container.decodeIfPresent(Int.self, forKey: .seed)
+        response_format = try container.decodeIfPresent(ResponseFormat.self, forKey: .response_format)
         let osaurus = try decoder.container(keyedBy: OsaurusCodingKeys.self)
         osaurus_session_id = try osaurus.decodeIfPresent(String.self, forKey: .osaurus_session_id)
         osaurus_create_session = try osaurus.decodeIfPresent(Bool.self, forKey: .osaurus_create_session)
@@ -278,6 +285,12 @@ extension ChatCompletionRequest {
 
 struct StreamOptions: Codable, Sendable {
     let include_usage: Bool?
+}
+
+/// OpenAI `response_format` (upstream `ResponseFormat`). Intel keeps the type
+/// only: `RequestValidator` rejects `json_schema`, so no schema is decoded.
+struct ResponseFormat: Codable, Sendable, Equatable {
+    let type: String
 }
 
 /// OpenAI-compatible model object

@@ -169,6 +169,55 @@ struct IntelCallerSamplingTests {
         #expect(body["stop"] == nil)
     }
 
+    // MARK: Row 22 (response_format)
+
+    @Test("response_format decodes from the request body")
+    func decodesResponseFormat() throws {
+        let json = #"{"model":"m","messages":[{"role":"user","content":"hi"}],"response_format":{"type":"json_object"}}"#
+        let request = try JSONDecoder().decode(ChatCompletionRequest.self, from: Data(json.utf8))
+        #expect(request.response_format == ResponseFormat(type: "json_object"))
+        let none = try JSONDecoder().decode(
+            ChatCompletionRequest.self, from: Data(#"{"model":"m","messages":[]}"#.utf8))
+        #expect(none.response_format == nil)
+    }
+
+    @Test("Gemini maps JSON mode to responseMimeType")
+    func geminiJSONMode() throws {
+        let out = try IntelGeminiAdapter.makeRequest(chatCompletions: [
+            "model": "gemini-3-pro", "messages": [["role": "user", "content": "hi"]],
+            "response_format": ["type": "json_object"],
+        ])
+        let generation = try #require(out["generationConfig"] as? [String: Any])
+        #expect(generation["responseMimeType"] as? String == "application/json")
+    }
+
+    @Test("The OpenAI Responses preset gets text.format; Codex is never handed the field")
+    func responsesJSONMode() throws {
+        let body: [String: Any] = [
+            "model": "gpt-4.1", "messages": [["role": "user", "content": "hi"]],
+            "response_format": ["type": "json_object"],
+        ]
+        let payload = try IntelCodexResponsesAdapter.makeRequest(chatCompletions: body, target: .openAI)
+        let text = payload["text"] as? [String: Any]
+        #expect((text?["format"] as? [String: Any])?["type"] as? String == "json_object")
+    }
+
+    @Test("A chat-completions turn forwards json_object, and a plain turn does not")
+    func engineForwardsJSONMode() async throws {
+        CallerSamplingProtocol.reset()
+        var request = ChatCompletionRequest(
+            model: "fixture-model", messages: [ChatMessage(role: "user", content: "hi")])
+        request.response_format = ResponseFormat(type: "json_object")
+        _ = try await Self.run(request)
+        let body = try #require(CallerSamplingProtocol.lastBody())
+        #expect((body["response_format"] as? [String: Any])?["type"] as? String == "json_object")
+
+        CallerSamplingProtocol.reset()
+        _ = try await Self.run(
+            ChatCompletionRequest(model: "fixture-model", messages: [ChatMessage(role: "user", content: "hi")]))
+        #expect(CallerSamplingProtocol.lastBody()?["response_format"] == nil)
+    }
+
     private static func run(_ request: ChatCompletionRequest) async throws -> String {
         let provider = IntelChatTransportTests.provider()
         let configuration = URLSessionConfiguration.ephemeral
