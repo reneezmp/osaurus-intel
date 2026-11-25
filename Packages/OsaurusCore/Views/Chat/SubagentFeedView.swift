@@ -350,9 +350,12 @@ struct SubagentFeedView: View {
             return
         }
         #if OSAURUS_INTEL
-        // Intel: delegated child chats come with the spawn kind; focus the
-        // window already showing the session when there is one.
-        if let windowId = ChatWindowManager.shared.findWindow(bySessionId: sessionId) {
+        // Intel: reveal the tab already showing the session, else hydrate the
+        // persisted child chat into a tab (`openSessionAsTab` is Intel's
+        // `openHistorySession`; W-subagents stage 5).
+        if let sessionData = ChatSessionsManager.shared.session(for: sessionId) {
+            ChatWindowManager.shared.openSessionAsTab(sessionData)
+        } else if let windowId = ChatWindowManager.shared.findWindow(bySessionId: sessionId) {
             ChatWindowManager.shared.showWindow(id: windowId)
         }
         #else

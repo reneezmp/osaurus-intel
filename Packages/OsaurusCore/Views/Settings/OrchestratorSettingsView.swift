@@ -48,6 +48,7 @@ struct OrchestratorSettingsView: View {
                     generationSection
                     delegationSection
                     SubagentSettingsSection(configuration: $subagentConfiguration)
+                    OrchestratorDelegationsSection()
                     declarativeConfigurationSection
                 }
                 .padding(24)
