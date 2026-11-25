@@ -782,9 +782,12 @@ final class NativeToolCallRowView: NSView {
 
         // 0) Unified subagent feed (upstream): a row whose tool-call-id has a
         //    live (or grace-tail) `SubagentFeed` renders the activity pane.
-        //    Upstream also replays a finished run's saved log
-        //    (`SubagentRunLogArchive`), which comes with the spawn kind.
-        if let feed = SubagentFeedRegistry.shared.feed(for: item.call.id) {
+        //    A finished run whose live feed is gone (grace tail elapsed, or
+        //    the chat was reopened) replays its saved log from
+        //    `SubagentRunLogArchive` (upstream; W-subagents stage 5).
+        if let feed = SubagentFeedRegistry.shared.feed(for: item.call.id)
+            ?? SubagentRunLogArchive.shared.feed(for: item.call.id)
+        {
             tearDownResultSection()
             tearDownTerminalView()
             mountSubagentFeedView(feed: feed, theme: theme)

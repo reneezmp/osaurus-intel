@@ -117,6 +117,11 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     /// reloaded chat still shows "· 1.2s" next to the tool title (upstream
     /// #1259).
     @Published var toolCallDurations: [String: TimeInterval] = [:]
+    /// Finished subagent step logs by tool-call id (upstream
+    /// `toolCallLogs`, W-subagents stage 5): saved with the turn so an
+    /// AppleScript run's activity feed survives the registry's grace tail
+    /// and a relaunch. UI evidence only; never sent to the model.
+    var toolCallLogs: [String: SubagentRunLog] = [:]
     /// How long the model spent thinking (seconds) — from the first reasoning
     /// token to the first content/tool that follows. Drives "Thought for
     /// 30s"; persisted.
@@ -224,6 +229,10 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
             (turn as? ChatTurnData)?.injectedContextPrefix ?? (turn as? ChatTurn)?.injectedContextPrefix
         self.toolCallDurations =
             (turn as? ChatTurnData)?.toolCallDurations ?? (turn as? ChatTurn)?.toolCallDurations ?? [:]
+        self.toolCallLogs =
+            (turn as? ChatTurnData)?.toolCallLogs ?? (turn as? ChatTurn)?.toolCallLogs ?? [:]
+        // A reloaded chat replays its saved step logs through the archive.
+        for (callId, log) in toolCallLogs { SubagentRunLogArchive.shared.store(log, for: callId) }
         self.thinkingDuration =
             (turn as? ChatTurnData)?.thinkingDuration ?? (turn as? ChatTurn)?.thinkingDuration
         self.anthropicThinkingBlocks =
@@ -269,6 +278,15 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     /// durations persist.
     func setToolResult(_ result: String, for callId: String) {
         toolResults[callId] = result
+        // The run has finished by the time its result lands, and the feed
+        // registry keeps it for a short grace window: keep the step log
+        // (upstream; only kinds in `SubagentRunLog.persistedKindIds`).
+        if toolCallLogs[callId] == nil,
+            let log = SubagentFeedRegistry.shared.feed(for: callId)?.finishedRunLog()
+        {
+            toolCallLogs[callId] = log
+            SubagentRunLogArchive.shared.store(log, for: callId)
+        }
         guard toolCallDurations[callId] == nil, let start = toolCallStartedAt[callId] else { return }
         let elapsed = Date().timeIntervalSince(start)
         if elapsed >= Self.minDisplayableToolDuration {
@@ -768,6 +786,8 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
     var terminalStopReason: String?
     var injectedContextPrefix: String?
     var toolCallDurations: [String: TimeInterval] = [:]
+    /// Saved subagent step logs by tool-call id (see `ChatTurn.toolCallLogs`).
+    var toolCallLogs: [String: SubagentRunLog] = [:]
     var thinkingDuration: TimeInterval?
     var anthropicThinkingBlocks: [JSONValue] = []
 
@@ -806,6 +826,8 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
             (turn as? ChatTurn)?.injectedContextPrefix ?? (turn as? ChatTurnData)?.injectedContextPrefix
         self.toolCallDurations =
             (turn as? ChatTurn)?.toolCallDurations ?? (turn as? ChatTurnData)?.toolCallDurations ?? [:]
+        self.toolCallLogs =
+            (turn as? ChatTurn)?.toolCallLogs ?? (turn as? ChatTurnData)?.toolCallLogs ?? [:]
         self.thinkingDuration =
             (turn as? ChatTurn)?.thinkingDuration ?? (turn as? ChatTurnData)?.thinkingDuration
         self.anthropicThinkingBlocks =
@@ -874,6 +896,7 @@ extension ChatTurnData: Codable {
         case terminalStopReason
         case injectedContextPrefix
         case toolCallDurations, thinkingDuration
+        case toolCallLogs
         case anthropicThinkingBlocks
     }
 
@@ -902,6 +925,8 @@ extension ChatTurnData: Codable {
         self.injectedContextPrefix = try? c.decodeIfPresent(String.self, forKey: .injectedContextPrefix)
         self.toolCallDurations =
             (try? c.decodeIfPresent([String: TimeInterval].self, forKey: .toolCallDurations)) ?? [:]
+        self.toolCallLogs =
+            (try? c.decodeIfPresent([String: SubagentRunLog].self, forKey: .toolCallLogs)) ?? [:]
         self.thinkingDuration = try? c.decodeIfPresent(TimeInterval.self, forKey: .thinkingDuration)
         self.anthropicThinkingBlocks =
             (try? c.decodeIfPresent([JSONValue].self, forKey: .anthropicThinkingBlocks)) ?? []
@@ -928,6 +953,7 @@ extension ChatTurnData: Codable {
         try c.encodeIfPresent(terminalStopReason, forKey: .terminalStopReason)
         try c.encodeIfPresent(injectedContextPrefix, forKey: .injectedContextPrefix)
         if !toolCallDurations.isEmpty { try c.encode(toolCallDurations, forKey: .toolCallDurations) }
+        if !toolCallLogs.isEmpty { try c.encode(toolCallLogs, forKey: .toolCallLogs) }
         try c.encodeIfPresent(thinkingDuration, forKey: .thinkingDuration)
         if !anthropicThinkingBlocks.isEmpty { try c.encode(anthropicThinkingBlocks, forKey: .anthropicThinkingBlocks) }
     }
