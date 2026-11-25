@@ -1,0 +1,201 @@
+//
+//  SetupChecker.swift
+//  osaurus
+//
+//  One readiness check for agents: "can this run the way it is
+//  configured, on this Mac?" It looks only at machine-local things a
+//  template can name but not grant: a working folder this Mac cannot read,
+//  a model that is not installed, a
+//  system permission the OS has not given, an MCP server or plugin that is
+//  missing.
+//
+//  Agents are checked before spawn (`SpawnAgentTool.setupRefusal`). Pure core
+//  (`check(_:environment:)`) so tests need no live services; the
+//  `check(_:)` convenience wires the real ones.
+//
+//  Intel (W-subagents stage 4, upstream #3172): same report types and checks
+//  as upstream minus the knowledge-grant check and the agent skill allow-list (Intel's
+//  `AgentSettings` has neither). Intel is
+//  not App-Sandboxed, so the working-folder check asks whether the path is a
+//  readable directory instead of resolving a security-scoped bookmark. The
+//  setup wizard and the import review that also consume the report stay
+//  unported (`W-agent-templates`).
+//
+
+import Foundation
+
+public struct SetupItem: Identifiable, Equatable, Sendable {
+    public enum Severity: Sendable {
+        /// The agent cannot do what it was configured for until fixed.
+        case blocking
+        /// Worth confirming, but the agent runs without it.
+        case advisory
+    }
+
+    public let kind: TemplateRequirement.Kind
+    public let severity: Severity
+    /// Short label, e.g. "Working folder".
+    public let title: String
+    /// What is wrong and what fixes it.
+    public let detail: String
+    /// The value involved (path, model id, permission raw value, tool names).
+    public let value: String
+
+    public var id: String { "\(kind.rawValue):\(value)" }
+    public var isBlocking: Bool { severity == .blocking }
+}
+
+public struct SetupReport: Equatable, Sendable {
+    /// The agent checked.
+    public let subjectId: UUID
+    public let items: [SetupItem]
+
+    public init(subjectId: UUID, items: [SetupItem]) {
+        self.subjectId = subjectId
+        self.items = items
+    }
+
+    public var isClean: Bool { items.isEmpty }
+    public var blocking: [SetupItem] { items.filter(\.isBlocking) }
+    public var hasBlockers: Bool { !blocking.isEmpty }
+
+    /// One-line summary for tool envelopes and toasts.
+    public var summary: String {
+        items.map { "\($0.title): \($0.detail)" }.joined(separator: " ")
+    }
+}
+
+public enum SetupChecker {
+
+    /// Everything the check reads from the machine, injectable for tests.
+    struct Environment {
+        var registeredToolNames: Set<String>
+        var modelCatalog: ConfigModelReference.Catalog
+        var isPermissionGranted: (SystemPermission) -> Bool
+        /// Intel: true when `path` is a readable directory (no bookmarks here).
+        var folderReadable: (String) -> Bool
+        /// Tools per MCP server / plugin registered here.
+        var toolGroups: [PortableToolGroup: [String]] = [:]
+        /// The MCP servers / plugins the named source template turns on.
+        var templateToolGroups: (String) -> [PortableToolGroup] = { _ in [] }
+
+        @MainActor
+        static func live() -> Environment {
+            return Environment(
+                registeredToolNames: Set(ToolRegistry.shared.listTools().map(\.name)),
+                modelCatalog: ConfigModelReference.liveCatalog(),
+                // Cached: a live Automation probe can itself trigger a system prompt.
+                isPermissionGranted: { SystemPermissionService.shared.cachedIsGranted($0) },
+                folderReadable: { path in
+                    var isDirectory: ObjCBool = false
+                    let expanded = (path as NSString).expandingTildeInPath
+                    return FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory)
+                        && isDirectory.boolValue
+                        && FileManager.default.isReadableFile(atPath: expanded)
+                },
+                toolGroups: ToolRegistry.shared.portableToolGroups(),
+                templateToolGroups: { TemplateStore.shared.template(named: $0, kind: .agent)?.toolGroups ?? [] }
+            )
+        }
+    }
+
+    @MainActor
+    public static func check(_ agent: Agent) -> SetupReport {
+        check(agent, environment: .live())
+    }
+
+    static func check(_ agent: Agent, environment env: Environment) -> SetupReport {
+        var items: [SetupItem] = []
+
+        // Working folder: a path this Mac cannot read is the "orchestrator
+        // said it has folder access but it loops forever" case.
+        if let path = agent.workingFolderPath, !path.isEmpty, !env.folderReadable(path) {
+            items.append(
+                SetupItem(
+                    kind: .workingFolder, severity: .blocking,
+                    title: L("Working Folder"),
+                    detail: L(
+                        "The agent points at \(path) but Osaurus has no access to it. Pick the folder to grant access."
+                    ),
+                    value: path))
+        }
+
+        // Model: pinned to something this Mac cannot route.
+        if let model = agent.defaultModel?.trimmingCharacters(in: .whitespacesAndNewlines), !model.isEmpty {
+            if case .invalid = ConfigModelReference.resolve(model, catalog: env.modelCatalog) {
+                items.append(
+                    SetupItem(
+                        kind: .model, severity: .blocking,
+                        title: L("Model"),
+                        detail: L(
+                            "\(model) is not installed or its provider is not connected. Install it or choose another model."
+                        ),
+                        value: model))
+            }
+        }
+
+        // System permissions the runtime gate will refuse on first call.
+        if agent.settings.computerUseEnabled, !env.isPermissionGranted(.accessibility) {
+            items.append(
+                SetupItem(
+                    kind: .systemPermission, severity: .blocking,
+                    title: L("Accessibility"),
+                    detail: L("Computer Use needs the Accessibility permission. Grant it in System Settings."),
+                    value: SystemPermission.accessibility.rawValue))
+        }
+        if agent.settings.appleScriptEnabled, !env.isPermissionGranted(.automation) {
+            items.append(
+                SetupItem(
+                    kind: .systemPermission, severity: .advisory,
+                    title: L("Automation"),
+                    detail: L("AppleScript will ask for Automation permission the first time it controls an app."),
+                    value: SystemPermission.automation.rawValue))
+        }
+
+        // Manual tool list naming tools no server or plugin here provides.
+        if agent.toolSelectionMode == .manual {
+            let missing = (agent.manualToolNames ?? []).filter { !env.registeredToolNames.contains($0) }
+            if !missing.isEmpty {
+                let joined = missing.sorted().joined(separator: ", ")
+                items.append(
+                    SetupItem(
+                        kind: .mcpServer, severity: .advisory,
+                        title: L("Tools"),
+                        detail: L(
+                            "Not available on this Mac: \(joined). Add the MCP server or plugin that provides them, or remove them from the agent."
+                        ),
+                        value: joined))
+            }
+        }
+
+        // MCP servers / plugins the source template turns on that this Mac
+        // does not have. They add no tool names to the agent, so the check
+        // above cannot see them.
+        if agent.toolSelectionMode == .manual, let source = agent.sourceTemplateName {
+            for group in env.templateToolGroups(source) where env.toolGroups[group] == nil {
+                switch group {
+                case .mcpServer(let name):
+                    items.append(
+                        SetupItem(
+                            kind: .mcpServer, severity: .advisory,
+                            title: L("MCP Server"),
+                            detail: L(
+                                "The \(source) template uses the \(name) MCP server, which is not set up on this Mac. Add it in MCP Servers to give the agent its tools."
+                            ),
+                            value: name))
+                case .plugin(let id):
+                    items.append(
+                        SetupItem(
+                            kind: .plugin, severity: .advisory,
+                            title: L("Plugin"),
+                            detail: L(
+                                "The \(source) template uses the \(id) plugin, which is not installed on this Mac. Install it in Plugins to give the agent its tools."
+                            ),
+                            value: id))
+                }
+            }
+        }
+
+        return SetupReport(subjectId: agent.id, items: items)
+    }
+}

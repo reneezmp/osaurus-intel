@@ -559,6 +559,17 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         persist(agent)
         reload()
         bumpCapabilityRevision()
+        // Upstream (#3172) flags every new custom agent for first-run setup in
+        // its `registerInDefaultSpawnPool`, the one hook all creation paths
+        // call. `spawn_agent` refuses a flagged agent whose readiness check
+        // finds a blocker (`SpawnAgentTool.setupRefusal`). Intel never adds the
+        // agent to a spawn pool here: the Orchestrator's pool is Gate 4.
+        if !agent.isBuiltIn {
+            // Intel's manager is not main-actor isolated; the store is. A spawn
+            // in the same turn also hops to the main actor, behind this task.
+            let agentID = agent.id
+            Task { @MainActor in SetupStateStore.shared.markNeedsSetup(agentID) }
+        }
         // Notify subscribers (e.g. PluginManager) so plugins get an
         // initial config / tunnel-URL push for the new agent without
         // needing to wait for the next plugin force-reload.
@@ -651,6 +662,7 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         try? FileManager.default.removeItem(at: url)
         knowledgeGrants.removeValue(forKey: id)
         persistKnowledgeGrants()
+        await SetupStateStore.shared.clear(id)
         if activeAgentId == id { activeAgentId = Agent.defaultId }
         reload()
         bumpCapabilityRevision()

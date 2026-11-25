@@ -215,6 +215,21 @@ final class SpawnAgentTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
             agentID = resolved
         }
 
+        // First-run gate (upstream #3172). An agent the orchestrator (or a
+        // template) created with a folder it cannot read, a model that is not
+        // installed, or a permission the OS has not granted must not run and
+        // "loop forever" on a promise it cannot keep. Refuse with what the
+        // user has to fix, and surface it to them directly, since only they
+        // can fix it. Intel: only for an agent in the launcher's own pool, so
+        // a UUID outside it learns nothing (Gate 4 admission stays the kind's).
+        let launcher = SubagentScope.current().agentId
+        let inPool = await MainActor.run {
+            IntelSpawnAdmission.liveFacts(launcherID: launcher).pool.contains(agentID)
+        }
+        if inPool, let refusal = await Self.setupRefusal(agentID: agentID, tool: name) {
+            return refusal
+        }
+
         // The shared host owns the recursion guard, live feed, permission
         // verdict, compact-result normalization and telemetry; the kind owns
         // Gate 4 admission and the delegated run. The name lookup here only
@@ -228,6 +243,50 @@ final class SpawnAgentTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
             continueSessionId: continueSessionId
         )
         return await SubagentSession.runWithVisiblePreparation(kind, tool: name)
+    }
+
+    /// Non-nil when `agentID` is still flagged for first-run setup AND the
+    /// readiness check finds a blocking item. A clean check clears the flag
+    /// so this costs nothing on later spawns; advisory-only items let the
+    /// run proceed.
+    @MainActor
+    static func setupRefusal(agentID: UUID, tool: String) -> String? {
+        guard SetupStateStore.shared.needsSetup(agentID),
+            let agent = AgentManager.shared.agent(for: agentID)
+        else { return nil }
+        return setupRefusal(agent: agent, report: SetupChecker.check(agent), tool: tool)
+    }
+
+    /// Pure half of `setupRefusal` (the report is injected so tests need no
+    /// live services).
+    @MainActor
+    static func setupRefusal(agent: Agent, report: SetupReport, tool: String) -> String? {
+        if report.isClean {
+            SetupStateStore.shared.clear(agent.id)
+            return nil
+        }
+        guard report.hasBlockers else { return nil }
+        let blockers = report.blocking
+        _ = ToastManager.shared.action(
+            L("Setup needed for \(agent.name)"),
+            message: blockers.map(\.detail).joined(separator: " "),
+            action: .openSettings(tab: ManagementTab.agents.rawValue),
+            buttonTitle: L("Open Agent Settings")
+        )
+        return ToolEnvelope.failure(
+            kind: .unavailable,
+            message: "Agent `\(agent.name)` cannot run yet: "
+                + blockers.map { "\($0.title.lowercased()): \($0.detail)" }.joined(separator: " ")
+                + " Only the user can fix this, in Osaurus (Agents → \(agent.name)). Tell them what is "
+                + "needed and stop; do not retry until they confirm it is done.",
+            tool: tool,
+            retryable: false,
+            metadata: [
+                "needs_user_action": true,
+                "agent_id": agent.id.uuidString,
+                "blockers": blockers.map { ["kind": $0.kind.rawValue, "value": $0.value, "detail": $0.detail] },
+            ]
+        )
     }
 
     /// The agent identity (UUID) recorded on a persisted delegated worker

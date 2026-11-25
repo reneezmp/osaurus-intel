@@ -6701,6 +6701,34 @@
       "extractionState" : "manual",
       "shouldTranslate" : false
     },
+    "AppleScript will ask for Automation permission the first time it controls an app." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AppleScript fragt beim ersten Steuern einer App nach der Automations-Berechtigung."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AppleScript는 앱을 처음 제어할 때 자동화 권한을 요청해요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AppleScript запросит разрешение на автоматизацию при первом управлении приложением."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AppleScript 在首次控制某个 App 时会请求自动化权限。"
+          }
+        }
+      }
+    },
     "Applied to new outbound sessions." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12009,6 +12037,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "電腦操作"
+          }
+        }
+      }
+    },
+    "Computer Use needs the Accessibility permission. Grant it in System Settings." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Computer Use braucht die Bedienungshilfen-Berechtigung. Erteile sie in den Systemeinstellungen."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Computer Use에는 손쉬운 사용 권한이 필요해요. 시스템 설정에서 허용해 주세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Для Computer Use нужно разрешение «Универсальный доступ». Выдайте его в Системных настройках."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Computer Use 需要辅助功能权限。请在系统设置中授予。"
           }
         }
       }
@@ -24360,6 +24416,34 @@
         }
       }
     },
+    "MCP Server" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MCP-Server"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MCP 서버"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MCP-сервер"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MCP 服务器"
+          }
+        }
+      }
+    },
     "MCP Server Hub" : {
       "comment" : "The title of the MCP Server Hub panel.",
       "extractionState" : "stale",
@@ -29728,6 +29812,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打開 %@"
+          }
+        }
+      }
+    },
+    "Open Agent Settings" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent-Einstellungen öffnen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "에이전트 설정 열기"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыть настройки агента"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开智能体设置"
           }
         }
       }
@@ -41109,6 +41221,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "設定 → 隱私 → 導出資料。下載連結將透過電子郵件傳送。資料量大的帳戶會被拆分為多個批次 zip 檔案和一個索引 JSON：請匯入每個批次 zip 檔案，而不是索引。"
+          }
+        }
+      }
+    },
+    "Setup needed for %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einrichtung nötig für %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 설정이 필요해요"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Требуется настройка: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 需要完成设置"
           }
         }
       }
