@@ -591,7 +591,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         }
     }
 
-    private func encodeMessage(_ msg: ChatMessage) -> [String: Any] {
+    private func encodeMessage(_ msg: ChatMessage, reasoning: IntelReasoningWire? = nil) -> [String: Any] {
         var m: [String: Any] = ["role": msg.role]
         // Images (and audio / video) ride as an OpenAI parts array, as
         // upstream's `ChatMessage` encodes them; text-only stays a string.
@@ -617,6 +617,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         // adapter replays it, other wires drop it (see `streamChat`).
         let thinking = IntelAnthropicMessagesAdapter.wireThinkingBlocks(msg.anthropic_thinking_blocks)
         if !thinking.isEmpty { m["anthropic_thinking_blocks"] = thinking }
+        // Stage 5d rows 24 and 26 (upstream `RemoteReasoningPolicy.transformOutbound`):
+        // prior-turn reasoning is dropped by default, echoed as `reasoning_content`
+        // for DeepSeek, or folded into `<think>` content for MiniMax.
+        if let reasoning { m = reasoning.applyingOutbound(reasoning: msg.reasoning_content, to: m) }
         return m
     }
 
@@ -837,13 +841,27 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             providerType: endpoint.provider?.providerType,
             host: URL(string: endpoint.url)?.host ?? "",
             isOsaurusRouter: endpoint.isOsaurusRouter)
+        let host = URL(string: endpoint.url)?.host ?? ""
+        let wire = IntelReasoningWire.resolve(
+            providerType: endpoint.provider?.providerType, host: host, model: endpoint.modelId)
+        // Upstream `RemoteChatRequest`: `reasoning_effort`, plus a `reasoning`
+        // object on hosts that read it (OpenRouter and compatible servers; never
+        // Mistral, which 422s on it, nor openai.com).
+        func applyEffort(_ value: String) {
+            body["reasoning_effort"] = value
+            if wire.allowsReasoningObject { body["reasoning"] = ["effort": value] }
+        }
         if request.modelOptions?["disableThinking"]?.boolValue == true {
             Self.applyReasoningOff(offForm, into: &body)
+            // Stage 5d row 35: `none` is a real effort on Mistral and on the
+            // official OpenAI host (models whose table has it).
+            if effort == "none", let accepted = wire.chatEffort(effort) { applyEffort(accepted) }
             return
         }
         switch effort {
         case "instruct", "chat", "none", "no_think", "nothink", "off", "disabled", "false":
             Self.applyReasoningOff(offForm, into: &body)
+            if let accepted = wire.chatEffort(effort) { applyEffort(accepted) }
         case .some(let nonEmpty) where !nonEmpty.isEmpty:
             // Upstream #3115: a Gemini text model's effort goes only to a
             // route that forwards it, and only as one of its documented
@@ -852,9 +870,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 GeminiReasoningContract.wireAccepts(
                     effort: nonEmpty, modelId: endpoint.modelId,
                     providerType: endpoint.provider?.providerType,
-                    host: URL(string: endpoint.url)?.host ?? "")
+                    host: host)
             else { return }
-            body["reasoning_effort"] = nonEmpty
+            // DeepSeek accepts only its own effort set (upstream `acceptedEffort`).
+            guard let accepted = wire.chatEffort(nonEmpty) else { return }
+            applyEffort(accepted)
         case .some, .none:
             Self.applyReasoningOff(offForm, into: &body)
         }
@@ -1548,8 +1568,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     // full context. (M12 Gap 3 — engine-side agent loop, since
                     // the upstream RemoteProviderService tool path is amputated
                     // on Intel.)
+                    // Stage 5d rows 23-26: how this provider exchanges reasoning.
+                    let reasoningWire = IntelReasoningWire.resolve(
+                        providerType: endpoint.provider?.providerType,
+                        host: URL(string: endpoint.url)?.host ?? "", model: endpoint.modelId)
                     var wireMessages = Self.sanitizeToolSequence(
-                        request.messages.map { self.encodeMessage($0) }
+                        request.messages.map { self.encodeMessage($0, reasoning: reasoningWire) }
                     )
                     // A model that already refused images this session gets
                     // them flattened up front (IntelImageInputFallback).
@@ -1710,7 +1734,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         }
                         // Whether this round streamed any non-blank reasoning.
                         var roundHasReasoning = false
+                        // This round's reasoning text, for the tool-round echo
+                        // (DeepSeek `reasoning_content`, MiniMax `<think>`).
+                        var roundReasoning = ""
                         func noteReasoning(_ text: String) {
+                            roundReasoning += text
                             if !roundHasReasoning, text.contains(where: { !$0.isWhitespace }) {
                                 roundHasReasoning = true
                             }
@@ -2145,6 +2173,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         var roundFinishReason: String?
                         var announcedNames: Set<Int> = []
                         var slotResolver = IntelToolCallSlotResolver()
+                        // Row 24 (upstream `state.thinkSplitter`): MiniMax inlines
+                        // `<think>` in `content`; split it to the Think panel.
+                        var thinkSplitter: InlineThinkSplitter? =
+                            reasoningWire.inbound == .inlineThink ? InlineThinkSplitter() : nil
 
                         // Router billing (upstream `RemoteProviderService`):
                         // however this round's stream ends, a connected Router
@@ -2776,18 +2808,42 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         continuation.yield(StreamingAnthropicThinkingHint.encode(value))
                                     }
                                 }
-                                if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
-                                    totalChunks += 1
-                                    noteReasoning(reasoning)
-                                    continuation.yield(StreamingReasoningHint.encode(reasoning))
+                                var reasoningDelta = (delta["reasoning_content"] as? String) ?? ""
+                                var contentDelta = ""
+                                if let text = delta["content"] as? String {
+                                    contentDelta = text
+                                } else if let chunks = IntelReasoningWire.structuredContent(delta["content"]) {
+                                    // Row 23 (upstream `DeltaContent`): Mistral reasoning
+                                    // models stream `content` as thinking / text chunks.
+                                    reasoningDelta += chunks.thinking
+                                    contentDelta = chunks.visible
                                 }
-                                if let rawContent = delta["content"] as? String, !rawContent.isEmpty {
-                                    let content = stopSequences.apply(rawContent)
-                                    if !content.isEmpty {
+                                // Reasoning first (it precedes the answer), then the
+                                // answer, split when this provider inlines `<think>`.
+                                var segments: [InlineThinkSplitter.Segment] = []
+                                if !reasoningDelta.isEmpty { segments.append(.reasoning(reasoningDelta)) }
+                                if !contentDelta.isEmpty {
+                                    if thinkSplitter != nil {
+                                        segments += thinkSplitter!.process(contentDelta)
+                                    } else {
+                                        segments.append(.content(contentDelta))
+                                    }
+                                }
+                                for segment in segments {
+                                    switch segment {
+                                    case .reasoning(let reasoning):
+                                        if reasoning.isEmpty { continue }
                                         totalChunks += 1
-                                        assistantContent += content
-                                        responseText += content
-                                        continuation.yield(content)
+                                        noteReasoning(reasoning)
+                                        continuation.yield(StreamingReasoningHint.encode(reasoning))
+                                    case .content(let rawContent):
+                                        let content = stopSequences.apply(rawContent)
+                                        if !content.isEmpty {
+                                            totalChunks += 1
+                                            assistantContent += content
+                                            responseText += content
+                                            continuation.yield(content)
+                                        }
                                     }
                                 }
                                 // Accumulate streamed tool calls (M12 Gap 3).
@@ -2826,6 +2882,28 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         partials[idx] = partial
                                     }
                                 }
+                        }
+                        // Drain the think splitter's tail (a partial tag that never
+                        // completed, or an unclosed `<think>` block), upstream.
+                        if thinkSplitter != nil {
+                            for segment in thinkSplitter!.flush() {
+                                switch segment {
+                                case .reasoning(let text):
+                                    if !text.isEmpty {
+                                        totalChunks += 1
+                                        noteReasoning(text)
+                                        continuation.yield(StreamingReasoningHint.encode(text))
+                                    }
+                                case .content(let text):
+                                    let content = stopSequences.apply(text)
+                                    if !content.isEmpty {
+                                        totalChunks += 1
+                                        assistantContent += content
+                                        responseText += content
+                                        continuation.yield(content)
+                                    }
+                                }
+                            }
                         }
                         } catch let error as URLError
                             where IntelTransportRetry.isTransientStreamDrop(error) && mayRetryTransient()
@@ -3031,6 +3109,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         if !roundThinkingBlocks.isEmpty {
                             echoedAssistant["anthropic_thinking_blocks"] = roundThinkingBlocks
                         }
+                        // The round's own reasoning goes back with its tool calls
+                        // per the provider's outbound policy (DeepSeek's thinking
+                        // mode needs it on the follow-up request).
+                        echoedAssistant = reasoningWire.applyingOutbound(
+                            reasoning: roundReasoning.isEmpty ? nil : roundReasoning, to: echoedAssistant)
                         wireMessages.append(echoedAssistant)
 
                         // Execute each tool, surface the result card, and feed
