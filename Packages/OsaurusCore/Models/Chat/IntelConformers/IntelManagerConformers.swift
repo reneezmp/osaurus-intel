@@ -1049,6 +1049,27 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         return agent.settings.browserUseEnabled && !effectiveToolsDisabled(for: agentId)
     }
 
+    /// `spawn_agent` (upstream `spawnAgentAvailable`, W-subagents stage 3): the
+    /// launcher has at least one agent in its spawn pool (the Orchestrator's
+    /// pool is its Gate 4 allowlist; a custom agent needs its own Spawn switch)
+    /// and its tools are on. Availability of a target's model is judged
+    /// separately (`IntelSpawnAdmission`), at planning and again at execution.
+    func effectiveSpawnAgentAvailable(for agentId: UUID) -> Bool {
+        if effectiveToolsDisabled(for: agentId) { return false }
+        let config = SubagentConfigurationStore.snapshot()
+        if agentId == Agent.defaultId {
+            return !SubagentToolVisibility.effectiveSpawnableAgents(
+                isDefault: true, config: config, perAgentEnabled: false, perAgentTargets: []
+            ).isEmpty
+        }
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        return !SubagentToolVisibility.effectiveSpawnableAgents(
+            isDefault: false, config: config,
+            perAgentEnabled: agent.settings.spawnDelegationEnabled,
+            perAgentTargets: agent.settings.spawnableAgentIDs
+        ).isEmpty
+    }
+
     /// `applescript` / `mac_query` (upstream `appleScriptAvailable`): only a
     /// custom agent's own switch, and only while its tools are on.
     func effectiveAppleScriptEnabled(for agentId: UUID) -> Bool {

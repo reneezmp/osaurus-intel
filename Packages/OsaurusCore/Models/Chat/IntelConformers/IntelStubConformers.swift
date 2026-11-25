@@ -1332,6 +1332,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     static let videoToolName = "video"
     static let appleScriptToolNames: Set<String> = [AppleScriptTool.toolName, MacQueryTool.toolName]
     static let browserUseToolName = BrowserUseTool.toolName
+    static let spawnAgentToolName = SubagentCapabilityRegistry.spawnAgentToolName
 
     init() {
         loadPersistedPolicies()
@@ -1402,6 +1403,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             AppleScriptTool(), MacQueryTool(),
             // Browser Use (`W-browser-use`); the agent's switch is the grant.
             BrowserUseTool(),
+            // Agent delegation (`W-subagents` stage 3); the launcher's Spawn
+            // pool is the grant and the tool owns its approval.
+            SpawnAgentTool(),
         ]
         for tool in tools {
             toolsByName[tool.name] = tool
@@ -2070,6 +2074,22 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                     message: name == Self.imageToolName
                         ? "Image generation is off for this agent (Agents → Abilities → Images & Video)."
                         : "Video generation is off for this agent (Agents → Abilities → Images & Video).",
+                    tool: name
+                )
+            }
+            return nil
+        }
+        if name == Self.spawnAgentToolName {
+            // A delegated child is never a spawner, and any other caller needs
+            // a spawn pool (the grant is the pool, not the Tools-tab
+            // allowlist). Gate 4 admission and the permission are judged again
+            // by the kind at execution.
+            guard ChatExecutionContext.currentSessionSource != .delegation,
+                AgentManager.shared.effectiveSpawnAgentAvailable(for: agentId)
+            else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "Delegation is not available for this agent: it has no spawnable agents.",
                     tool: name
                 )
             }

@@ -38,6 +38,21 @@ public enum AgentDescriptionPolicy {
     /// A JSON string literal for `text`, so user-written names and purposes
     /// reach a model as quoted data (delimiters and control characters
     /// escaped), never as prompt structure.
+    /// Upstream's `routingJSON` (W-subagents stage 3): one agent as a JSON
+    /// object `{id, name, description?}` with user text quoted as data. Names
+    /// and descriptions never change authorization or execution policy.
+    public static func routingJSON(id: String, name: String, description: String) -> String {
+        var object: [String: String] = ["id": id, "name": name]
+        let text = normalized(description)
+        if !text.isEmpty { object["description"] = text }
+        guard
+            let data = try? JSONSerialization.data(
+                withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes]),
+            let json = String(data: data, encoding: .utf8)
+        else { return "{\"id\":\"\(id)\",\"name\":\"\(name)\"}" }
+        return json
+    }
+
     public static func quoted(_ text: String) -> String {
         guard
             let data = try? JSONSerialization.data(

@@ -574,11 +574,3 @@ stdin from `/dev/null`, the machine-wide `lockf` lock, the 300-second stall
 watchdog with one retry, and the identity mdat and live-folder checks. The
 porting agents' shared brief is `docs/AGENT_PORT_BRIEF.md`.
 
-**Live hit, 2026-11-25:** a full run listed about 20 files under
-`~/.osaurus/PluginSpecs/central/` changed inside the test window. The whole
-`central` folder had been replaced at 19:25:08 by the running upstream app
-(1.0.7), which refreshes its central plugin catalog that way. Tests cannot
-write there: `ToolsPaths.root()` (OsaurusRepository) follows
-`OSAURUS_TEST_ROOT` like `OsaurusPaths.root()`. A stale
-`central.staging-…` folder from 2026-05-22 is the app's, too.
-

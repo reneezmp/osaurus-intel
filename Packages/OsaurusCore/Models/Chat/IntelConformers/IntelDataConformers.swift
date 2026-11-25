@@ -2762,6 +2762,13 @@ final class SystemPromptComposer: @unchecked Sendable {
     static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Set<String>? = nil, frozenToolSpecs: [Tool]? = nil, frozenManifest: String? = nil, trace: Any? = nil, projectId: UUID? = nil, folderContext: FolderContext? = nil, offerFolderPrompt: Bool = false) async -> ComposedContext {
         let id = (agentId as? UUID) ?? Agent.defaultId
         await KnowledgeManager.shared.ensureLoaded()
+        // Target availability reads the provider model cache; warm it only for
+        // a launcher that can spawn (W-subagents stage 3).
+        if IntelSpawnAdmission.availableModelIDsOverrideForTests == nil,
+            await MainActor.run(body: { AgentManager.shared.effectiveSpawnAgentAvailable(for: id) })
+        {
+            await ModelPickerItemCache.shared.prewarmModelCache()
+        }
         // One main-actor read for every gate (upstream `AgentConfigSnapshot`),
         // so a settings edit mid-compose cannot mix two states.
         let snapshot = await MainActor.run {
@@ -2862,10 +2869,16 @@ final class SystemPromptComposer: @unchecked Sendable {
         allowDatabaseOpen: Bool
     ) -> IntelStaticCompose {
         let id = s.agentId
+        // `spawn_agent` is offered only with a runnable target, never to a
+        // delegated child (upstream's recursion guard).
+        let spawnVisible =
+            !s.spawnTargets.runnableAgentIDs.isEmpty
+            && ChatExecutionContext.currentSessionSource != .delegation
         let basePrompt = IntelOrchestratorPrompt.compose(
             agentID: id,
             editablePrompt: s.editablePrompt,
-            delegationTargets: s.delegationTargets
+            delegationTargets: s.delegationTargets,
+            spawnAgentAvailable: spawnVisible
         )
         let folder = folderContext
         let enabledToolNames = s.enabledToolNames
@@ -3027,6 +3040,11 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if name == ToolRegistry.videoToolName { return videoEnabled }
                 if ToolRegistry.appleScriptToolNames.contains(name) { return appleScriptEnabled }
                 if name == ToolRegistry.browserUseToolName { return browserUseEnabled }
+                if name == ToolRegistry.spawnAgentToolName { return spawnVisible }
+                // One delegation tool: the Orchestrator's one-turn
+                // `orchestrator_delegate` yields to `spawn_agent` when that is
+                // offered (its manual sheet is unaffected).
+                if name == IntelOrchestratorDelegationTool.toolName, spawnVisible { return false }
                 if disabledOptionalTools.contains(name) { return false }
                 return true
             }
@@ -3071,6 +3089,7 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if videoEnabled { allowed.insert(ToolRegistry.videoToolName) }
                 if appleScriptEnabled { allowed.formUnion(ToolRegistry.appleScriptToolNames) }
                 if browserUseEnabled { allowed.insert(ToolRegistry.browserUseToolName) }
+                if spawnVisible { allowed.insert(ToolRegistry.spawnAgentToolName) }
                 // Upstream: `share_artifact` is baseline; Charts and Memory
                 // Recall switches are their own grants.
                 allowed.insert("share_artifact")
@@ -3244,6 +3263,25 @@ final class SystemPromptComposer: @unchecked Sendable {
                 sections.append(
                     PromptSection(id: agentLoopSection.id, label: agentLoopSection.label, text: block, tint: .indigo))
             }
+        }
+        // Narrow `spawn_agent` to the runnable pool and list it (upstream's
+        // request-local schema + dynamic block); both read one snapshot.
+        if spawnVisible, resolvedNames.contains(ToolRegistry.spawnAgentToolName) {
+            let targets = s.spawnTargets.agents
+            tools = tools.map { spec in
+                spec.function.name == ToolRegistry.spawnAgentToolName
+                    ? SpawnAgentTool.constrainedSpec(
+                        spec, allowedAgentIDs: targets.map(\.id), allowedAgentNames: targets.map(\.name),
+                        agents: targets)
+                    : spec
+            }
+            let block =
+                "\n\n"
+                + SystemPromptTemplates.spawnGuidance(
+                    agents: targets, maxRemoteParallel: s.spawnBudgets.maxRemoteParallelSpawns,
+                    launcherHasFolder: folder != nil, targetsOnly: id == Agent.defaultId)
+            prompt += block
+            sections.append(PromptSection(id: "spawn", label: L("Subagents"), text: block, tint: .green))
         }
         if let manifestBlock {
             prompt += manifestBlock
@@ -3560,6 +3598,10 @@ struct IntelAgentConfigSnapshot: @unchecked Sendable {
     var videoEnabled: Bool
     var appleScriptEnabled: Bool
     var browserUseEnabled: Bool
+    /// `spawn_agent` targets the launcher can run right now (Gate 4 admission
+    /// judged per target; W-subagents stage 3). Empty hides the tool.
+    var spawnTargets: SpawnTargetAvailabilitySnapshot = .empty
+    var spawnBudgets: SubagentBudgets = SubagentBudgets()
     var renderChartEnabled: Bool
     var searchMemoryEnabled: Bool
     var disabledOptionalTools: Set<String>
@@ -3612,6 +3654,10 @@ struct IntelAgentConfigSnapshot: @unchecked Sendable {
             videoEnabled: manager.effectiveVideoEnabled(for: id),
             appleScriptEnabled: manager.effectiveAppleScriptEnabled(for: id),
             browserUseEnabled: manager.effectiveBrowserUseEnabled(for: id),
+            spawnTargets: manager.effectiveSpawnAgentAvailable(for: id)
+                ? IntelSpawnAdmission.resolveTargets(launcherID: id) : .empty,
+            spawnBudgets: SpawnFanOutPolicy.effectiveBudgets(
+                scope: SubagentScope(sessionId: "", toolCallId: "", agentId: id)),
             renderChartEnabled: settings?.renderChartEnabled ?? false,
             searchMemoryEnabled: settings?.searchMemoryEnabled ?? false,
             disabledOptionalTools: disabledOptional,
@@ -3639,6 +3685,7 @@ struct IntelAgentConfigSnapshot: @unchecked Sendable {
             disabledOptionalTools.sorted().joined(separator: ","),
             appleAppToolNames.sorted().joined(separator: ","),
             knowledgeGrants.map(\.name).sorted().joined(separator: ","),
+            spawnTargets.runnableAgentIDs.map(\.uuidString).sorted().joined(separator: ","),
         ].joined(separator: "|")
     }
 }

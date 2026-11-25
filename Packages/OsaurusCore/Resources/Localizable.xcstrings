@@ -23693,6 +23693,34 @@
         }
       }
     },
+    "Let this agent delegate a task to %@? It runs as a chat of that agent on %@ and may use your cloud account." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soll dieser Agent eine Aufgabe an %@ delegieren? Sie läuft als Chat dieses Agenten mit %@ und kann dein Cloud-Konto nutzen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要让此智能体把任务委派给 %@ 吗？任务会作为该智能体的聊天使用 %@ 运行，并可能使用你的云账户。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 에이전트가 %@에게 작업을 위임하도록 할까요? 해당 에이전트의 채팅으로 %@에서 실행되며 클라우드 계정을 사용할 수 있어요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разрешить этому агенту делегировать задачу агенту %@? Она выполнится как чат этого агента на модели %@ и может использовать ваш облачный аккаунт."
+          }
+        }
+      }
+    },
     "Lets Osaurus transact on your behalf - cloud models, provider load-balancing, and future routed services; requests spend credits. Keeping it on helps support Osaurus development - thank you." : {
       "localizations" : {
         "de" : {

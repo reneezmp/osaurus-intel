@@ -23,7 +23,8 @@ enum IntelOrchestratorPrompt {
     static func compose(
         agentID: UUID,
         editablePrompt: String,
-        delegationTargets: [DelegationTarget] = []
+        delegationTargets: [DelegationTarget] = [],
+        spawnAgentAvailable: Bool = false
     ) -> String {
         guard agentID == Agent.defaultId else { return editablePrompt }
 
@@ -35,7 +36,14 @@ enum IntelOrchestratorPrompt {
             Configuration is available only through `osaurus_config`: one declarative YAML document (actions `schema`, `export`, `plan`, `apply`). Call `schema` with `sections` when unsure of a key, and `export` to read current values. For a normal change call `apply` directly; reserve `plan` for big or destructive changes, and remember a plan is a dry run that changes NOTHING, so a change is done only when an `apply` result says applied. A separate one-tap approval card gates every apply, so never ask for confirmation in chat and never claim a change until an apply result confirms it; if you never called the tool, or the result was a dry run, error, refusal, or cancellation, say that instead. When apply rejects the document with a hint (unknown key, did-you-mean), fix the YAML and apply again in the same turn. "Set my model to X" is `default_agent: {model: X}`. `delegation.spawnable_agents` replaces the whole list of custom agents you may delegate to; admitting a cloud model for them is a Settings → Orchestrator choice only the user can make. Secrets go through the native credential sheet, never into YAML or messages. For questions about Osaurus itself (what a feature does, how to use it, whether this Intel Mac has it), call `osaurus_help` (`topics`, then `read`) and answer from the guide. When the user asks where a setting lives or how to change something `osaurus_config` cannot, call `osaurus_help` with `action: "find"` and quote the returned path; never guess menu paths or keyboard shortcuts. Do not invent tools, permissions, targets, models, or completed actions. When a gate denies a request, explain the real gate and let the user change it explicitly.
             """
 
-        if delegationTargets.isEmpty {
+        if spawnAgentAvailable {
+            // `spawn_agent` is offered (W-subagents stage 3): the one-turn,
+            // tool-free `orchestrator_delegate` paragraph and roster give way
+            // to it; the roster follows in the `spawn_agent` targets block.
+            role = role.replacingOccurrences(
+                of: "Delegation is available only through `orchestrator_delegate`. Delegate only to a custom agent and cloud model the user explicitly admitted in Orchestrator settings. Each child is fresh, standalone, tool-free, limited to one turn, bounded by input, token, output, and timeout limits, cancellable, and returned only as inline text. Never claim that a child chat, file, background task, nested delegation, or durable artifact was created.",
+                with: "Delegation is available only through `spawn_agent`. It reaches only a custom agent the user explicitly allowed in Orchestrator settings, on a cloud model the user admitted; the user's permission setting for that agent (Ask by default) is applied before every run, and a run uses their cloud account. A delegated agent runs as its own chat with its own tools and returns a short result plus a `session_id`. Never claim a delegation ran, or that a file or chat exists, unless `spawn_agent` returned it.")
+        } else if delegationTargets.isEmpty {
             role += """
 
 
