@@ -213,6 +213,13 @@ mdat and live-folder checks).
   gate for `spawn_agent`, declarative delegation budgets live.
 - **Provider slice 7** (5d rows 23–26, 35): Mistral, MiniMax, DeepSeek
   reasoning echo, inline tool calls, `none` effort; all need a live check.
+- **Subagents stage 5** (2026-11-25, UI): delegation settings, Delegations
+  list, run-log replay; Activity mirrors already covered. Combined suite 6,085.
+- **Paused 2026-11-25 (usage limit):** provider slices 8–9 were still running in
+  worktree `agent-ab20cd64bf11ccd0f` (branch `worktree-agent-ab20cd64bf11ccd0f`,
+  report `port_5d_slice89.md` in the session scratchpad); review, rebase and run
+  the combined suite before merging. Next: 5d slice 10, subagents stage 6, then
+  the big Classic items.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
