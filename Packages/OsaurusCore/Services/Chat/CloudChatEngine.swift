@@ -1797,12 +1797,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // Explicit sampling (the agent's saved generation
                         // settings, upstream #3233): only what this provider
                         // accepts, else a clear error before any HTTP call.
+                        // An API or plugin caller's own temperature, top_p,
+                        // penalties, stop and seed ride underneath (upstream
+                        // `buildChatRequest`, stage 5d row 21); the app's chat
+                        // has none, so it is unchanged.
+                        let samplingWire = IntelSamplingWire.wire(
+                            providerType: endpoint.provider?.providerType,
+                            host: URL(string: endpoint.url)?.host ?? "",
+                            usesResponsesWire: endpoint.usesResponsesWire)
                         try IntelSamplingWire.apply(
-                            request.explicitSampling,
-                            wire: IntelSamplingWire.wire(
-                                providerType: endpoint.provider?.providerType,
-                                host: URL(string: endpoint.url)?.host ?? "",
-                                usesResponsesWire: endpoint.usesResponsesWire),
+                            IntelSamplingWire.effectiveSampling(
+                                explicit: request.explicitSampling, caller: request.callerSampling,
+                                wire: samplingWire),
+                            wire: samplingWire,
                             rejectsSamplers: Self.rejectsSamplingTemperature(modelId: endpoint.modelId),
                             providerLabel: endpoint.providerLabel,
                             sendsResponsesSamplers: endpoint.usesResponsesWire && !endpoint.isCodex,
@@ -2064,6 +2071,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         }
 
                         var assistantContent = ""
+                        // Client-side `stop` truncation for providers that ignore
+                        // the field (upstream `applyStopSequences`, row 21).
+                        var stopSequences = IntelStopSequences(request: request)
                         // Anthropic thinking blocks this round, replayed on the
                         // echoed assistant message (`W-anthropic-thinking-replay`).
                         var roundThinkingBlocks: [[String: Any]] = []
@@ -2087,6 +2097,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             }
                         }
 
+                        // Text emissions of the Responses wire go through the stop
+                        // sequences (upstream `response.output_text.delta`); hints
+                        // and reasoning pass untouched. The stream is still read to
+                        // its end so usage and the completion stay intact.
+                        func stopFiltered(_ emission: String) -> String? {
+                            guard !stopSequences.isEmpty, !StreamingToolHint.isSentinel(emission),
+                                StreamingReasoningHint.decode(emission) == nil,
+                                StreamingStatsHint.decode(emission) == nil
+                            else { return emission }
+                            let kept = stopSequences.apply(emission)
+                            return kept.isEmpty ? nil : kept
+                        }
+
                         if endpoint.usesResponsesWire {
                             let allowedTools = Set(activeTools?.map { $0.function.name } ?? [])
                             var decoder = IntelCodexResponsesSSEDecoder(allowedToolNames: allowedTools)
@@ -2098,7 +2121,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 buffer.append(byte)
                                 if buffer.count >= 2_048 {
                                     wireProbe.appendResponseChunk(buffer)
-                                    for emission in try decoder.append(buffer) {
+                                    for raw in try decoder.append(buffer) {
+                                        guard let emission = stopFiltered(raw) else { continue }
                                         totalChunks += 1
                                         captureResponseText(emission)
                                         if let reasoning = StreamingReasoningHint.decode(emission) { noteReasoning(reasoning) }
@@ -2109,7 +2133,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             }
                             if !buffer.isEmpty {
                                 wireProbe.appendResponseChunk(buffer)
-                                for emission in try decoder.append(buffer) {
+                                for raw in try decoder.append(buffer) {
+                                    guard let emission = stopFiltered(raw) else { continue }
                                     totalChunks += 1
                                     captureResponseText(emission)
                                     if let reasoning = StreamingReasoningHint.decode(emission) { noteReasoning(reasoning) }
@@ -2129,7 +2154,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     "[CloudChatEngine] Responses usage in=\(usage.inputTokens) out=\(usage.outputTokens) cached=\(usage.cachedInputTokens ?? -1) round=\(round)"
                                 )
                             }
-                            for emission in finalized.emissions {
+                            for raw in finalized.emissions {
+                                guard let emission = stopFiltered(raw) else { continue }
                                 totalChunks += 1
                                 captureResponseText(emission)
                                 if let reasoning = StreamingReasoningHint.decode(emission) { noteReasoning(reasoning) }
@@ -2693,14 +2719,17 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     noteReasoning(reasoning)
                                     continuation.yield(StreamingReasoningHint.encode(reasoning))
                                 }
-                                if let content = delta["content"] as? String, !content.isEmpty {
-                                    totalChunks += 1
-                                    assistantContent += content
-                                    responseText += content
-                                    continuation.yield(content)
+                                if let rawContent = delta["content"] as? String, !rawContent.isEmpty {
+                                    let content = stopSequences.apply(rawContent)
+                                    if !content.isEmpty {
+                                        totalChunks += 1
+                                        assistantContent += content
+                                        responseText += content
+                                        continuation.yield(content)
+                                    }
                                 }
                                 // Accumulate streamed tool calls (M12 Gap 3).
-                                if let tcs = delta["tool_calls"] as? [[String: Any]] {
+                                if let tcs = delta["tool_calls"] as? [[String: Any]], !stopSequences.hit {
                                     for tc in tcs {
                                         let callId = (tc["id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
                                         let idx = slotResolver.resolve(

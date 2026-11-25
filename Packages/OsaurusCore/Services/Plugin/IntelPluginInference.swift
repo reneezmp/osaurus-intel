@@ -383,6 +383,9 @@ extension PluginHostContext {
             session_id: request.session_id
         )
         enriched.samplingParametersAreImplicit = request.temperature == nil
+        // Stage 5d row 21: the plugin's own sampling reaches a cloud provider
+        // (not the agent default `ctx.temperature`, which stays implicit).
+        enriched.callerSampling = request.samplingFromFields
         return EnrichedInference(request: enriched, tools: effectiveTools, recordedUserPrefix: recordedUserPrefix)
     }
 
@@ -428,6 +431,7 @@ extension PluginHostContext {
             session_id: request.session_id
         )
         copy.samplingParametersAreImplicit = request.samplingParametersAreImplicit
+        copy.callerSampling = request.callerSampling
         return copy
     }
 

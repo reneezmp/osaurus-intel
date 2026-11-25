@@ -157,6 +157,10 @@ struct ChatCompletionRequest: Codable, Sendable {
     var tools: [Tool]?
     var tool_choice: ToolChoiceOption?
     var session_id: String?
+    /// Deterministic-sampling seed (OpenAI v1.x; upstream `ChatCompletionRequest.seed`).
+    /// Decoded for API callers; it reaches a cloud provider through
+    /// `callerSampling` (`IntelSamplingWire.effectiveSampling`).
+    var seed: Int?
     var samplingParametersAreImplicit: Bool = false
     var modelOptions: [String: ModelOptionValue]? = nil
     /// Intel (`W-agent-generation-overrides`, upstream #3233): sampling the
@@ -165,6 +169,14 @@ struct ChatCompletionRequest: Codable, Sendable {
     /// provider, and only where it accepts them (`IntelSamplingWire`). Not
     /// encoded: API clients keep today's behavior.
     var explicitSampling: ChatExplicitSampling? = nil
+    /// Intel (stage 5d row 21, upstream `buildChatRequest`): the sampling an
+    /// API or plugin caller sent in the request (temperature, top_p,
+    /// penalties, stop, seed). Set at those entry points only
+    /// (`adoptCallerSampling`), so the app's chat is unchanged; the engine
+    /// merges it under `explicitSampling` and drops what the wire cannot
+    /// carry instead of failing the caller (`IntelSamplingWire.effectiveSampling`).
+    /// Not encoded.
+    var callerSampling: ChatExplicitSampling? = nil
     /// Intel (docs/SUBAGENTS_INTEL.md): a desktop subagent's model step. The
     /// engine ends the stream at the first round that proposes tool calls,
     /// yielding them as one `StreamingToolHint.encodeProposed` sentinel,
@@ -227,6 +239,7 @@ struct ChatCompletionRequest: Codable, Sendable {
         case model, messages, stream, temperature, max_tokens, top_p
         case stream_options, frequency_penalty, presence_penalty, stop, n
         case tools, tool_choice, session_id
+        case seed
     }
 
     /// Decoded only (upstream): the phone's fields never reach a provider.
@@ -254,6 +267,7 @@ extension ChatCompletionRequest {
         tools = try container.decodeIfPresent([Tool].self, forKey: .tools)
         tool_choice = try container.decodeIfPresent(ToolChoiceOption.self, forKey: .tool_choice)
         session_id = try container.decodeIfPresent(String.self, forKey: .session_id)
+        seed = try container.decodeIfPresent(Int.self, forKey: .seed)
         let osaurus = try decoder.container(keyedBy: OsaurusCodingKeys.self)
         osaurus_session_id = try osaurus.decodeIfPresent(String.self, forKey: .osaurus_session_id)
         osaurus_create_session = try osaurus.decodeIfPresent(Bool.self, forKey: .osaurus_create_session)

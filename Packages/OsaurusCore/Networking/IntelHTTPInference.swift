@@ -77,6 +77,9 @@ enum IntelHTTPInference {
         var request = request
         request.stopAtToolCalls = true
         request.reportsUsage = true
+        // Stage 5d row 21: the client's temperature, top_p, penalties, stop and
+        // seed reach a cloud provider (upstream `buildChatRequest`).
+        request.adoptCallerSampling()
         return request
     }
 

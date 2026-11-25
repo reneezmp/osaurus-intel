@@ -115,6 +115,46 @@ enum IntelSamplingWire {
         return names
     }
 
+    /// The sampling to send: the turn's explicit sampling (agent settings, hard
+    /// controls) over what an API or plugin caller put in its request (upstream
+    /// `buildChatRequest` forwards the caller's temperature, top_p, penalties,
+    /// stop and seed). Caller values are soft, as upstream: a wire that cannot
+    /// carry one (Anthropic and Gemini have no penalties, Anthropic and the
+    /// Responses wires no seed, Responses no `stop`) drops it instead of
+    /// failing a client that sends OpenAI SDK defaults.
+    nonisolated static func effectiveSampling(
+        explicit: ChatExplicitSampling?, caller: ChatExplicitSampling?, wire: Wire
+    ) -> ChatExplicitSampling? {
+        guard var merged = caller, !merged.isEmpty else { return explicit }
+        switch wire {
+        case .chatCompletions:
+            break
+        case .anthropic:
+            merged.frequencyPenalty = nil
+            merged.presencePenalty = nil
+            merged.seed = nil
+        case .gemini:
+            merged.frequencyPenalty = nil
+            merged.presencePenalty = nil
+        case .responses:
+            merged.frequencyPenalty = nil
+            merged.presencePenalty = nil
+            merged.seed = nil
+            merged.stop = nil
+        }
+        guard let explicit else { return merged.isEmpty ? nil : merged }
+        merged.temperature = explicit.temperature ?? merged.temperature
+        merged.topP = explicit.topP ?? merged.topP
+        merged.topK = explicit.topK ?? merged.topK
+        merged.minP = explicit.minP ?? merged.minP
+        merged.repetitionPenalty = explicit.repetitionPenalty ?? merged.repetitionPenalty
+        merged.frequencyPenalty = explicit.frequencyPenalty ?? merged.frequencyPenalty
+        merged.presencePenalty = explicit.presencePenalty ?? merged.presencePenalty
+        merged.seed = explicit.seed ?? merged.seed
+        if let stop = explicit.stop, !stop.isEmpty { merged.stop = stop }
+        return merged.isEmpty ? nil : merged
+    }
+
     /// Add the explicit sampling this provider accepts to `body`, or throw
     /// `Unsupported` naming what it cannot represent.
     ///
@@ -166,5 +206,61 @@ enum IntelSamplingWire {
             if let value = effective.frequencyPenalty { body["frequency_penalty"] = value }
             if let value = effective.presencePenalty { body["presence_penalty"] = value }
         }
+    }
+}
+
+extension ChatCompletionRequest {
+    /// What an API or plugin caller asked for in the request body (nil when
+    /// it sent none of these).
+    var samplingFromFields: ChatExplicitSampling? {
+        var sampling = ChatExplicitSampling()
+        sampling.temperature = temperature
+        sampling.topP = top_p
+        sampling.frequencyPenalty = frequency_penalty
+        sampling.presencePenalty = presence_penalty
+        sampling.seed = seed
+        sampling.stop = stop?.filter { !$0.isEmpty }
+        return sampling.isEmpty ? nil : sampling
+    }
+
+    /// Mark the request's own sampling fields as a caller's. Called only at
+    /// the API and plugin entry points; the app's chat never calls it, so its
+    /// behaviour (explicit sampling only) is unchanged.
+    mutating func adoptCallerSampling() {
+        callerSampling = samplingFromFields
+    }
+}
+
+/// Client-side stop-sequence truncation (upstream `applyStopSequences`):
+/// providers and compatible servers that ignore `stop` still end the reply at
+/// the first sequence found in a streamed delta. Like upstream it matches per
+/// delta, and checks the sequences in the order given.
+struct IntelStopSequences {
+    private let sequences: [String]
+    private(set) var hit = false
+
+    init(_ sequences: [String]) {
+        var seen = Set<String>()
+        self.sequences = sequences.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    init(request: ChatCompletionRequest) {
+        self.init((request.stop ?? []) + (request.explicitSampling?.stop ?? []))
+    }
+
+    var isEmpty: Bool { sequences.isEmpty }
+
+    /// The delta with everything from the first stop sequence removed; once a
+    /// sequence was hit, later text is dropped.
+    mutating func apply(_ text: String) -> String {
+        guard !sequences.isEmpty else { return text }
+        if hit { return "" }
+        for sequence in sequences {
+            if let range = text.range(of: sequence) {
+                hit = true
+                return String(text[..<range.lowerBound])
+            }
+        }
+        return text
     }
 }
