@@ -3664,3 +3664,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Create an agent from a template that needs setup and try to delegate to it: `spawn_agent` refuses and says the setup isn't finished.
 - [ ] Through the Orchestrator, set a delegation budget (for example a lower max turns) and approve it: the next delegated run respects it.
 - [ ] Creating a new agent through the Orchestrator doesn't make it delegable on its own; it still has to be allowed in Settings → Orchestrator.
+
+## Provider slice 7: local and compatible endpoints (2026-11-25)
+
+`W-cov-reaudit` 5d (`COV_REAUDIT_STAGE5D_PROVIDER.md` rows 23–26, 35). Not in candidate 69. Each needs that provider; skip the ones you don't use.
+
+- [ ] DeepSeek with thinking on: a multi-turn tool chat keeps working after the first tool call (no 400 about `reasoning_content`).
+- [ ] MiniMax: thinking appears in the thinking block, not in the answer text.
+- [ ] Mistral: replies with images or structured content show normally.
+- [ ] A local model that writes tool calls inline in its text (for example some Qwen or Hermes builds on LM Studio or llama.cpp): the call runs as a tool call instead of appearing as raw text.
+- [ ] Setting reasoning effort to None on a model that supports it gives a fast reply with no thinking block, and no provider error.

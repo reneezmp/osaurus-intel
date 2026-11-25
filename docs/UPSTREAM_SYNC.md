@@ -211,6 +211,8 @@ mdat and live-folder checks).
   outside the task's area are read.
 - **Subagents stage 4** (2026-11-25): `osaurus_inspect`, template setup
   gate for `spawn_agent`, declarative delegation budgets live.
+- **Provider slice 7** (5d rows 23–26, 35): Mistral, MiniMax, DeepSeek
+  reasoning echo, inline tool calls, `none` effort; all need a live check.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
