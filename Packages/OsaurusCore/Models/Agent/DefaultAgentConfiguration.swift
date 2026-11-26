@@ -32,6 +32,14 @@ public struct DefaultAgentConfiguration: Codable, Equatable, Sendable {
     /// apart from the agent the foreground window is browsing, so opening a
     /// custom agent's chat never re-targets the next new chat.
     public var newChatAgentId: UUID?
+    /// Claude Code behaviour when the Orchestrator runs on that harness
+    /// (upstream #3175 `DefaultAgentConfiguration.claudeCode`). Nil = safe
+    /// read-only defaults.
+    public var claudeCode: ClaudeCodeAgentConfig?
+    /// Which loop runs the Orchestrator's chats. Nil = the built-in loop.
+    /// Encoded only when set, so a file written by this build stays readable
+    /// by the previous one.
+    public var runtime: AgentRuntime?
 
     public init(
         displayName: String? = nil,
@@ -40,7 +48,9 @@ public struct DefaultAgentConfiguration: Codable, Equatable, Sendable {
         temperature: Float? = nil,
         maxTokens: Int? = nil,
         delegation: OrchestratorDelegationConfiguration = .default,
-        newChatAgentId: UUID? = nil
+        newChatAgentId: UUID? = nil,
+        claudeCode: ClaudeCodeAgentConfig? = nil,
+        runtime: AgentRuntime? = nil
     ) {
         self.displayName = displayName
         self.systemPrompt = systemPrompt
@@ -49,6 +59,8 @@ public struct DefaultAgentConfiguration: Codable, Equatable, Sendable {
         self.maxTokens = maxTokens
         self.delegation = delegation
         self.newChatAgentId = newChatAgentId
+        self.claudeCode = claudeCode
+        self.runtime = runtime
     }
 
     /// A trimmed custom name, or nil when the built-in name should render.
@@ -68,6 +80,8 @@ public struct DefaultAgentConfiguration: Codable, Equatable, Sendable {
         case maxTokens
         case delegation
         case newChatAgentId
+        case claudeCode
+        case runtime
     }
 
     /// Older Gate 1 files have no delegation field. Decode them as a
@@ -85,5 +99,9 @@ public struct DefaultAgentConfiguration: Codable, Equatable, Sendable {
             forKey: .delegation
         ) ?? .default
         newChatAgentId = try container.decodeIfPresent(UUID.self, forKey: .newChatAgentId)
+        claudeCode = try container.decodeIfPresent(ClaudeCodeAgentConfig.self, forKey: .claudeCode)
+        // Upstream decodes the runtime with `try?`: an id this build can't
+        // read must not make the whole file look corrupt.
+        runtime = try? container.decodeIfPresent(AgentRuntime.self, forKey: .runtime)
     }
 }

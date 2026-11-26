@@ -99,12 +99,11 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     public var agentDeviceScope: String?
     /// Controls the agent's ability to run arbitrary commands in the sandbox
     public var autonomousExec: AutonomousExecConfig?
-    /// Behavior of the Claude Code subprocess backend when this agent uses a
-    /// `claude-code/…` model. `nil` uses the safe read-only defaults.
+    /// Behavior of the Claude Code harness when this agent runs on it
+    /// (`runtime`). `nil` uses the safe read-only defaults.
     public var claudeCode: ClaudeCodeAgentConfig?
     /// Which loop runs this agent's chats. Nil = Osaurus's built-in loop.
-    /// Persisted shape only until the harness session lands (#3175,
-    /// `W-harness-runtimes` stage 3); nothing reads it yet.
+    /// Read by `AgentManager.effectiveRuntime(for:)` (#3175).
     public var runtime: AgentRuntime?
     /// Per-agent plugin instruction overrides keyed by plugin ID
     public var pluginInstructions: [String: String]?
@@ -445,9 +444,9 @@ extension Agent {
 
 // MARK: - Claude Code Configuration
 
-/// Per-agent behavior for the Claude Code subprocess backend.
+/// Per-agent behavior for the Claude Code harness.
 ///
-/// Only consulted while the selected model is a `claude-code/…` model.
+/// Only consulted while the agent's runtime is a Claude Code harness.
 public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable, Hashable {
     /// Whether Claude Code runs its own tool loop or only generates text.
     public var mode: ClaudeCodeMode
@@ -460,9 +459,8 @@ public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable, Hashable {
     /// Nested under `allowOsaurusTools`: permit configuration-changing tools.
     public var allowOsaurusConfigWrites: Bool
     /// `--model` value for the Claude Code runtime: an alias (`sonnet`, `opus`,
-    /// `fable`, `haiku`) or a full model id. Nil = `sonnet` (#3175). Unused
-    /// until the harness session lands; the `claude-code/<alias>` picker ids
-    /// still choose the model.
+    /// `fable`, `haiku`) or a full model id. Nil = `sonnet` (#3175). The old
+    /// `claude-code/<alias>` picker ids migrate into this field.
     public var model: String?
     /// `--effort` value (`ClaudeCodeEffort`). Nil = the CLI's per-model default.
     public var effort: String?

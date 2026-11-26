@@ -9,14 +9,14 @@ import Testing
 
 @Suite("Intel Claude Code integration")
 struct IntelClaudeCodeTests {
-    @Test func pickerIdsRouteOnlyClaudeAliases() {
+    /// The picker rows are gone (Claude Code is a harness runtime), but the
+    /// ids still parse: the launch migration turns them into aliases.
+    @Test func legacyPickerIdsStillParseForTheMigration() {
         for model in ClaudeCodeModel.allCases {
             #expect(ClaudeCodeModel.fromPickerId(model.pickerId) == model)
-            #expect(IntelClaudeCodeService.handles(model.pickerId))
         }
-        #expect(!IntelClaudeCodeService.handles(nil))
-        #expect(!IntelClaudeCodeService.handles("default"))
-        #expect(!IntelClaudeCodeService.handles("claude-code/unknown"))
+        #expect(ClaudeCodeModel.fromPickerId("default") == nil)
+        #expect(ClaudeCodeModel.fromPickerId("claude-code/unknown") == nil)
     }
 
     @Test func textOnlyArgumentsDisableToolsAndPreserveStreaming() throws {
@@ -116,34 +116,6 @@ struct IntelClaudeCodeTests {
         #expect(ClaudeCodeConfiguration.permissionDeniedMessage(tool: "Write").contains("Allow file changes"))
     }
 
-    @Test func nonStreamingCompatibilityKeepsOnlyVisibleText() {
-        #expect(IntelClaudeCodeService.visibleTextDelta("answer") == "answer")
-        #expect(IntelClaudeCodeService.visibleTextDelta(StreamingToolHint.encode("Read")) == nil)
-        #expect(IntelClaudeCodeService.visibleTextDelta(StreamingReasoningHint.encode("thinking")) == nil)
-        #expect(IntelClaudeCodeService.visibleTextDelta(
-            StreamingStatsHint.encode(tokenCount: 4, tokensPerSecond: 2)
-        ) == nil)
-    }
-
-    @Test func promptRenderingHoistsSystemAndLabelsHistory() {
-        let rendered = IntelClaudeCodeService.renderPrompt(messages: [
-            ChatMessage(role: "system", content: "Be brief."),
-            ChatMessage(role: "user", content: "one"),
-            ChatMessage(role: "assistant", content: "two"),
-            ChatMessage(role: "user", content: "three"),
-        ])
-        #expect(rendered.systemPrompt == "Be brief.")
-        #expect(rendered.prompt == "User: one\n\nAssistant: two\n\nUser: three")
-    }
-
-    @Test func singleUserPromptIsBare() {
-        let rendered = IntelClaudeCodeService.renderPrompt(messages: [
-            ChatMessage(role: "user", content: "hello")
-        ])
-        #expect(rendered.prompt == "hello")
-        #expect(rendered.systemPrompt == nil)
-    }
-
     @Test func authStatusShapesDecodeWithoutCredentialAccess() throws {
         let signedIn = try #require(ClaudeCodeConfiguration.decodeAuthStatus(Data(
             #"{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max","newField":1}"#.utf8
@@ -164,15 +136,6 @@ struct IntelClaudeCodeTests {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         #expect(entries.contains("\(home)/.local/bin"))
         #expect(entries.contains("/usr/local/bin"))
-    }
-
-    @Test func warningRateStatusDoesNotAbortTurn() {
-        #expect(IntelClaudeCodeService.rateLimitError(status: "allowed", utilization: 0.1) == nil)
-        #expect(IntelClaudeCodeService.rateLimitError(status: "allowed_warning", utilization: 0.82) == nil)
-        #expect(
-            IntelClaudeCodeService.rateLimitError(status: "rejected", utilization: 0.82)
-                == .rateLimited(detail: "Claude Code reported rejected at 82% utilization.")
-        )
     }
 
     @Test func subprocessEnvironmentExcludesCredentialAndRoutingOverrides() {

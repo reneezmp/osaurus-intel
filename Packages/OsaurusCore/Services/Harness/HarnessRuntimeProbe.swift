@@ -46,7 +46,9 @@ enum HarnessControlCommand {
         _ command: String,
         overlay: [String: String] = [:],
         removing: Set<String> = HarnessEnvironment.alwaysRemoved,
-        inherited: [String: String] = ProcessInfo.processInfo.environment
+        // Owner decision 2026-11-26: the same narrow environment a chat gets,
+        // so the Test button reports what a chat will see.
+        inherited: [String: String] = HarnessProcess.defaultInheritedEnvironment()
     ) async -> Resolved? {
         let entries = await LoginShellPath.shared.entries()
         return resolve(
@@ -82,7 +84,7 @@ enum HarnessControlCommand {
     }
 
     /// The PATH searched for `command`, for "not found" messages.
-    static func searchedPath(inherited: [String: String] = ProcessInfo.processInfo.environment) async -> String {
+    static func searchedPath(inherited: [String: String] = HarnessProcess.defaultInheritedEnvironment()) async -> String {
         let entries = await LoginShellPath.shared.entries()
         return ExecutableLocator.childPath(inherited: inherited, loginShellEntries: entries)
     }

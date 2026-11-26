@@ -257,11 +257,12 @@ final class HarnessProcess: @unchecked Sendable {
 
     /// The environment a harness child inherits before the spec's own overlay.
     ///
-    /// Intel keeps its narrow `ClaudeCodeConfiguration.subprocessEnvironment`
-    /// here for now (PATH, HOME, USER, LOGNAME, TMPDIR, locale), where upstream
-    /// inherits the whole app environment. This is the single place that
-    /// choice lives; the owner decides before stage 4 (see
-    /// `docs/W_HARNESS_RUNTIMES_PLAN.md`).
+    /// Intel uses its narrow `ClaudeCodeConfiguration.subprocessEnvironment`
+    /// (PATH, HOME, USER, LOGNAME, TMPDIR, LANG, LC_ALL, LC_CTYPE), where
+    /// upstream inherits the whole app environment. Owner decision 2026-11-26:
+    /// narrow, plus only what each tool needs (the runtime's own `environment`
+    /// overlay and the `OSAURUS_*` contract). This is the single place that
+    /// choice lives (see `docs/W_HARNESS_RUNTIMES_PLAN.md`).
     static let defaultInheritedEnvironment: @Sendable () -> [String: String] = {
         ClaudeCodeConfiguration.subprocessEnvironment()
     }

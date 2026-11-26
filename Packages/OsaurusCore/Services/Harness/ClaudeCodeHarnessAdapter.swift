@@ -276,10 +276,13 @@ final class ClaudeCodeHarnessCodec: HarnessCodec {
 /// `<config dir>/projects/<project>/<id>.jsonl`, under whichever project
 /// directory the session started in.
 enum ClaudeCodeSessionLocator {
+    /// Intel: only the runtime's own environment counts. Upstream also reads
+    /// the app's `CLAUDE_CONFIG_DIR`, because its child inherits the app
+    /// environment; Intel's child gets the narrow one (owner decision
+    /// 2026-11-26), so the app's value never reaches `claude` and must not
+    /// steer the resume lookup either.
     static func configDirectory(environment: [String: String]) -> URL {
-        let override =
-            environment["CLAUDE_CONFIG_DIR"]
-            ?? ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"]
+        let override = environment["CLAUDE_CONFIG_DIR"]
         if let override, !override.isEmpty {
             return URL(fileURLWithPath: ExecutableLocator.expandUserPath(override), isDirectory: true)
         }

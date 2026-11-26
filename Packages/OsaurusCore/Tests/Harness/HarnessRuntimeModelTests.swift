@@ -3,8 +3,8 @@
 //  osaurusTests
 //
 //  Persisted shapes (runtimes, per-agent runtime selection), the runtime
-//  store's seeding rules, and the move of `claude-code/*` model agents onto
-//  the Claude Code runtime (that migration lands with the session stage).
+//  store's seeding rules. (The move of `claude-code/*` model agents onto the
+//  Claude Code runtime is tested in HarnessAppIntegrationTests.)
 //
 
 import Foundation

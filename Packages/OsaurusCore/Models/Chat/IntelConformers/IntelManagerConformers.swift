@@ -147,6 +147,11 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
     private init() {
         reload()
         loadKnowledgeGrants()
+        // Not inline (upstream #3175): the migration's saves notify observers
+        // that read `AgentManager.shared`, which is still initializing here.
+        Task { @MainActor [weak self] in
+            self?.migrateClaudeCodeModelsToHarness()
+        }
         // The database layer edge-triggers from its own queue; copy the
         // payload into primitives before hopping to the main actor.
         NotificationCenter.default.addObserver(
@@ -617,12 +622,22 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
     /// Selected-agent Claude Code settings, with a safe fallback for agents
     /// saved before this configuration existed.
     func effectiveClaudeCodeConfig(for agentId: UUID) -> ClaudeCodeAgentConfig {
-        agent(for: agentId)?.claudeCode ?? .default
+        if agentId == Agent.defaultId {
+            return DefaultAgentConfigurationStore.load().claudeCode ?? .default
+        }
+        return agent(for: agentId)?.claudeCode ?? .default
     }
 
     /// Mutate and persist the complete agent record so unrelated per-agent
     /// settings survive an Agent Settings save.
     func updateClaudeCodeConfig(_ config: ClaudeCodeAgentConfig, for agentId: UUID) {
+        if agentId == Agent.defaultId {
+            var configuration = DefaultAgentConfigurationStore.load()
+            guard configuration.claudeCode != config else { return }
+            configuration.claudeCode = config
+            _ = updateDefaultAgentConfiguration(configuration)
+            return
+        }
         guard var agent = agent(for: agentId) else { return }
         agent.claudeCode = config
         update(agent)
@@ -1379,20 +1394,8 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
             // routes that forward the effort.
             var reasoningCapabilities: [String: ModelReasoningCapabilities] = [:]
             let codexMetadata = OpenAICodexOAuthService.lastModelMetadata
-            if ClaudeCodeConfiguration.isAvailable() {
-                let sourceId = UUID(uuidString: "C1A0DE00-C0DE-4000-8000-000000000001")!
-                for model in ClaudeCodeModel.allCases {
-                    out.append(
-                        ModelPickerItem(
-                            id: model.pickerId,
-                            displayName: model.displayName,
-                            source: .remote(providerName: "Claude Code", providerId: sourceId),
-                            description: "Uses your signed-in Claude Code CLI subscription"
-                        )
-                    )
-                    seen.insert(model.pickerId)
-                }
-            }
+            // Claude Code is no longer a model here: it is a harness runtime
+            // chosen per agent (upstream #3175), so no `claude-code/…` rows.
             let manager = RemoteProviderManager.shared
             let providers = manager.configuration.providers.filter { $0.enabled }
             for provider in providers {
@@ -1709,6 +1712,9 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         // Drop the session's file history and collect its now-unreferenced
         // snapshot blobs (upstream #2907 part A).
         Task { await FileChangeJournal.shared.purgeSession(id.uuidString) }
+        // A deleted chat's harness process (and its grant) go with it
+        // (upstream #3175).
+        Task { await HarnessSessionManager.shared.close(chatId: id) }
     }
     /// Delete every session owned by an agent (upstream #2355). Strict
     /// ownership match, unlike `sessions(for:)`: the Default agent's "show

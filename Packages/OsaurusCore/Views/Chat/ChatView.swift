@@ -296,7 +296,13 @@ final class ChatSession: ObservableObject {
     @Published var queuedSend: QueuedSend?
 
     // MARK: - Persistence Properties
-    @Published var sessionId: UUID?
+    @Published var sessionId: UUID? {
+        didSet {
+            // One harness process per open chat: the chat this session
+            // showed before is resumed on its next send (upstream #3175).
+            if let oldValue, oldValue != sessionId { closeHarnessSession(for: oldValue) }
+        }
+    }
     @Published var title: String = "New Chat"
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -333,7 +339,7 @@ final class ChatSession: ObservableObject {
     var pinned: Bool = false
 
     /// Tracks if session has unsaved content changes
-    private var isDirty: Bool = false
+    var isDirty: Bool = false
     /// See `stop(preservesCancelledMarker:)`; reset by the trim.
     private var stopPreservesCancelledMarker = true
 
@@ -1007,7 +1013,10 @@ final class ChatSession: ObservableObject {
     /// follow-up suggestions use it, so a selected image or video model is
     /// never sent to the chat engine.
     var auxiliaryChatModel: String? {
-        guard let model = selectedModel else { return nil }
+        // A harness agent has no built-in model: titles and follow-ups use the
+        // core model or nothing, never the picker's last selection (upstream
+        // #3175 `fallbackModel`).
+        guard !isHarnessAgentActive, let model = selectedModel else { return nil }
         return pickerItems.first(where: { $0.id == model })?.isMediaGeneration == true ? nil : model
     }
 
@@ -2138,7 +2147,8 @@ final class ChatSession: ObservableObject {
     /// popover and composer) unless no model is known, which opens the
     /// model-picking dialog.
     func compactConversation() {
-        guard !isStreaming, !compactionState.isRunning else { return }
+        // A harness keeps (and compacts) its own context (upstream #3175).
+        guard !isHarnessAgentActive, !isStreaming, !compactionState.isRunning else { return }
         guard IntelContextCompaction.effectiveModelIdentifier(fallback: selectedModel) != nil else {
             compactionState = .needsModelSelection
             showCompactionDialog = true
@@ -2784,7 +2794,7 @@ final class ChatSession: ObservableObject {
         var userContentIsHostAuthored = false
     }
 
-    private func isRunActive(_ runId: UUID) -> Bool {
+    func isRunActive(_ runId: UUID) -> Bool {
         activeRunId == runId && !Task.isCancelled
     }
 
@@ -2799,7 +2809,7 @@ final class ChatSession: ObservableObject {
     /// the cell shows nothing until the steady-state read is meaningful —
     /// avoids the prior "shows 12 tok/s for the first half-second then
     /// jumps to 60 tok/s" jitter users complained about.
-    private func refreshLiveRate(
+    func refreshLiveRate(
         rolling: inout RollingTokenRate,
         lastRefreshAt: inout Date,
         now: Date,
@@ -3615,6 +3625,10 @@ final class ChatSession: ObservableObject {
         let mediaInput =
             turns.last(where: { $0.role == .user }).map { (prompt: $0.content, attachments: $0.attachments) }
             ?? (prompt: trimmed, attachments: attachments)
+        // Upstream #3175: an agent on a harness runtime runs this turn in its
+        // own process. Resolved at send time so a mid-run runtime edit can't
+        // change the loop under a running turn.
+        let turnHarness = harnessSelection
 
         let runId = UUID()
         beginRun(
@@ -3674,6 +3688,24 @@ final class ChatSession: ObservableObject {
             // user-only while isStreaming is true and the table early-returns without assistant rows.
             rebuildVisibleBlocks()
 
+            // A harness agent's turn has its own history and loop; none of
+            // the built-in loop (or a media model left in the picker) applies (upstream #3175).
+            if let turnHarness {
+                // A restored chat may still be rebuilding its folder tree;
+                // the harness starts in that folder, so wait for it.
+                _ = await self.folderState.contextWaitingForRestore()
+                guard self.isRunActive(runId) else { return }
+                await self.runHarnessTurn(
+                    turnHarness,
+                    prompt: mediaInput.prompt,
+                    attachments: mediaInput.attachments,
+                    agentId: generationAgentId,
+                    folderRoot: self.folderState.context?.rootPath,
+                    into: assistantTurn,
+                    runId: runId
+                )
+                return
+            }
             if let media = turnMediaItem?.mediaModel {
                 if media.kind.isVideo {
                     await self.runVideoGeneration(
@@ -3705,7 +3737,7 @@ final class ChatSession: ObservableObject {
                 let chatCfg = ChatConfigurationStore.load()
                 // A saved agent reasoning default the selected model cannot
                 // honor stops the send with a clear message (upstream #3233).
-                if let model = selectedModel, !IntelClaudeCodeService.handles(model) {
+                if let model = selectedModel {
                     try turnGenerationControls.validateAgentReasoning(modelID: model)
                 }
 

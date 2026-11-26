@@ -2134,7 +2134,7 @@ extension FloatingInputCard {
 
     /// The agent saved a Thinking / effort choice this model cannot honor.
     private var reasoningSelectionNeedsChoice: Bool {
-        guard let model = selectedModel, !IntelClaudeCodeService.handles(model),
+        guard let model = selectedModel, agentManager.effectiveHarness(for: effectiveAgentId) == nil,
             let settings = agentManager.effectiveGenerationSettings(for: effectiveAgentId),
             settings.hasReasoningOverride
         else { return false }

@@ -11,6 +11,10 @@ import Foundation
 
 @MainActor
 enum HarnessTurnDriver {
+    /// Test seam: tests answer "is the local server up" without opening a
+    /// socket. The live value is a loopback TCP connect.
+    nonisolated(unsafe) static var serverProbe: @Sendable (Int) -> Bool = { HarnessServerProbe.isListening(port: $0) }
+
     /// Resolve how this chat's harness process should be started.
     ///
     /// - Parameter folderRoot: the chat's selected working folder, or nil for
@@ -35,7 +39,8 @@ enum HarnessTurnDriver {
         let manager = AgentManager.shared
         let systemPrompt = manager.effectiveSystemPrompt(for: agentId)
         let port = ServerConfigurationStore.load()?.port ?? 1337
-        let reachable = await Task.detached { HarnessServerProbe.isListening(port: port) }.value
+        let probe = Self.serverProbe
+        let reachable = await Task.detached { probe(port) }.value
 
         return HarnessLaunchContext(
             runtime: runtime,

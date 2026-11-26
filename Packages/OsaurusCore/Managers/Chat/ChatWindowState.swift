@@ -137,6 +137,7 @@ final class ChatWindowState: ObservableObject {
         selectedDiscoveredAgentProviderId = nil
         selectedRelayAgent = nil
         session.stop()
+        session.closeHarnessSession()
         session.onSessionChanged = nil
     }
 
@@ -1361,6 +1362,7 @@ final class ChatWindowState: ObservableObject {
             tabs.removeAll { $0.id == tab.id }
             let doomed = tab.session
             doomed.stop()
+            doomed.closeHarnessSession()
             doomed.onSessionChanged = nil
             doomed.windowState = nil
             return
@@ -1629,6 +1631,9 @@ final class ChatWindowState: ObservableObject {
         }
         if !closingSession.turns.isEmpty { closingSession.save() }
         closingSession.stop()
+        // Upstream #3175: the chat's harness process ends with its tab (a
+        // session adopted above keeps running, so it keeps its harness too).
+        closingSession.closeHarnessSession()
     }
 
     // MARK: Recently closed tabs (⇧⌘T)

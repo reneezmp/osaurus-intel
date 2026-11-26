@@ -407,7 +407,7 @@ struct ChatContentView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
-                        if session.hasAnyModel || session.isDiscoveringModels {
+                        if session.hasAnyModel || session.isDiscoveringModels || session.isHarnessAgentActive {
                             let _ = observedSession.turns.count
                             if observedSession.turns.isEmpty {
                                 emptyStateView
