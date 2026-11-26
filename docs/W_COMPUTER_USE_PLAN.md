@@ -2,9 +2,9 @@
 
 Backlog item `W-computer-use` (upstream Classic 0.25.x, 40 files, about 15k
 lines; see `INTEL_MISSING_FEATURES_APPENDIX.md`). Ported from
-`upstream/classic` only. Nothing in stages 1-3 can act on the real screen,
-mouse or keyboard: the native driver exists but nothing constructs it, and no
-tool, kind or UI is registered.
+`upstream/classic` only. Stages 1-3 cannot act on the real screen,
+mouse or keyboard. From stage 4 the tool `computer_use` is registered and can
+reach the native driver, but only under the gates listed in the stage 4 log.
 
 ## Owner policy (hard rules for every stage)
 
@@ -54,7 +54,7 @@ native implementation, perception, the loop, and the tool and kind.
 | 1 | Model and policy: `AgentAction`, `AgentView`, the `MacDriver` contract with `MockMacDriver`, `TargetResolver`, un-fenced `EffectClassifier`, `Gate` (`ComputerUseGating`, `HardwiredGate`) and `ComputerUseGate`; upstream tests for each | done |
 | 2 | Perception with fakes: `CloudVisionConsent`, `FrameScrubber` (Vision; fail-closed, see log), `VisionAttachment`, `CaptureRouter`, `ScreenContextSnapshot`, `AxResolvableSweep`, `ComputerUseRunMetrics`; router, consent, scrub, attachment and metrics tests | done |
 | 3 | Native driver, not yet reachable: `Accessibility`, `ElementCache`, `Screenshot` (ScreenCaptureKit 14+, `CGWindowListCreateImage` / `CGDisplayCreateImage` on 13), `InputController`, `BackgroundDriver`, `SkyLightBridge` (dlsym, nil-safe), `NativeMacDriver`, `AutomationSession`, `CaptureMode`; route, bounds, self-guard and open-folder tests over fakes | done |
-| 4 | `ComputerUseLoop`, `ComputerUseRunMetrics`, `AxResolvableSweep`, `ComputerUseTool`, `ComputerUseKind`; registry and `resolveTools` gates; loop tests on `MockMacDriver` and a scripted model step | planned |
+| 4 | `ComputerUseLoop`, `ComputerUseTool`, `ComputerUseKind` (metrics and sweep were already in from stage 2); registry, `resolveTools` and execution gates; loop tests on `MockMacDriver` and a scripted model step | done (reachable from an attended chat only when the agent's switch is on; the switch has no UI until stage 5) |
 | 5 | Settings and consent UI: `ComputerUseSettingsView`, `ComputerUseDiagnosticsPanel`, `ComputerUsePermissionDoctor`, `ComputerUseGateInspector`, Abilities switch, quit/stop wiring, `/computer-use/prompts` consumers; i18n | planned |
 | 6 | Screen context: `ScreenContextDistiller`, `[Screen Context]` prefix (composer row 30), per-agent screen-context option, `ScreenContextPreview`, guide topic, composer guidance loop row 12 | planned |
 
@@ -172,3 +172,70 @@ Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
   - **Gate results.** Filtered: 293 tests in 65 suites passed, live hits empty, mdat
     unchanged. Full suite (`gate_pty.sh`): 6518 tests in 847 suites passed with 6
     known issues, live hits empty.
+- 2026-11-26 stage 4 done: `ComputerUseLoop`, `ComputerUseTool`, `ComputerUseKind`
+  ported whole from `upstream/classic`, plus the registry wiring. **This is the
+  first stage that can reach the real mouse, keys and screen.** How a run starts
+  and which consents gate it (Intel owner policy on top of upstream):
+  1. The agent's own switch `Agent.settings.computerUseEnabled` (default off;
+     custom agents only, off while the agent's Tools is off):
+     `AgentManager.effectiveComputerUseEnabled`. It strips `computer_use` from
+     the model's tool list (`IntelDataConformers` compose) and is checked again
+     at execution (`ToolRegistry.runtimeCapabilityDenial`) and in
+     `ComputerUseKind.validateAuthority`. There is no settings UI for it before
+     stage 5; it can be set today only through a config document.
+  2. Attended chat only (`ComputerUseKind.unattendedRefusal`, Intel addition):
+     `currentSessionSource` must be `.chat` or `.imported`, `isUnattendedDispatch`
+     and `isExternalSurface` must be false. Schedules, watchers, self-scheduled
+     wake-ups, plugins, HTTP/MCP callers, delegated children and an unpublished
+     source are refused at the registry and again in the kind. `computer_use` is
+     also in `externallyDeniedHostToolNames` (hidden from `/mcp/tools`).
+  3. Every action goes through upstream's per-action gate: `ComputerUseGate`
+     (policy, allowlist, per-agent ceiling) and the confirm card
+     (`ComputerUsePromptQueue`); a missing card surface rejects, never runs
+     (`confirmUnavailable`). The host permission stays `.allow`, as upstream: the
+     card is the consent. Accessibility is preflighted by `PermissionedTool`.
+  4. Stage 1 hard stops are enforced in the loop (Intel addition): the loop
+     wraps any injected gate in `HardStopGate`, and before the gate it judges
+     password/credential fields, card numbers, CAPTCHAs and system dialogs
+     against the resolved element, or the focused element for a target-less
+     `type`. A hard stop is a rejection, never a confirm card.
+  5. Stop: `InterruptToken` / `SubagentFeed` interrupt centre, as upstream; the
+     quit hook is stage 5.
+  - **Intel adaptations.** `RunLimits` stays in `RunLimits.swift` and
+    `ModelActionCall` in `DesktopResponsesModelStep.swift` (removed from the
+    loop file; they were already extracted there). The loop's engine is
+    `ChatEngine(source: .agent)` (as the AppleScript loop), without upstream's
+    inference-source and auto-scrub privacy mode. `ComputerUseTool.modelAcceptsImages`
+    has no on-device branch (every Intel model is remote; Router catalog for
+    vision), and `modelIsLocal` is always false. `FeatureTelemetry.computerUseRun` /
+    `computerUseRefused` are no-op stubs (Intel sends no telemetry).
+    `authorizationRefusal` takes `toolsDisabled` where upstream reads
+    `agent.toolsEnabled`. `ComputerUseEvalHarness` is kept (unused; evals are not
+    in Intel's package).
+  - **Frame scrubber unchanged:** while `W-privacy-filter` is missing it keeps
+    masking all text; no hook was added for the privacy filter.
+  - **Tests (Swift Testing, fakes only):** upstream's `ComputerUseLoopActTests`,
+    `ComputerUseLoopRunTests`, `ComputerUseLoopTests`, `StaleViewCompactionTests`,
+    `ComputerUseAuthorizationTests`, `ComputerUseEvidencePackTests` and the full
+    `FrameScrubFailureTests` (cloud-send half), converted from XCTest with a
+    mechanical script; new `ComputerUseLoopHardStopTests` and source-gate tests.
+    Not ported: `ResponsesDesktopModelStepTests` (Intel has its own
+    `IntelDesktopModelStepTests`).
+  - **Accessibility check in the kind.** Upstream preflights Accessibility in
+    `ToolRegistry.runPermissionGate`; Intel's registry has no such gate, so
+    `ComputerUseKind.run` refuses (check only, no prompt) when `AXIsProcessTrusted`
+    is false, before the loop starts.
+  - **Gate results.** Filtered (ComputerUse, Computer, Screen, Accessibility,
+    Desktop, Subagent, ToolRegistry, Spawn, IntelVenturaControlGuard, FrameScrub,
+    StaleView, ExternalSurface, Mcp): 564 tests in 103 suites, only 2 issues, both
+    `FrameScrubberTests` (stage 2). Full (`gate_pty.sh`): 6629 tests in 859 suites,
+    13 issues = the 6 known + 7 Vision OCR failures
+    (`TextRecognition.CRImageReaderError` code 1: `FrameScrubberTests` x2,
+    `CaptureRouterTests`, `IntelRichFolderFormatsTests` OCR, and others in the
+    same family). **Vision text recognition stopped working on the build Mac
+    during the 2026-11-26 session** (the same tests passed in the stage 2 and 3
+    gates that morning and fail identically in other worktrees and in isolation);
+    nothing in stage 4 touches it. Re-run those suites after a reboot before
+    blaming code. Live hits listed only files the running upstream app holds open.
+  - **Stage 5 not started.** The Computer Use switch has no UI yet; until
+    stage 5 it can be set only through the declarative config.

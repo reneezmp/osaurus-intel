@@ -226,6 +226,8 @@ let package = Package(
             ],
             path: "Tests",
             exclude: [
+                // Read by path (#filePath) by ComputerUseEvidencePackTests; not bundled.
+                "ComputerUse/Fixtures",
                 "Voice/LiveVoiceResidentPreencodeIntegrationTests.swift",
                 "Sandbox/BuiltinSandboxToolsTests.swift",
                 "Sandbox/TeeWriterTests.swift",

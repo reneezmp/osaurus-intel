@@ -2911,6 +2911,7 @@ final class SystemPromptComposer: @unchecked Sendable {
         let videoEnabled = s.videoEnabled
         let appleScriptEnabled = s.appleScriptEnabled
         let browserUseEnabled = s.browserUseEnabled
+        let computerUseEnabled = s.computerUseEnabled
         let renderChartEnabled = s.renderChartEnabled
         let searchMemoryEnabled = s.searchMemoryEnabled
         let disabledOptionalTools = s.disabledOptionalTools
@@ -3083,6 +3084,7 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if name == ToolRegistry.videoToolName { return videoEnabled }
                 if ToolRegistry.appleScriptToolNames.contains(name) { return appleScriptEnabled }
                 if name == ToolRegistry.browserUseToolName { return browserUseEnabled }
+                if name == ToolRegistry.computerUseToolName { return computerUseEnabled }
                 if name == ToolRegistry.spawnAgentToolName { return spawnVisible }
                 // One delegation tool: the Orchestrator's one-turn
                 // `orchestrator_delegate` yields to `spawn_agent` when that is
@@ -3134,6 +3136,7 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if videoEnabled { allowed.insert(ToolRegistry.videoToolName) }
                 if appleScriptEnabled { allowed.formUnion(ToolRegistry.appleScriptToolNames) }
                 if browserUseEnabled { allowed.insert(ToolRegistry.browserUseToolName) }
+                if computerUseEnabled { allowed.insert(ToolRegistry.computerUseToolName) }
                 if spawnVisible { allowed.insert(ToolRegistry.spawnAgentToolName) }
                 // Upstream: `share_artifact` is baseline; Charts and Memory
                 // Recall switches are their own grants.
@@ -3681,6 +3684,9 @@ struct IntelAgentConfigSnapshot: @unchecked Sendable {
     var videoEnabled: Bool
     var appleScriptEnabled: Bool
     var browserUseEnabled: Bool
+    /// Computer Use (W-computer-use stage 4): the agent's own switch, custom
+    /// agents only, off while Tools is off. Default off.
+    var computerUseEnabled: Bool = false
     /// `spawn_agent` targets the launcher can run right now (Gate 4 admission
     /// judged per target; W-subagents stage 3). Empty hides the tool.
     var spawnTargets: SpawnTargetAvailabilitySnapshot = .empty
@@ -3744,6 +3750,7 @@ struct IntelAgentConfigSnapshot: @unchecked Sendable {
             videoEnabled: manager.effectiveVideoEnabled(for: id),
             appleScriptEnabled: manager.effectiveAppleScriptEnabled(for: id),
             browserUseEnabled: manager.effectiveBrowserUseEnabled(for: id),
+            computerUseEnabled: manager.effectiveComputerUseEnabled(for: id),
             spawnTargets: manager.effectiveSpawnAgentAvailable(for: id)
                 ? IntelSpawnAdmission.resolveTargets(launcherID: id) : .empty,
             spawnBudgets: SpawnFanOutPolicy.effectiveBudgets(

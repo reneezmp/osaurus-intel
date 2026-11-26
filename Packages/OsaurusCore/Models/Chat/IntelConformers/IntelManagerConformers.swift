@@ -1148,6 +1148,15 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         return agent.settings.browserUseEnabled && !effectiveToolsDisabled(for: agentId)
     }
 
+    /// `computer_use` (upstream `computerUseAvailable`): only a custom agent's
+    /// own switch (default off), and only while its tools are on. The tool is
+    /// additionally refused at run time unless the chat is attended
+    /// (`ComputerUseKind.unattendedRefusal`).
+    func effectiveComputerUseEnabled(for agentId: UUID) -> Bool {
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        return agent.settings.computerUseEnabled && !effectiveToolsDisabled(for: agentId)
+    }
+
     /// `spawn_agent` (upstream `spawnAgentAvailable`, W-subagents stage 3): the
     /// launcher has at least one agent in its spawn pool (the Orchestrator's
     /// pool is its Gate 4 allowlist; a custom agent needs its own Spawn switch)

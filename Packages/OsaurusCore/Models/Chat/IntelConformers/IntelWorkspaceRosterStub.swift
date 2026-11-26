@@ -77,6 +77,9 @@ enum FeatureTelemetry {
     static func armFirstTimeChatShown() {}
     static func recordOnboardingBrainSource(_ value: String?) {}
     static func recordOnboardingBrainSourceAbsent() {}
+    // Computer Use (W-computer-use stage 4): upstream's funnel events; Intel sends no telemetry.
+    static func computerUseRun(_ metrics: ComputerUseRunMetrics, outcome: String) {}
+    static func computerUseRefused(stage: ComputerUseRefusalStage) {}
 }
 
 /// Intel stub: only upstream's `normalized(_:)` (verbatim), which the ported

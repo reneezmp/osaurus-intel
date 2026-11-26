@@ -1289,6 +1289,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         // Sandbox tools run commands on this Mac: never from an external surface.
         "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_search_files",
         "sandbox_secret_check", "sandbox_secret_set", "sandbox_process", "sandbox_plugin_register",
+        // Intel owner policy (W-computer-use stage 4): Computer Use drives the real
+        // screen, mouse and keyboard, so no external caller (MCP, HTTP) ever starts it.
+        "computer_use",
     ]
 
     /// Tool classes the `/mcp/call` bridge (and later the HTTP agent loop)
@@ -1372,6 +1375,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     static let videoToolName = "video"
     static let appleScriptToolNames: Set<String> = [AppleScriptTool.toolName, MacQueryTool.toolName]
     static let browserUseToolName = BrowserUseTool.toolName
+    static let computerUseToolName = ComputerUseTool.toolName
     static let spawnAgentToolName = SubagentCapabilityRegistry.spawnAgentToolName
 
     init() {
@@ -1445,6 +1449,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             AppleScriptTool(), MacQueryTool(),
             // Browser Use (`W-browser-use`); the agent's switch is the grant.
             BrowserUseTool(),
+            // Computer Use (`W-computer-use` stage 4); the agent's switch is
+            // the grant and the kind refuses unattended runs.
+            ComputerUseTool(),
             // Agent delegation (`W-subagents` stage 3); the launcher's Spawn
             // pool is the grant and the tool owns its approval.
             SpawnAgentTool(),
@@ -2211,6 +2218,25 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                     message: "Browser Use is off for this agent (Agents → Abilities → Browser Use).",
                     tool: name
                 )
+            }
+            return nil
+        }
+        if name == Self.computerUseToolName {
+            // The agent's Computer Use switch is the grant (not the allowlist).
+            guard AgentManager.shared.effectiveComputerUseEnabled(for: agentId) else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "Computer Use is off for this agent (Agents → Abilities → Subagents → Computer Use).",
+                    tool: name
+                )
+            }
+            // Owner policy: never from an unattended or external run.
+            if let refusal = ComputerUseKind.unattendedRefusal(
+                source: ChatExecutionContext.currentSessionSource,
+                isUnattendedDispatch: ChatExecutionContext.isUnattendedDispatch,
+                isExternalSurface: ChatExecutionContext.isExternalSurface
+            ) {
+                return ToolEnvelope.failure(kind: .unavailable, message: refusal, tool: name)
             }
             return nil
         }
