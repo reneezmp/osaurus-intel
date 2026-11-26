@@ -407,7 +407,7 @@ now that Intel has both. Stage 6 re-reads them.
    registry never prompts for a plugin's declared system permissions
    (upstream `runPermissionGate`); `AgentManager.persist` writes agent JSON
    on the main thread (upstream #2307 queues it).
-6. **Stage 6, the declined verdicts:** re-read the 0.24.3 and 0.24.7 SKIP
+6. **Stage 6, the declined verdicts** (**audited 2026-11-26**, [`COV_REAUDIT_STAGE6_DECLINED.md`](COV_REAUDIT_STAGE6_DECLINED.md): of 456, Covered 133 (lightly verified), Port 12, Needs work 13, still declined 298, mostly local MLX): re-read the 0.24.3 and 0.24.7 SKIP
    verdicts the feasibility audit did not revisit (456 commits at
    `bce907045` still count as declined) and drop the ones whose reason no
    longer holds on Intel ("subsystem excluded" for a subsystem Intel now
