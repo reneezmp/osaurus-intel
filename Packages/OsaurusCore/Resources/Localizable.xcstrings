@@ -158,6 +158,62 @@
         }
       }
     },
+    "\"%@\" has no build this Mac can run (%@)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ hat keine Version, die dieser Mac ausführen kann (%@)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”没有这台 Mac 可以运行的版本（%@）。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%@\"에는 이 Mac에서 실행할 수 있는 빌드가 없어요 (%@)."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "У «%@» нет сборки, которую может запустить этот Mac (%@)."
+          }
+        }
+      }
+    },
+    "\"%@\" was built only for Apple silicon (%@) and this Intel Mac can't run it. Install a build for Intel (x86_64), or the npm version." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ wurde nur für Apple Silicon (%@) gebaut, und dieser Intel-Mac kann es nicht ausführen. Installiere eine Version für Intel (x86_64) oder die npm-Version."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”仅为 Apple 芯片（%@）构建，这台 Intel Mac 无法运行。请安装 Intel（x86_64）版本或 npm 版本。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%@\"은(는) Apple 실리콘(%@)용으로만 빌드되어 이 Intel Mac에서는 실행할 수 없어요. Intel(x86_64)용 빌드나 npm 버전을 설치해 주세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«%@» собрано только для Apple silicon (%@), и этот Mac на Intel не может его запустить. Установите сборку для Intel (x86_64) или версию из npm."
+          }
+        }
+      }
+    },
     "%@ already defines model_providers.osaurus outside the Osaurus-managed block. Remove that definition (or move it between the markers) and try again." : {
       "comment" : "Write refusal when the user's config.toml has an unmanaged [model_providers.osaurus] table. %@ is the config.toml path.",
       "localizations" : {
@@ -11079,6 +11135,7 @@
         }
       }
     },
+    "Claude Code %@ doesn't report its sign-in status. Run claude in Terminal to check it." : {},
     "Claude Code couldn't complete the turn: %@" : {
       "localizations" : {
         "de" : {
@@ -11297,6 +11354,7 @@
         }
       }
     },
+    "Claude Code isn't signed in." : {},
     "Claude Code isn't signed in. Open `claude` in a terminal, sign in, then try again." : {
       "localizations" : {
         "de" : {
@@ -13892,6 +13950,7 @@
         }
       }
     },
+    "Couldn't find \"%@\"." : {},
     "Couldn't generate a title. Check that a model is available and try again." : {
       "localizations" : {
         "de" : {
@@ -19564,6 +19623,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "忘記此專案的共享記憶"
+          }
+        }
+      }
+    },
+    "Found at %@. Osaurus checks that it answers when a chat starts it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gefunden unter %@. Osaurus prüft, ob es antwortet, sobald ein Chat es startet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在 %@ 找到。聊天启动它时，Osaurus 会检查它是否响应。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 찾았어요. 채팅이 시작할 때 Osaurus가 응답하는지 확인해요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Найдено: %@. Osaurus проверит, отвечает ли оно, когда его запустит чат."
           }
         }
       }
@@ -32999,6 +33086,7 @@
         }
       }
     },
+    "Pi (RPC)" : {},
     "Pick a Palette" : {
       "comment" : "Title of an example action in the first-run call to action in the Themes view, related to choosing a color palette.",
       "extractionState" : "stale",
@@ -43359,6 +43447,8 @@
         }
       }
     },
+    "Signed in as %@." : {},
+    "Signed in." : {},
     "Signed request diagnostics" : {
       "localizations" : {
         "de" : {

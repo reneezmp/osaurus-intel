@@ -612,6 +612,81 @@ public enum ClaudeCodeConfiguration {
         return .signedIn(status)
     }
 
+    // MARK: - Runtime-aware control commands (#3175)
+    //
+    // `W-harness-runtimes` stage 2. These mirror upstream's `command:` /
+    // `overlay:` overloads: they run the runtime's own command with the
+    // environment a harness chat process gets (login-shell PATH, the
+    // interpreter beside an npm `claude`, `ANTHROPIC_API_KEY` removed), so the
+    // status shown is the status a chat will see. `command` has no default so
+    // the existing `env:` forms above stay unambiguous; they remain the live
+    // path until the harness session replaces it (stage 4).
+
+    /// Variables stripped from a Claude Code child so runs stay on the user's
+    /// signed-in subscription (upstream `ClaudeCodeHarnessAdapter.removedEnvironment`).
+    static let removedEnvironment: Set<String> = ["ANTHROPIC_API_KEY"]
+
+    static func controlCommand(
+        _ command: String,
+        overlay: [String: String]
+    ) async -> HarnessControlCommand.Resolved? {
+        await HarnessControlCommand.resolve(
+            command,
+            overlay: overlay,
+            removing: HarnessEnvironment.alwaysRemoved.union(removedEnvironment)
+        )
+    }
+
+    public static func cliVersion(
+        command: String,
+        overlay: [String: String] = [:],
+        timeout: TimeInterval = 5
+    ) async -> String? {
+        guard let resolved = await controlCommand(command, overlay: overlay),
+            let result = await ClaudeCodeProcessRunner.capture(
+                executable: resolved.executable,
+                arguments: ["--version"],
+                environment: resolved.environment,
+                timeout: timeout
+            ),
+            result.exitCode == 0,
+            !result.timedOut
+        else { return nil }
+        return decodeVersion(result.stdout)
+    }
+
+    public static func authStatus(
+        command: String,
+        overlay: [String: String] = [:],
+        timeout: TimeInterval = 10
+    ) async -> ClaudeCodeAuthStatus? {
+        guard let resolved = await controlCommand(command, overlay: overlay),
+            let result = await ClaudeCodeProcessRunner.capture(
+                executable: resolved.executable,
+                arguments: ["auth", "status", "--json"],
+                environment: resolved.environment,
+                timeout: timeout
+            ),
+            !result.timedOut
+        else { return nil }
+        // Some versions use a non-zero exit for the signed-out JSON state.
+        return decodeAuthStatus(result.stdout)
+    }
+
+    public static func setupState(
+        command: String,
+        overlay: [String: String] = [:]
+    ) async -> ClaudeCodeSetupState {
+        guard await controlCommand(command, overlay: overlay) != nil else {
+            return .notInstalled(searchedPath: await HarnessControlCommand.searchedPath())
+        }
+        let version = await cliVersion(command: command, overlay: overlay)
+        guard let status = await authStatus(command: command, overlay: overlay) else {
+            return .statusUnavailable(cliVersion: version)
+        }
+        return status.loggedIn ? .signedIn(status) : .signedOut
+    }
+
     /// Start the CLI's own browser sign-in.
     ///
     /// `claude auth login` opens the system browser and blocks until the round
