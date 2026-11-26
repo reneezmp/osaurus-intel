@@ -25,13 +25,22 @@ enum IntelToolScopeGate {
         "file_read", "file_search", "file_write", "file_edit", "shell_run",
     ]
 
+    /// Upstream `ToolRegistry.hallucinatedFetchToolNames` (#2625). Lowercase.
+    static let hallucinatedFetchToolNames: Set<String> = [
+        "web_fetch", "webfetch", "fetch", "fetch_url", "fetch_page",
+        "fetch_webpage", "http_get", "get_url", "get_webpage", "read_url",
+        "read_webpage", "visit_page", "load_url", "url_fetch",
+    ]
+
     @MainActor
     static func envelope(forUnofferedCall name: String, offered: [Tool]?, agentId: UUID?) -> String {
         let offeredNames = Set((offered ?? []).map(\.function.name))
         let catalog: CapabilityCatalog =
             (offeredNames.contains(CapabilitiesTool.toolName) && agentId != nil)
             ? CapabilityCatalog.build(agentId: agentId!) : .empty
-        return envelope(forUnofferedCall: name, offeredNames: offeredNames, agentId: agentId, catalog: catalog)
+        return envelope(
+            forUnofferedCall: name, offeredNames: offeredNames, agentId: agentId, catalog: catalog,
+            isRegistered: ToolRegistry.shared.isRegistered(name))
     }
 
     /// Pure form (tests pass their own catalog).
@@ -39,7 +48,8 @@ enum IntelToolScopeGate {
         forUnofferedCall name: String,
         offeredNames: Set<String>,
         agentId: UUID?,
-        catalog: CapabilityCatalog
+        catalog: CapabilityCatalog,
+        isRegistered: Bool = false
     ) -> String {
         // Folder tools first: their only next step is user-facing (attach a
         // folder), never a loader round-trip (upstream). Intel has no
@@ -80,6 +90,27 @@ enum IntelToolScopeGate {
                     "'\(name)' is a capability id for a plugin group, not a callable "
                     + "function. Call capabilities with {\"ids\":[\"plugin/\(group.id)\"]} to "
                     + "load it, then call one of the loaded tool names to continue.",
+                toolName: name,
+                retryable: true
+            ).toJSONString()
+        }
+        // Upstream #2625: fetch-tool names imported from other harnesses
+        // (`web_fetch`, `fetch_url`, ...) are steered to `search_and_extract`,
+        // but only when this request already offers it (nothing withheld is
+        // leaked; a nil/empty offer keeps the opaque refusal), the name has no
+        // real registration (a plugin/MCP tool claiming it wins; the caller
+        // passes `isRegistered`), and no plugin group shares the name (the
+        // group rescue above keeps precedence). Browser- and shell-intent
+        // names are deliberately not steered.
+        if !isRegistered, hallucinatedFetchToolNames.contains(name.lowercased()),
+            offeredNames.contains("search_and_extract")
+        {
+            return ToolErrorEnvelope(
+                kind: .toolNotFound,
+                reason:
+                    "There is no '\(name)' tool. To fetch a web page, call search_and_extract "
+                    + "with {\"urls\": [\"<url>\"]} — it fetches the pages and returns their "
+                    + "readable content. To find sources first, call web_search.",
                 toolName: name,
                 retryable: true
             ).toJSONString()

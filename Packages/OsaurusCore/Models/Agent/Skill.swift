@@ -130,7 +130,7 @@ public struct Skill: Codable, Identifiable, Sendable, Equatable {
 
                     ## Workflow
                     1. Use `web_search` with focused queries to find candidate sources
-                    2. Loading this skill does not load the extraction schema. Before retrieval, if `search_and_extract` is not already in the current tool schema, call `capabilities_load` with the exact id `tool/search_and_extract`; after that succeeds, call `search_and_extract` in this same run.
+                    2. `search_and_extract` is the page-fetch tool and is in the tool schema whenever Web Search is on for this agent (#2625). Do not invent other fetch tools such as `web_fetch`; if `search_and_extract` is missing, Web Search is off for this agent, so say so instead of guessing.
                     3. Pick the most authoritative results and call `search_and_extract` with each result's direct `url` to retrieve the actual page content — never pass a known URL back into `web_search` as another query
                     4. Cross-reference key facts across at least two independent sources
                     5. Note publication dates; prefer recent sources for fast-moving topics
