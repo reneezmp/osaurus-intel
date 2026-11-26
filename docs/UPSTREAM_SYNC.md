@@ -246,6 +246,10 @@ mdat and live-folder checks).
   duplicate copies tool settings, global Disable Tools switch retired.
 - **Computer Use stages 1–2** (2026-11-26): model, gate, hard stops,
   perception types; nothing acts on the screen yet (`W_COMPUTER_USE_PLAN.md`).
+- **Seatbelt sandbox stages 4–5** (2026-11-26): `W-seatbelt-sandbox`
+  complete except `sandbox_secret_set`. A lead-requested fix confines the
+  app-side `SOUL.md` read (a symlink in the sandbox-writable folder could have
+  put any file into the prompt).
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

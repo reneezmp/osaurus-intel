@@ -3745,3 +3745,12 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Duplicate an agent with manual tools chosen: the copy has the same tool selection.
 - [ ] Settings no longer has a global "Disable Tools" switch; if it was on before, tools work again.
 - [ ] Ask a model to "web_fetch" a page: it uses `search_and_extract` instead of failing on an unknown tool.
+
+## Seatbelt sandbox stages 4–5: switch, plugins, background processes (2026-11-26)
+
+`W-seatbelt-sandbox` stages 4–5. Not in candidate 69. **Take screenshots** of the agent's sandbox settings.
+
+- [ ] An agent's settings have a sandbox switch, off by default. Turning it on asks for approval and shows what it allows; network stays off unless you also turn it on.
+- [ ] With it on, ask the agent to start a long-running command in the background, then press Stop: the command ends too. Quit the app: no leftover process (Activity Monitor).
+- [ ] Turning on sandbox network or plugin creation through the Orchestrator shows as high risk in the review window.
+- [ ] Delete that agent: its sandbox plugins and background jobs are gone.
