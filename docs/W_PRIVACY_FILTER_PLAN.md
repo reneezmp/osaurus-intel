@@ -1,0 +1,92 @@
+# W-privacy-filter: plan and status
+
+Backlog item `W-privacy-filter` (upstream Classic 0.25.x, about 12k lines in
+`PrivacyFilter/`, plus plumbing in `RemoteProviderService`, `ChatView`,
+`HTTPHandler`, `ChatEngine`, Insights and the folder redaction tools). Ported
+from `upstream/classic` only; upstream's manual is `docs/PRIVACY_FILTER.md`
+on that branch. Rows that depend on it: stage 5c row 16 (blocked-send error),
+stage 5d row 40 (outbound/inbound scrub, Responses privacy stream), stage 6
+rows `fa47416a8` #2979 and `437ca4257` #2793, the Bulk edits prompt section
+(stage 5b row 17), the `detect_pii` / `redact_file` folder tools, spoken
+numbers (#3135) and Computer Use's `FrameScrubber`.
+
+## Owner policy (hard rules for every stage)
+
+- The filter only ever removes or masks data before it leaves the Mac.
+- It never sends the user's text anywhere new to decide what to mask: no
+  cloud detector, ever.
+- When it cannot decide, it masks (fail closed) wherever upstream does.
+- It is on or off exactly as upstream's defaults say (upstream: master switch
+  off for existing and fresh installs, built-in patterns on, presets seeded by
+  locale), and turning it off is the user's action.
+- Tests use synthetic data only: no network, keychain or `~/.osaurus`.
+
+## Detector architecture finding (decided 2026-11-26)
+
+Upstream has two optional "AI" detectors behind the rule layer:
+
+| Detector | Files | What it is | Intel |
+| --- | --- | --- | --- |
+| OpenAI privacy-filter (`PrivacyAIBackend.openai`) | `Vendor/PrivacyFilterKit/*` (MoE transformer, `import MLX`, `MLX.loadArrays`, `MLXFast.RoPE`), `Model/PrivacyFilterModel*` | 2.8 GB bf16 sparse-MoE, MLX | **Incompatible** |
+| Rampart (`PrivacyAIBackend.rampart`) | `Rampart/*` (`import RampartPII`, a vmlx-swift product), `MetalGate` | 37 MB BERT token classifier, MLX | **Incompatible** |
+
+Evidence: both run on MLX GPU kernels (`RampartPrivacyDetector` documents the
+passes as "MLX GPU producers on the shared Metal device"); upstream's
+`Package.swift` targets `.macOS(.v15)` and takes `RampartPII` from
+`vmlx-swift`; Intel's build links only `IntelStubs` MLX stand-ins and its
+Metal kernels already fail on Intel (`UPSTREAM_SYNC.md` Apple Silicon rows).
+Neither can run on macOS 13 x86_64, and a cloud or CPU-only substitute would
+break the owner policy, so the port keeps the rule-based layer only:
+
+- Not ported: `Vendor/PrivacyFilterKit`, `Rampart/*`, `Model/*`,
+  `PIIModelDownloadPromptView`, the two `*GlobalProxy*` downloader tests,
+  `RampartWindowingTests`.
+- `PrivacyAIBackend` and the config keys stay (a config copied from an
+  upstream install still decodes); `PrivacyDetectorSupport.modelDetectorsRunnable`
+  is `false` and `isBundleInstalled` is always `false`, so the pipeline always
+  runs regex-only and never throws `.engineUnavailable`.
+- Where upstream shows detector status (Privacy tab, Model sub-tab, review
+  sheet footer) Intel shows "Incompatible: needs an Apple Silicon Mac" and
+  disables the AI toggle. Never hidden.
+
+## What the filter catches without the detector
+
+Built-in patterns (`RegexEntityDetector`): phone, email, URL, US SSN and
+Luhn-valid card numbers, plus numbers read out as words (spoken digits).
+Presets (about 6 regions, checksum validators in `PrivacyChecksums`): IBAN,
+national IDs, passports, driver's licences, tax numbers, AWS and GitHub keys
+and more, enabled per region. Custom rules (builder or raw regex). Not caught
+without a model: person names, street addresses, free-form dates and
+free-form secrets. The UI and manual say so.
+
+## Stages
+
+1. **Rule engine and settings store (core, no UI, no wiring).** `Placeholder`,
+   `RedactionMap`, `ScrubResult`, `PrivacyRule`, all `PrivacyRulePresets*`,
+   `PrivacyChecksums`, `RegexEntityDetector`, `SpokenNumberDetector`,
+   `CodeBlockMasker`, `InjectedContextSpans`, `StreamingUnscrubber`,
+   `MessageScrubbing`, `PrivacyFilterConfiguration`, `PrivacyFilterStore`,
+   `SessionRedactionStore`, `PrivacyDetectorSupport`; upstream tests for them.
+2. **Engine and pipeline.** `PrivacyFilterEngine` (rule-only; model hooks
+   removed), `PrivacyFilterPipeline` (outbound scrub, review gate, post-scrub
+   invariant, inbound wrapper), `PrivacyReviewService`; their tests
+   (`ApplyOutboundE2E`, `PrivacyReview*`, `InboundStreamWrapper`, ...).
+3. **Wiring.** `RemoteProviderService` outbound/inbound hooks and the typed
+   blocked-send error (row 16), `RemoteResponsesPrivacyStream` /
+   Responses item scrub (row 40), `WireTransportProbe`, HTTP 422 for
+   non-interactive review, Insights post-scrub bodies, chat inline highlights
+   (`RedactionHighlighter` is already on Intel), `ChatView` review presenter.
+4. **UI.** `PrivacyView` (Overview, Rules, Providers; Model tab shows
+   Incompatible), `PrivacyPresetRulesSection`, `PrivacyCustomRuleEditor`,
+   `RedactionReviewSheet` and state, preview views, Management tab entry,
+   What's New, Ventura rules, `L()` strings in de/zh-Hans/ko/ru.
+5. **Folder tools and prompt.** `detect_pii`, `redact_file`
+   (`RedactionTools`, `RedactionToolSupport`), the Bulk edits prompt section,
+   phone call setting the filter (`osaurus_privacy`), spoken numbers in voice.
+6. **Computer Use scrubber hook and QA.** Restore upstream's `.pii` branch in
+   `FrameScrubber` (hook only, marked), Insights Privacy tab wording, Rosy
+   retest checklist, manual update.
+
+## Status
+
+- 2026-11-26: plan written; stage 1 in progress.
