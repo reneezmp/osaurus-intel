@@ -520,28 +520,47 @@ public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable, Hashable {
 // MARK: - Autonomous Exec Configuration
 
 public struct AutonomousExecConfig: Codable, Sendable, Equatable {
+    /// Whether the agent's sandbox (autonomous command execution) is on.
+    /// Intel: this is an explicit opt-in. A missing config, the built-in
+    /// Default agent and every agent that never turned it on keep today's
+    /// behaviour (no sandbox tools). Upstream's "custom agents default ON"
+    /// is deliberately not copied (docs/W_SEATBELT_SANDBOX_PLAN.md).
     public var enabled: Bool
     public var maxCommandsPerTurn: Int
     public var commandTimeout: Int
     public var pluginCreate: Bool
+    /// Whether sandboxed commands may use the network. Upstream defaults this
+    /// to `true`; Intel defaults it to `false` and only the user's explicit
+    /// per-agent switch turns it on. Seatbelt cannot filter domains, so the
+    /// allowlist setting is not offered. Both this switch and the shared
+    /// sandbox configuration must allow the network.
+    public var sandboxNetworkEnabled: Bool
+    /// Whether the agent may run detached background jobs (stage 4).
+    public var backgroundProcessEnabled: Bool
 
     public static let `default` = AutonomousExecConfig(
         enabled: false,
         maxCommandsPerTurn: 10,
         commandTimeout: 30,
-        pluginCreate: true
+        pluginCreate: true,
+        sandboxNetworkEnabled: false,
+        backgroundProcessEnabled: false
     )
 
     public init(
         enabled: Bool = false,
         maxCommandsPerTurn: Int = 10,
         commandTimeout: Int = 30,
-        pluginCreate: Bool = true
+        pluginCreate: Bool = true,
+        sandboxNetworkEnabled: Bool = false,
+        backgroundProcessEnabled: Bool = false
     ) {
         self.enabled = enabled
         self.maxCommandsPerTurn = maxCommandsPerTurn
         self.commandTimeout = commandTimeout
         self.pluginCreate = pluginCreate
+        self.sandboxNetworkEnabled = sandboxNetworkEnabled
+        self.backgroundProcessEnabled = backgroundProcessEnabled
     }
 
     /// Decode field-by-field with the `default` values as fallbacks.
@@ -562,6 +581,13 @@ public struct AutonomousExecConfig: Codable, Sendable, Equatable {
         commandTimeout =
             try c.decodeIfPresent(Int.self, forKey: .commandTimeout) ?? fallback.commandTimeout
         pluginCreate = try c.decodeIfPresent(Bool.self, forKey: .pluginCreate) ?? fallback.pluginCreate
+        // A missing key stays OFF on Intel; unknown upstream keys
+        // (`sandboxAllowedDomains`, ...) are ignored by keyed decoding.
+        sandboxNetworkEnabled =
+            try c.decodeIfPresent(Bool.self, forKey: .sandboxNetworkEnabled) ?? fallback.sandboxNetworkEnabled
+        backgroundProcessEnabled =
+            try c.decodeIfPresent(Bool.self, forKey: .backgroundProcessEnabled)
+            ?? fallback.backgroundProcessEnabled
     }
 }
 

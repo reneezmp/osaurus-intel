@@ -1230,19 +1230,27 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .agentUpdated, object: agentId)
     }
 
-    // AgentDetailView's sandbox section reads/writes
-    // `AutonomousExecConfig` (the real type from Models/Agent/Agent.swift,
-    // NOT excluded on Intel) — not the lightweight protocol
-    // `AgentAutoExecInfo`. The protocol overloads below are kept for the
-    // chat-side callers that use them; the view-facing overloads use
-    // `AutonomousExecConfig`. Sandbox is amputated on Intel so both are
-    // effectively inert (return `.default`, write no-ops).
-    /// AgentDetailView's sandbox section reads/writes the real
-    /// `AutonomousExecConfig` (Models/Agent/Agent.swift, NOT excluded),
-    /// so `effectiveAutonomousExec` returns that type here. Sandbox is
-    /// amputated on Intel → always `.default` (disabled), write no-ops.
-    func effectiveAutonomousExec(for agentId: UUID) -> AutonomousExecConfig? { .default }
-    func updateAutonomousExec(_ config: AutonomousExecConfig, for agentId: UUID) async throws {}
+    // AgentDetailView's sandbox section reads/writes `AutonomousExecConfig`
+    // (the real type from Models/Agent/Agent.swift, NOT the lightweight
+    // protocol `AgentAutoExecInfo`).
+    //
+    // W-seatbelt-sandbox stage 3: the config is real again. Upstream resolves
+    // an unconfigured custom agent to ON; Intel does not. The sandbox runs
+    // commands on this Mac, so an agent only gets sandbox tools after an
+    // explicit `enabled: true` the user set, and the built-in Default agent
+    // never does. Everything else resolves to `.default` (disabled), which
+    // keeps every existing agent's tool surface exactly as it was.
+    func effectiveAutonomousExec(for agentId: UUID) -> AutonomousExecConfig? {
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return .default }
+        return agent.autonomousExec ?? .default
+    }
+
+    func updateAutonomousExec(_ config: AutonomousExecConfig, for agentId: UUID) async throws {
+        guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
+        agent.autonomousExec = config
+        update(agent)
+    }
+
     func ttsVoice(for agentId: UUID) -> Any? { agent(for: agentId)?.ttsVoice }
     func themeId(for agentId: UUID) -> UUID? { agent(for: agentId)?.themeId }
 }

@@ -1198,27 +1198,18 @@ enum PluginInstructionsResolver {
     }
 }
 
-final class SandboxAgentProvisioner: @unchecked Sendable { static let shared = SandboxAgentProvisioner(); static func linuxName(for agentId: String) -> String { "agent" } }
-final class SandboxToolRegistrar: @unchecked Sendable {
-    static let shared = SandboxToolRegistrar()
-    func registerTools(for agentId: UUID) async {}
-    /// FloatingInputCard's sandbox chip calls this when the user
-    /// clicks "Retry" after a provisioning failure. Intel has no
-    /// failures to reset (no provisioning ever happens), so no-op.
-    /// `for:` arg is optional to match both upstream call shapes
-    /// (`resetStartupFailures()` and `resetStartupFailures(for:)`).
-    func resetStartupFailures(for agentId: UUID? = nil) {}
+final class SandboxAgentProvisioner: @unchecked Sendable {
+    static let shared = SandboxAgentProvisioner()
+    /// Intel keeps this constant for the callers that predate the host
+    /// sandbox (`share_artifact`, plugin hosts): changing it would move their
+    /// paths. The sandbox tools use `SandboxToolRegistrar.hostAgentName(for:)`
+    /// (upstream's real `linuxName` logic) instead.
+    static func linuxName(for agentId: String) -> String { "agent" }
 }
 
-struct SecretPromptParser: Sendable {
-    init() {}
-    static func parse(_ text: String) -> SecretPromptState? { nil }
-}
-struct SecretToolResult: Sendable {
-    init() {}
-    static func stored(key: String) -> String { "" }
-    static func cancelled(key: String) -> String { "" }
-}
+// `SandboxToolRegistrar`, `SecretPromptParser` and `SecretToolResult` now live
+// in Services/Sandbox/IntelSandboxToolRegistrar.swift and
+// Tools/IntelSandboxSecretTools.swift (W-seatbelt-sandbox stage 3).
 
 enum SessionCapability: String, Codable, Hashable, Sendable, CaseIterable {
     case vision
@@ -3029,6 +3020,9 @@ final class SystemPromptComposer: @unchecked Sendable {
         if toolsDisabled || agentToolsDisabled {
             tools = []
         } else {
+            // Sandbox tools register lazily, the first time an opted-in agent
+            // composes; nothing registers for anyone else.
+            if s.sandbox != nil { BuiltinSandboxTools.register() }
             let chainedSpecs = filteringWebSearchTools(
                 ToolRegistry.shared.openAISpecs(for: id),
                 enabled: webSearchEnabled
@@ -3122,6 +3116,8 @@ final class SystemPromptComposer: @unchecked Sendable {
                 }
                 // And for Apple apps: the per-app toggle is the grant.
                 allowed.formUnion(appleAppToolNames)
+                // The sandbox switch is the grant for the sandbox tools.
+                if s.sandbox != nil { allowed.formUnion(BuiltinSandboxTools.allToolNames) }
                 // The folder ask is a chat-surface affordance, not a capability.
                 allowed.insert(PromptWorkingFolderTool.toolName)
                 // So are the agent-loop tools (todo/complete/clarify/time).
@@ -3242,6 +3238,39 @@ final class SystemPromptComposer: @unchecked Sendable {
                 prompt += block
                 sections.append(PromptSection(id: "folderContext", label: "Working Directory", text: block, tint: .teal))
             }
+        }
+        // Sandbox sections (W-seatbelt-sandbox stage 3, `IntelSandboxPrompt`):
+        // the environment, the stored secret names, secret handling and the
+        // agent's SOUL.md, only when sandbox tools resolved into the schema.
+        // An agent that opted in on a Mac without `sandbox-exec` gets the
+        // unavailable notice instead.
+        if let sandbox = s.sandbox, !resolvedNames.isDisjoint(with: BuiltinSandboxTools.allToolNames) {
+            let homeName = SandboxToolRegistrar.hostAgentName(for: id.uuidString)
+            let parts: [(String, String, String, ContextBreakdown.Tint)] = [
+                (
+                    "sandbox", "Sandbox",
+                    IntelSandboxPrompt.environment(
+                        home: OsaurusPaths.inContainerAgentHome(homeName),
+                        network: sandbox.sandboxNetworkEnabled, toolNames: resolvedNames),
+                    .green
+                ),
+                ("sandboxState", "Sandbox State", IntelSandboxPrompt.state(secretNames: s.sandboxSecretNames), .green),
+                (
+                    "secretHandling", "Secret Handling",
+                    resolvedNames.contains(BuiltinSandboxTools.secretCheck) ? IntelSandboxPrompt.secretHandling : "",
+                    .orange
+                ),
+                ("soul", "SOUL", IntelSandboxPrompt.soul(agentName: homeName), .purple),
+            ]
+            for (sectionId, label, text, tint) in parts where !text.isEmpty {
+                prompt += text
+                sections.append(PromptSection(id: sectionId, label: label, text: text, tint: tint))
+            }
+        } else if s.sandboxUnsupported, !(toolsDisabled || agentToolsDisabled) {
+            prompt += IntelSandboxPrompt.unavailable
+            sections.append(
+                PromptSection(
+                    id: "sandboxUnavailable", label: "Sandbox", text: IntelSandboxPrompt.unavailable, tint: .gray))
         }
         // Upstream's static discipline sections (#1317, #1430): Default agent
         // without a folder only. Upstream's order puts the agent-loop guide
@@ -3659,6 +3688,13 @@ struct IntelAgentConfigSnapshot: @unchecked Sendable {
     var folderToolNames: Set<String>
     var knowledgeGrants: [KnowledgeGrantDescriptor]
     var project: ProjectInstructions?
+    /// The agent's sandbox settings when it opted in and this Mac can run
+    /// the sandbox (W-seatbelt-sandbox stage 3); nil for every other agent.
+    var sandbox: AutonomousExecConfig? = nil
+    /// Opted in, but `sandbox-exec` is missing on this Mac.
+    var sandboxUnsupported: Bool = false
+    /// Names of the secrets stored for a sandbox agent (names only).
+    var sandboxSecretNames: [String] = []
 
     @MainActor
     static func capture(agentId id: UUID, projectId: UUID?) -> IntelAgentConfigSnapshot {
@@ -3714,7 +3750,11 @@ struct IntelAgentConfigSnapshot: @unchecked Sendable {
             appleAppToolNames: AppleApp.toolNames(for: manager.effectiveAppleApps(for: id)),
             folderToolNames: Set(FolderToolManager.shared.folderToolNames),
             knowledgeGrants: collections.map(\.grantDescriptor),
-            project: project
+            project: project,
+            sandbox: SandboxToolGate.config(for: id),
+            sandboxUnsupported: SandboxToolGate.optedInButUnsupported(id),
+            sandboxSecretNames: SandboxToolGate.config(for: id) == nil
+                ? [] : AgentSecretsKeychain.secretIDs(agentId: id)
         )
     }
 
@@ -3727,7 +3767,7 @@ struct IntelAgentConfigSnapshot: @unchecked Sendable {
         let flags: [Bool] = [
             agentToolsDisabled, selfSchedulingEnabled, webSearchEnabled, databaseEnabled, speakEnabled,
             imageEnabled, videoEnabled, appleScriptEnabled, browserUseEnabled, renderChartEnabled,
-            searchMemoryEnabled,
+            searchMemoryEnabled, sandbox != nil, sandboxUnsupported,
         ]
         return [
             flags.map { $0 ? "1" : "0" }.joined(),
@@ -3735,6 +3775,7 @@ struct IntelAgentConfigSnapshot: @unchecked Sendable {
             disabledOptionalTools.sorted().joined(separator: ","),
             appleAppToolNames.sorted().joined(separator: ","),
             knowledgeGrants.map(\.name).sorted().joined(separator: ","),
+            "sbx:\(sandbox?.sandboxNetworkEnabled == true ? 1 : 0)",
             spawnTargets.runnableAgentIDs.map(\.uuidString).sorted().joined(separator: ","),
         ].joined(separator: "|")
     }

@@ -1286,6 +1286,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         "redact_file",
         "write_knowledge", "delete_knowledge", "edit_knowledge",
         "update_skill",
+        // Sandbox tools run commands on this Mac: never from an external surface.
+        "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_search_files",
+        "sandbox_secret_check", "sandbox_secret_set",
     ]
 
     /// Tool classes the `/mcp/call` bridge (and later the HTTP agent loop)
@@ -1573,8 +1576,23 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// composing the prompt.
     private(set) var builtInToolNames: Set<String> = []
 
-    /// Built-in sandbox tool names. Amputated on Intel — always empty.
-    var builtInSandboxToolNames: Set<String> { [] }
+    /// Built-in sandbox tool names that are registered right now
+    /// (W-seatbelt-sandbox stage 3). Empty until an opted-in agent first
+    /// uses the sandbox: nothing registers for everyone else.
+    var builtInSandboxToolNames: Set<String> {
+        BuiltinSandboxTools.allToolNames.filter { toolsByName[$0] != nil }
+    }
+
+    /// Register a sandbox tool. Like upstream's `registerSandboxTool`, minus
+    /// the runtime-managed flag (Intel derives it from `isSandboxTool`).
+    func registerSandboxTool(_ tool: OsaurusTool) {
+        register(tool)
+    }
+
+    /// Tear down every registered built-in sandbox tool.
+    func unregisterAllBuiltinSandboxTools() {
+        unregister(names: Array(builtInSandboxToolNames))
+    }
 
     /// Read-only snapshot of built-in sandbox tool names (mirrors upstream).
     var builtInSandboxToolNamesSnapshot: Set<String> { builtInSandboxToolNames }
@@ -1614,15 +1632,21 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// Specs for the named registered tools (loaded capabilities), skipping
     /// names that are no longer registered.
     func openAISpecs(named names: [String]) -> [Tool] {
-        names.compactMap { toolsByName[$0]?.asOpenAITool() }
+        // A loaded capability can never be a sandbox tool for an agent that
+        // has not opted in (owner policy: the sandbox only ever restricts).
+        let sandboxAllowed = SandboxToolGate.isOptedIn(ChatExecutionContext.currentAgentId)
+        return names.compactMap { name in
+            if isSandboxTool(name), !sandboxAllowed { return nil }
+            return toolsByName[name]?.asOpenAITool()
+        }
     }
 
     /// Native x86_64 plugin tools (this fork). True for tools registered via
     /// `registerPluginTool` so the picker buckets them under their plugin.
     func isPluginTool(_ name: String) -> Bool { pluginToolGroups[name] != nil }
 
-    /// Sandbox tools are amputated on Intel.
-    func isSandboxTool(_ name: String) -> Bool { false }
+    /// The built-in sandbox tool family (`sandbox_exec`, ...).
+    func isSandboxTool(_ name: String) -> Bool { BuiltinSandboxTools.allToolNames.contains(name) }
 
     /// The provider/plugin group a tool belongs to: MCP provider name for
     /// remote tools, the plugin display name for native plugin tools.
@@ -1706,8 +1730,12 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     ]
 
     func openAISpecs(for agentID: UUID? = nil) -> [Tool] {
-        toolsByName.values
+        // Sandbox tools reach only the agent that opted in; every other
+        // caller (no agent, Default agent, other agents) never sees them.
+        let sandboxAllowed = SandboxToolGate.isOptedIn(agentID)
+        return toolsByName.values
             .filter { !Self.onDemandBuiltInToolNames.contains($0.name) }
+            .filter { sandboxAllowed || !isSandboxTool($0.name) }
             .filter {
                 Self.orchestratorOnlyToolNames.contains($0.name)
                     || !disabledToolNames.contains($0.name)
@@ -2046,6 +2074,26 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                     message: "\(app.displayName) is not turned on for this agent (Agents → Overview → Apple Apps).",
                     tool: name
                 )
+            }
+            return nil
+        }
+
+        // Sandbox tools: the calling agent's own opt-in is the grant (not the
+        // Tools-tab allowlist). With no agent, or one that never opted in,
+        // they never run, whichever surface calls.
+        if isSandboxTool(name) {
+            guard let agentId = ChatExecutionContext.currentAgentId,
+                SandboxToolGate.isOptedIn(agentId)
+            else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "The sandbox is off for this agent (Agents → Sandbox).",
+                    tool: name
+                )
+            }
+            if AgentManager.shared.effectiveToolsDisabled(for: agentId) {
+                return ToolEnvelope.failure(
+                    kind: .unavailable, message: "Tools are disabled for this agent.", tool: name)
             }
             return nil
         }
@@ -2413,6 +2461,16 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// The tools registered on Intel — the folder tool suite once a working
     /// folder is selected (M12 Gap 3). ToolsManagerView renders the list.
     func listTools() -> [ToolEntry] {
+        // Sandbox tools appear in catalogs only once some agent has the
+        // sandbox, so every other listing stays exactly as it was.
+        let all = listAllTools()
+        guard all.contains(where: { isSandboxTool($0.name) }), !SandboxToolGate.anyAgentOptedIn else {
+            return all
+        }
+        return all.filter { !isSandboxTool($0.name) }
+    }
+
+    private func listAllTools() -> [ToolEntry] {
         if let cachedListTools { return cachedListTools }
         let entries = toolsByName.values
             .sorted { $0.name < $1.name }
