@@ -264,6 +264,8 @@ mdat and live-folder checks).
   3. Stopped background subagent workers report back as upstream does (a new
      parent reply may start after Stop); revert stage 6's Intel difference.
   4. Cut Rosy build 70 after Computer Use stage 4 and privacy filter stage 1.
+- **Privacy filter stages 1–2** (2026-11-26): rules only (ML detectors need
+  Apple Silicon), not wired in yet (`W_PRIVACY_FILTER_PLAN.md`).
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

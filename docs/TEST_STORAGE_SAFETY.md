@@ -599,3 +599,12 @@ runs. The last two (`InsightsImageRedactionTests`, `ComputerUsePromptQueueTests`
 were converted on 2026-11-26 and pass; no XCTest file is left. Port new tests
 as Swift Testing (`import Testing`).
 
+**Vision OCR failures on the build Mac (2026-11-26).** Computer Use's
+`PerceptionTests` (frame scrubber, `testCloudRouteRequiresConsent`,
+`testReturnsScrubbedFrameForValidImage`, `testAllTextMasksAtLeastAsMuchAsPII`)
+fail with `TextRecognition.CRImageReaderError` code 1 on plain `intel-fork`,
+though they passed earlier the same day: the build Mac's text recognition
+refuses the x86_64 test process at times. Not a code regression; rerun later
+or on Rosy. Follow-up: gate these tests on Vision being usable rather than
+failing.
+
