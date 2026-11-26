@@ -2,9 +2,8 @@
 //  IntelSandboxManagerConformer.swift
 //  OsaurusCore
 //
-//  Intel-fork conformer for SandboxManager + nested State.
-//  Scope: Phase 8A — satisfies NativeBlockViews call sites only.
-//  All values are no-op defaults. Sandbox subsystem is amputated on Intel.
+//  Intel-fork conformer for SandboxToolRegistrar.UnavailabilityReason.
+//  (SandboxManager itself moved to Services/Sandbox/IntelSandboxManager.swift.)
 //  Extend this conformer's surface when later phases un-body-swap
 //  FloatingInputCard, AgentsView, OnboardingView, SandboxView,
 //  ProvisioningJourneyView.
@@ -14,25 +13,7 @@
 
 import Foundation
 
-// MARK: - SandboxManager
-
-enum SandboxManager {
-    @MainActor
-    final class State: ObservableObject {
-        static let shared = State()
-
-        @Published var availability: SandboxAvailability = .unavailable(reason: "Intel — sandbox not supported")
-        @Published var status: ContainerStatus = .notProvisioned
-        @Published var provisioningPhase: String? = nil
-        @Published var provisioningProgress: Double? = nil
-        @Published var isProvisioning: Bool = false
-        /// Phase 8C surface — FloatingInputCard's sandbox chip reads this
-        /// to flip the chip red + show a tooltip when the active agent's
-        /// sandbox provisioning failed. Always nil on Intel (no sandbox
-        /// = no failure reason).
-        @Published var activeAgentUnavailability: SandboxToolRegistrar.UnavailabilityReason? = nil
-    }
-}
+// SandboxManager (and State) now live in Services/Sandbox/IntelSandboxManager.swift.
 
 // MARK: - SandboxToolRegistrar.UnavailabilityReason (Intel stub)
 //

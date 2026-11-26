@@ -69,7 +69,7 @@ Facts from upstream's profile that matter:
 | # | Stage | Status |
 |---|-------|--------|
 | 1 | **Seatbelt core, unwired.** `SeatbeltSandbox` (profile, backend enum, path mapper), `SeatbeltExecutor` (pipes, idle timeout, hard deadline, NUL check), Intel stand-ins for `Writer` and `SandboxError`. Tests. No behaviour change. | Done |
-| 2 | **Host sandbox runtime.** A compiled Intel `SandboxManager` slice with upstream's `exec` / Seatbelt branch, workspace folders under `OsaurusPaths.containerWorkspace()`, per-agent homes, `SandboxLogBuffer`, availability cache (#3094, #3105), `SandboxError` merge. Default network denied. A confinement self-test (upstream's diagnostic: a write outside the workspace must fail). | Not started |
+| 2 | **Host sandbox runtime.** A compiled Intel `SandboxManager` slice with upstream's `exec` / Seatbelt branch, workspace folders under `OsaurusPaths.containerWorkspace()`, per-agent homes, `SandboxLogBuffer`, availability cache (#3094, #3105), `SandboxError` merge. Default network denied. A confinement self-test (upstream's diagnostic: a write outside the workspace must fail). | Done (2026-11-26) |
 | 3 | **Tools.** Compile the host-capable part of `BuiltinSandboxTools` (`sandbox_exec`, read, write, search, `sandbox_secret_set` with #2157 scrubbing), `SandboxToolRegistrar`, per-agent `AutonomousExecConfig` (`enabled`, `maxCommandsPerTurn`, `pluginCreate`, `backgroundProcessEnabled`), `ToolRegistry` wiring, permission "Ask", composer sections (`sandboxState`, `sandboxUnavailable`, `secretHandling`, `selfImprovement`, `pluginCreator`, `soul`). | Not started |
 | 4 | **Background processes and plugins.** `sandbox_exec(background:true)`, `sandbox_process`, sandbox plugins on the host backend. Avoid `BackgroundTaskManager` and the spawn tools while `W-subagents` is open. | Not started |
 | 5 | **UI and declarative config.** Seatbelt variant of the Sandbox page (`isSeatbelt` branches), per-agent switches in the agent editor including an explicit network switch that defaults off, `sandbox.*` keys in declarative config. Ventura rules apply. | Not started |
@@ -94,3 +94,34 @@ validates the process before launch), `OSAURUS_KEYCHAIN_FREE_SANDBOX`.
   prompt-framing tests and the bridge-migration test. They return with stages
   2 and 3.
 - Nothing calls the new code yet, so no file or network access changes.
+
+## Stage 2 notes (2026-11-26)
+
+- File: `Services/Sandbox/IntelSandboxManager.swift` defines Intel's compiled
+  `actor SandboxManager` (upstream's `SandboxManager.swift` stays excluded: it
+  is the VM stack). It holds only upstream's Seatbelt branches: cached
+  availability (#3094, #3105), `provision`/`startContainer`/`stopContainer`/
+  `removeContainer`/`resetContainer`, `exec`/`execAsRoot`/`execAsAgent`,
+  `bootstrapAgent`/`ensureAgentUser`/`removeAgentUser` (host dirs under
+  `OsaurusPaths.containerWorkspace()/agents/<name>`, mode 700, SOUL seeded
+  once), `info()` and `runDiagnostics()`. The old no-op `enum SandboxManager`
+  in `IntelSandboxManagerConformer.swift` is gone (that file keeps only the
+  `UnavailabilityReason` stub). `SandboxError` gained `provisionFailed`,
+  `removeFailed`, `userCreationFailed` (VM-only cases stay out).
+- Intel adaptations: `exec` takes `networkEnabled: Bool = false`. Network is
+  allowed only when that flag is true AND `sandbox.json` still says
+  "outbound"; either denying wins, so upstream's "outbound" default cannot
+  widen anything. Tees are `SeatbeltOutputWriter`. `removeContainer` never
+  deletes the workspace folder. Agent names with `/`, `.`, `..` or empty are
+  rejected. `startContainer` is a no-op after the user removed the sandbox.
+- UI gate: `SandboxManager.publishesAvailabilityToUI` is `false`, so
+  `State.shared.availability` stays unavailable and Onboarding / the agent
+  editor / the chat chip behave as before (otherwise Onboarding would persist
+  upstream's default sandbox config). Stage 3/5 flips it with the tools and UI.
+- Confinement self-test (`runDiagnostics`): exec, workspace read/write, a
+  write outside the workspace must fail, and a network probe that only
+  connects to a loopback listener opened by the app itself (`nc -z`), so
+  diagnostics never leave the Mac. With network off the connect must fail.
+- Tests: `Tests/Sandbox/SandboxManagerHostTests.swift` (temp workspaces only;
+  `SandboxManager(workspaceRoot:)` does not touch `State`, logs or
+  `sandbox.json`). Nothing in the app calls the manager yet.

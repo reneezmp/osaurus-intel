@@ -22,10 +22,15 @@ public protocol SeatbeltOutputWriter: AnyObject, Sendable {
     func close() throws
 }
 
-/// Errors of the sandbox exec path (the cases upstream's executor throws).
+/// Errors of the sandbox exec path. Same cases and messages as upstream's
+/// `SandboxManager.SandboxError`, minus the VM-only ones (start/stop failure,
+/// vmnet ownership conflict, artifact integrity).
 public enum SandboxError: Error, LocalizedError {
     case unavailable
     case containerNotRunning
+    case provisionFailed(String)
+    case removeFailed(String)
+    case userCreationFailed(String)
     case execFailed(String)
     case timeout
 
@@ -33,6 +38,9 @@ public enum SandboxError: Error, LocalizedError {
         switch self {
         case .unavailable: L("Sandbox is not available on this system")
         case .containerNotRunning: "Container is not running"
+        case .provisionFailed(let msg): "Provisioning failed: \(msg)"
+        case .removeFailed(let msg): "Container removal failed: \(msg)"
+        case .userCreationFailed(let msg): "User creation failed: \(msg)"
         case .execFailed(let msg): "Execution failed: \(msg)"
         case .timeout: "Command timed out"
         }
