@@ -376,11 +376,15 @@ public struct OnboardingView: View {
                 pinProviderModel(providerId: providerId, forAgents: brainPinTargets)
             }
         case .claudeCode:
-            // Intel: Claude Code is a model in the picker (`claude-code/…`,
-            // `IntelClaudeCodeService`), not upstream's harness runtime
-            // (`W-harness-runtimes`), so the agents default to its Sonnet.
+            // Claude Code is a harness runtime, not a model (upstream #3175):
+            // the agents run their chats in it, and their own model setting
+            // stays untouched. The user picked it in this step.
+            let runtime = HarnessRuntimeStore.shared.ensureClaudeCodeRuntime()
             for agentId in brainPinTargets {
-                AgentManager.shared.updateDefaultModel(for: agentId, model: ClaudeCodeModel.sonnet.pickerId)
+                var claude = AgentManager.shared.effectiveClaudeCodeConfig(for: agentId)
+                claude.model = ClaudeCodeModel.sonnet.rawValue
+                AgentManager.shared.updateClaudeCodeConfig(claude, for: agentId)
+                AgentManager.shared.updateRuntime(.harness(runtime.id), for: agentId)
             }
         case nil:
             break

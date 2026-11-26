@@ -3166,8 +3166,13 @@ struct AgentDetailView: View {
         }
     }
 
-    private var isClaudeCodeModelSelected: Bool {
-        ClaudeCodeModel.fromPickerId(selectedModel ?? "") != nil
+    /// Claude Code is a harness runtime now (upstream #3175), not a model: the
+    /// options below apply when this agent's runtime is a Claude Code harness.
+    private var isClaudeCodeRuntimeSelected: Bool {
+        if case .resolved(let runtime)? = AgentManager.shared.effectiveHarness(for: agent.id) {
+            return runtime.kind == .claudeCode
+        }
+        return false
     }
 
     /// Claude Code owns its own tool loop, so host-file permissions live beside
@@ -3175,9 +3180,9 @@ struct AgentDetailView: View {
     private var claudeCodeSection: some View {
         AgentDetailSection(title: "Claude Code", icon: "terminal") {
             VStack(alignment: .leading, spacing: 14) {
-                if !isClaudeCodeModelSelected {
+                if !isClaudeCodeRuntimeSelected {
                     Text(
-                        "These controls apply whenever this agent uses a Claude Code model. Choose Claude Code above to exercise them in chat.",
+                        "These controls apply whenever this agent runs on the Claude Code runtime.",
                         bundle: .module
                     )
                     .font(.system(size: 11))
@@ -5780,6 +5785,9 @@ struct AgentDetailView: View {
             agentDeviceScope: current.agentDeviceScope,
             autonomousExec: current.autonomousExec,
             claudeCode: claudeCodeConfig,
+            // The runtime is chosen elsewhere (onboarding, the chat); never
+            // write a stale copy back over it (upstream #3175).
+            runtime: current.runtime,
             pluginInstructions: effectivePluginInstructions,
             bonjourEnabled: current.bonjourEnabled,
             toolSelectionMode: current.toolSelectionMode,

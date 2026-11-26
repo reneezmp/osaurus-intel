@@ -239,6 +239,20 @@ final class SpawnAgentTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
         if inPool, let refusal = await Self.setupRefusal(agentID: agentID, tool: name) {
             return refusal
         }
+        // Upstream #3175: an agent on a harness runtime has no built-in loop
+        // to spawn into; running it here with built-in defaults would
+        // silently be a different agent.
+        if let harnessError = await MainActor.run(body: {
+            AgentManager.shared.harnessUnsupportedError(for: agentID)
+        }) {
+            return ToolEnvelope.failure(
+                kind: .unavailable,
+                message: harnessError.localizedDescription,
+                field: "agent",
+                tool: name,
+                retryable: false
+            )
+        }
 
         // The shared host owns the recursion guard, live feed, permission
         // verdict, compact-result normalization and telemetry; the kind owns

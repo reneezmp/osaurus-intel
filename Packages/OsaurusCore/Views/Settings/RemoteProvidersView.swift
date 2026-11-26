@@ -32,8 +32,9 @@ struct RemoteProvidersView: View {
     /// Mirrors the sidebar's Developer Tools switch; gates the connectivity
     /// summary card.
     @State private var showDeveloperDetail = SidebarSectionExpansion.isDeveloperToolsOn
-    /// Intel: Claude Code is a model source on this Mac (`IntelClaudeCodeService`),
-    /// set up from a card at the top of Cloud Models.
+    /// Intel: the Claude Code CLI is set up (detected, signed in) from a card at
+    /// the top of Cloud Models. It runs as a harness runtime per agent, not as
+    /// a model (upstream #3175).
     @State private var showingClaudeCodeSetup = false
 
     private struct AddSheetConfig: Identifiable {
