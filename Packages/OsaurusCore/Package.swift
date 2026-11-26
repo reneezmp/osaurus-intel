@@ -283,7 +283,6 @@ let package = Package(
                 "Service/SearchServiceTests.swift",
                 "Service/ValidateJANGTQUnsupportedFamilyTests.swift",
                 
-                "PrivacyFilter/PostScrubInvariantTests.swift",
                 
                 "Provider/RemoteChatRequestEncodingTests.swift",
                 "Provider/RemoteProviderConnectRetryTests.swift",
