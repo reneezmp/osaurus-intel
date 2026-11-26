@@ -381,9 +381,12 @@ struct IntelHTTPAgentRoutesTests {
             let result = try await server.send("GET", path)
             #expect(result.status == 200, "\(path) returned \(result.status): \(result.body)")
         }
+        // Intel, owner decision 2026-11-26: a browser Origin not listed by
+        // name is refused even with the switch off (HTTPAuthGateTests
+        // `browserGuard_*` covers the rest).
         let browser = try await server.send("GET", "/agents", headers: ["Origin": "https://any.example"])
-        #expect(browser.status == 200)
-        #expect(browser.allowOrigin == "*")
+        #expect(browser.status == 403)
+        #expect(browser.allowOrigin == nil)
     }
 }
 

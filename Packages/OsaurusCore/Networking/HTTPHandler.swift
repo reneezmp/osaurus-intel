@@ -842,7 +842,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                 for: outerHead,
                 isPreflight: true,
                 isLoopback: isLoopbackConnection(context),
-                explicitOriginsOnly: localKeyRequired(for: path)
+                explicitOriginsOnly: LocalAPIKeyPolicy.isBrowserGuardedRoute(path)
             )
             sendGateResponse(context: context, head: head, status: .noContent, headers: cors, body: "")
             return false
@@ -865,29 +865,43 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             return false
         }
 
-        // `LocalAPIKeyPolicy`: on a protected route, a browser origin not
-        // listed by name is refused outright (key or not), and the
-        // in-process app token stands in for a key over physical loopback.
+        // Browser guard (Intel, owner decision 2026-11-26), on every guarded
+        // route and whatever the access-key switch says: a browser `Origin`
+        // not listed by name is refused, and over physical loopback so is
+        // `Sec-Fetch-Site: cross-site` / `same-site` and a non-loopback
+        // `Host` (DNS rebinding). Local tools send no Origin and pass. Then
+        // `LocalAPIKeyPolicy`: the in-process app token stands in for a key
+        // over physical loopback.
         let localKeyRequired = localKeyRequired(for: path)
         var presentedAppToken = false
-        if localKeyRequired {
+        if LocalAPIKeyPolicy.isBrowserGuardedRoute(path) {
             stateRef.value.corsHeaders = computeCORSHeaders(
                 for: outerHead,
                 isPreflight: false,
                 isLoopback: false,
                 explicitOriginsOnly: true
             )
-            if let origin = outerHead.headers.first(name: "Origin") ?? head.headers.first(name: "Origin"),
-                !LocalAPIKeyPolicy.isExplicitlyAllowedOrigin(origin, allowedOrigins: configuration.allowedOrigins)
-            {
+            let checkLocalOnly = isPhysicalLoopbackConnection(context) && !requestIsSecureChannel
+            let routeLabel =
+                path.hasPrefix("/admin/import/")
+                ? "/admin/import/*" : path.hasPrefix("/admin/config/") ? "/admin/config/*" : "this route"
+            if ConfigAdminEndpoint.browserRefusal(
+                host: checkLocalOnly ? outerHead.headers.first(name: "Host") : "localhost",
+                origin: outerHead.headers.first(name: "Origin") ?? head.headers.first(name: "Origin"),
+                secFetchSite: checkLocalOnly ? outerHead.headers.first(name: "Sec-Fetch-Site") : nil,
+                allowedOrigins: configuration.allowedOrigins,
+                route: routeLabel
+            ) != nil {
                 let message =
-                    "Browser requests to this route are refused. Add the origin to Allowed Origins (CORS) to permit it."
+                    "Browser requests to \(routeLabel) are refused. Add the origin to Allowed Origins (CORS) to permit it."
                 return refuse(
                     .forbidden,
                     #"{"error":{"code":"browser_origin_refused","message":"\#(message)","type":"permission_error"}}"#,
                     message: message
                 )
             }
+        }
+        if localKeyRequired {
             presentedAppToken =
                 isPhysicalLoopbackConnection(context)
                 && LocalAPIKeyPolicy.isAppSessionToken(head.headers.first(name: LocalAPIKeyPolicy.appTokenHeaderName))

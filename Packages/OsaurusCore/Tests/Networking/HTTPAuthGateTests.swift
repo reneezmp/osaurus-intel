@@ -596,9 +596,123 @@ struct HTTPAuthGateTests {
             let result = try await Self.sendLocal(method, path, server: server)
             #expect(result.status == 200, "\(method) \(path) returned \(result.status): \(result.body)")
         }
-        let browser = try await Self.sendLocal("GET", "/agents", server: server, origin: "https://any.example")
-        #expect(browser.status == 200)
-        #expect(browser.allowOrigin == "*")
+        for (method, path) in [("GET", "/agents"), ("GET", "/mcp/tools")] {
+            let result = try await Self.sendLocal(method, path, server: server)
+            #expect(result.allowOrigin == nil, "\(path): no CORS grant for a caller without an Origin")
+        }
+    }
+
+    /// Guarded routes: the routes the access-key switch protects (the two
+    /// admin groups have their own browser refusal) plus the other routes
+    /// that read chats or run agents and tools.
+    private static let browserGuardedRoutes: [(String, String)] = [
+        ("GET", "/agents"), ("GET", "/v1/agents"),
+        ("POST", "/agents/00000000-0000-0000-0000-000000000001/run"),
+        ("GET", "/sessions"), ("GET", "/v1/sessions/not-a-session"),
+        ("GET", "/mcp/tools"), ("POST", "/mcp/call"), ("GET", "/mcp/health"),
+        ("GET", "/runs/abc/events"), ("POST", "/runs/abc/stop"),
+        ("GET", "/tasks/abc"), ("GET", "/approvals"), ("POST", "/approvals/abc"),
+        ("GET", "/config/approvals"), ("POST", "/memory/ingest"),
+    ]
+
+    /// Switch OFF: a browser Origin not listed by name is refused on each
+    /// guarded route, `*` in Allowed Origins does not admit it, and the CORS
+    /// header is never `*`.
+    @Test func browserGuard_unlistedOriginIsRefusedWithSwitchOff() async throws {
+        for allowed in [[String](), ["*"], ["https://app.example.com"]] {
+            let server = try await startAuthTestServer(
+                validator: .forAlice(), trustLoopback: true, allowedOrigins: allowed
+            )
+            defer { Task { await server.shutdown() } }
+            for (method, path) in Self.browserGuardedRoutes {
+                let result = try await Self.sendLocal(
+                    method, path, server: server, origin: "https://evil.example")
+                #expect(result.status == 403, "\(method) \(path) \(allowed): \(result.status)")
+                #expect(result.body.contains("browser_origin_refused"), "\(method) \(path): \(result.body)")
+                #expect(result.allowOrigin == nil, "\(method) \(path) leaked \(result.allowOrigin ?? "")")
+            }
+        }
+    }
+
+    @Test func browserGuard_listedOriginIsAllowedWithSwitchOff() async throws {
+        let listed = "https://app.example.com"
+        let server = try await startAuthTestServer(
+            validator: .forAlice(), trustLoopback: true, allowedOrigins: [listed, "*"]
+        )
+        defer { Task { await server.shutdown() } }
+        for path in ["/agents", "/sessions", "/mcp/tools"] {
+            let result = try await Self.sendLocal("GET", path, server: server, origin: listed)
+            #expect(result.status == 200, "\(path): \(result.status) \(result.body)")
+            #expect(result.allowOrigin == listed, "\(path): echoes the one origin, never *")
+        }
+    }
+
+    @Test func browserGuard_requestWithoutOriginKeepsWorkingWithSwitchOff() async throws {
+        let server = try await startAuthTestServer(
+            validator: .forAlice(), trustLoopback: true, allowedOrigins: ["*"]
+        )
+        defer { Task { await server.shutdown() } }
+        for path in ["/agents", "/sessions", "/mcp/tools"] {
+            let result = try await Self.sendLocal("GET", path, server: server)
+            #expect(result.status == 200, "\(path): \(result.status) \(result.body)")
+            #expect(result.allowOrigin == nil)
+        }
+    }
+
+    @Test func browserGuard_crossSiteFetchMetadataIsRefused() async throws {
+        let server = try await startAuthTestServer(validator: .forAlice(), trustLoopback: true)
+        defer { Task { await server.shutdown() } }
+        for site in ["cross-site", "same-site"] {
+            let result = try await Self.sendLocal(
+                "GET", "/agents", server: server, headers: ["Sec-Fetch-Site": site])
+            #expect(result.status == 403, "\(site): \(result.status)")
+        }
+        let none = try await Self.sendLocal(
+            "GET", "/agents", server: server, headers: ["Sec-Fetch-Site": "none"])
+        #expect(none.status == 200)
+    }
+
+    /// DNS rebinding: the page's name resolves to 127.0.0.1, so the socket is
+    /// loopback but `Host` names the attacker. URLSession will not send a
+    /// custom `Host`, so this speaks raw HTTP.
+    @Test func browserGuard_nonLoopbackHostIsRefused() async throws {
+        let server = try await startAuthTestServer(validator: .forAlice(), trustLoopback: true)
+        defer { Task { await server.shutdown() } }
+        for path in ["/agents", "/sessions", "/mcp/tools"] {
+            let evil = try Self.rawGet(path, host: "evil.example", port: server.port)
+            #expect(evil.hasPrefix("HTTP/1.1 403"), "\(path): \(evil.prefix(40))")
+            #expect(!evil.lowercased().contains("access-control-allow-origin"), "\(path)")
+            let local = try Self.rawGet(path, host: "localhost:\(server.port)", port: server.port)
+            #expect(local.hasPrefix("HTTP/1.1 200"), "\(path): \(local.prefix(40))")
+        }
+    }
+
+    private static func rawGet(_ path: String, host: String, port: Int) throws -> String {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw URLError(.cannotConnectToHost) }
+        defer { close(fd) }
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(UInt16(port).bigEndian)
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard connected == 0 else { throw URLError(.cannotConnectToHost) }
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        let request = "GET \(path) HTTP/1.1\r\nHost: \(host)\r\nConnection: close\r\n\r\n"
+        _ = request.withCString { Darwin.send(fd, $0, strlen($0), 0) }
+        var received = Data()
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        while true {
+            let count = recv(fd, &buffer, buffer.count, 0)
+            if count <= 0 { break }
+            received.append(buffer, count: count)
+        }
+        return String(decoding: received, as: UTF8.self)
     }
 
     @Test func localKeyPolicyOn_keylessLoopbackGets401OnProtectedRoutesOnly() async throws {
@@ -784,6 +898,32 @@ struct LocalAPIKeyPolicyTests {
         LocalAPIKeyPolicy.setEnabled(true, defaults: defaults)
         #expect(LocalAPIKeyPolicy.isEnabled(defaults: defaults))
         LocalAPIKeyPolicy.setEnabled(false, defaults: defaults)
+        #expect(defaults.object(forKey: LocalAPIKeyPolicy.defaultsKey) == nil)
+    }
+
+    @Test func browserGuardedRoutesAreTheProtectedOnesPlusChatAndToolRoutes() {
+        for path in ["/sessions/x", "/agents", "/mcp/call", "/runs/x/events", "/tasks/x", "/approvals", "/memory/ingest"] {
+            #expect(LocalAPIKeyPolicy.isBrowserGuardedRoute(path), "\(path)")
+        }
+        for path in ["/", "/health", "/models", "/chat/completions", "/runsx", "/plugins/x"] {
+            #expect(!LocalAPIKeyPolicy.isBrowserGuardedRoute(path), "\(path)")
+        }
+    }
+
+    /// The Settings row's binding: reads the view's state, writes the live
+    /// switch at once; default off.
+    @Test func settingsRowBindingTogglesThePolicy() throws {
+        let suite = "LocalAPIKeyPolicyTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var state = LocalAPIKeyPolicy.isEnabled(defaults: defaults)
+        #expect(!state)
+        let binding = LocalAPIKeyPolicy.binding(defaults: defaults, get: { state }, set: { state = $0 })
+        binding.wrappedValue = true
+        #expect(LocalAPIKeyPolicy.isEnabled(defaults: defaults))
+        #expect(state)
+        binding.wrappedValue = false
+        #expect(!LocalAPIKeyPolicy.isEnabled(defaults: defaults))
         #expect(defaults.object(forKey: LocalAPIKeyPolicy.defaultsKey) == nil)
     }
 

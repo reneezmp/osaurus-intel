@@ -19,6 +19,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 enum LocalAPIKeyPolicy {
     /// UserDefaults key. Absent = off, so every existing install upgrading to
@@ -54,6 +55,22 @@ enum LocalAPIKeyPolicy {
             || path.hasPrefix("/admin/import/")
     }
 
+    /// Intel (owner decision 2026-11-26): routes that refuse browser callers
+    /// (an unlisted `Origin`, `Sec-Fetch-Site` cross-site / same-site, a
+    /// non-loopback `Host`) whatever the access-key switch says, and never
+    /// carry `Access-Control-Allow-Origin: *`. The protected routes plus the
+    /// others that read chats, run agents or tools, or answer their prompts.
+    nonisolated static func isBrowserGuardedRoute(_ path: String) -> Bool {
+        isProtectedRoute(path)
+            || path.hasPrefix("/runs/")
+            || path.hasPrefix("/tasks/")
+            || path == "/approvals" || path.hasPrefix("/approvals/")
+            || path == "/config/approvals" || path.hasPrefix("/config/approvals/")
+            || path == "/computer-use/prompts" || path.hasPrefix("/computer-use/prompts/")
+            || path == "/secrets/prompts" || path.hasPrefix("/secrets/prompts/")
+            || path == "/memory/ingest"
+    }
+
     /// A browser origin is admitted to a protected route only when Allowed
     /// Origins names it verbatim; a `*` wildcard does not count.
     nonisolated static func isExplicitlyAllowedOrigin(_ origin: String, allowedOrigins: [String]) -> Bool {
@@ -72,5 +89,21 @@ enum LocalAPIKeyPolicy {
         } else {
             defaults.removeObject(forKey: defaultsKey)
         }
+    }
+
+    /// The Settings row's binding (Intel): writes the live switch at once and
+    /// mirrors the value into the view's own state.
+    static func binding(
+        defaults: UserDefaults = .standard,
+        get: @escaping () -> Bool,
+        set: @escaping (Bool) -> Void
+    ) -> Binding<Bool> {
+        Binding(
+            get: get,
+            set: { newValue in
+                setEnabled(newValue, defaults: defaults)
+                set(newValue)
+            }
+        )
     }
 }

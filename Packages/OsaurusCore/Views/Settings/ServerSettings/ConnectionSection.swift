@@ -114,6 +114,9 @@ struct ConnectionSection: View {
     @State private var portText: String = ""
     @State private var corsText: String = ""
     @State private var initialized: Bool = false
+    /// `LocalAPIKeyPolicy` is a live UserDefaults switch, not part of the
+    /// draft: it applies at once, with no server restart.
+    @State private var requireLocalKey: Bool = LocalAPIKeyPolicy.isEnabled()
 
     var body: some View {
         ServerSettingsCard(
@@ -136,6 +139,15 @@ struct ConnectionSection: View {
                 description:
                     "Off binds to 127.0.0.1 (this Mac only). On binds to 0.0.0.0 so phones, iPads, and other devices on your network can connect.",
                 isOn: $draft.exposeToNetwork
+            )
+
+            SettingsToggle(
+                title: L("Require an access key for local apps"),
+                description: L(
+                    "Off: apps on this Mac can reach chats, agents and tools without a key. On: they must send an access key, like other devices. Browser pages are always refused unless listed in Allowed Origins."
+                ),
+                isOn: LocalAPIKeyPolicy.binding(
+                    get: { requireLocalKey }, set: { requireLocalKey = $0 })
             )
 
             SettingsDivider()
