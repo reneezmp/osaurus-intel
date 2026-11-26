@@ -2,8 +2,9 @@
 
 Backlog item `W-computer-use` (upstream Classic 0.25.x, 40 files, about 15k
 lines; see `INTEL_MISSING_FEATURES_APPENDIX.md`). Ported from
-`upstream/classic` only. Nothing in stages 1-2 can act on the real screen,
-mouse or keyboard: no tool, no driver, no UI is registered.
+`upstream/classic` only. Nothing in stages 1-3 can act on the real screen,
+mouse or keyboard: the native driver exists but nothing constructs it, and no
+tool, kind or UI is registered.
 
 ## Owner policy (hard rules for every stage)
 
@@ -52,7 +53,7 @@ native implementation, perception, the loop, and the tool and kind.
 |---|---|---|
 | 1 | Model and policy: `AgentAction`, `AgentView`, the `MacDriver` contract with `MockMacDriver`, `TargetResolver`, un-fenced `EffectClassifier`, `Gate` (`ComputerUseGating`, `HardwiredGate`) and `ComputerUseGate`; upstream tests for each | done |
 | 2 | Perception with fakes: `CloudVisionConsent`, `FrameScrubber` (Vision; fail-closed, see log), `VisionAttachment`, `CaptureRouter`, `ScreenContextSnapshot`, `AxResolvableSweep`, `ComputerUseRunMetrics`; router, consent, scrub, attachment and metrics tests | done |
-| 3 | Native driver, not yet reachable: `Accessibility`, `ElementCache`, `Screenshot` (ScreenCaptureKit 14+, `CGWindowListCreateImage` / `CGDisplayCreateImage` on 13), `InputController`, `BackgroundDriver`, `SkyLightBridge` (dlsym, nil-safe), `NativeMacDriver`, `AutomationSession`, `CaptureMode`; route and bounds tests over fakes | planned |
+| 3 | Native driver, not yet reachable: `Accessibility`, `ElementCache`, `Screenshot` (ScreenCaptureKit 14+, `CGWindowListCreateImage` / `CGDisplayCreateImage` on 13), `InputController`, `BackgroundDriver`, `SkyLightBridge` (dlsym, nil-safe), `NativeMacDriver`, `AutomationSession`, `CaptureMode`; route, bounds, self-guard and open-folder tests over fakes | done |
 | 4 | `ComputerUseLoop`, `ComputerUseRunMetrics`, `AxResolvableSweep`, `ComputerUseTool`, `ComputerUseKind`; registry and `resolveTools` gates; loop tests on `MockMacDriver` and a scripted model step | planned |
 | 5 | Settings and consent UI: `ComputerUseSettingsView`, `ComputerUseDiagnosticsPanel`, `ComputerUsePermissionDoctor`, `ComputerUseGateInspector`, Abilities switch, quit/stop wiring, `/computer-use/prompts` consumers; i18n | planned |
 | 6 | Screen context: `ScreenContextDistiller`, `[Screen Context]` prefix (composer row 30), per-agent screen-context option, `ScreenContextPreview`, guide topic, composer guidance loop row 12 | planned |
@@ -134,3 +135,37 @@ Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
     in the stage 4 notes: re-take it from `upstream/classic`).
   - Vision OCR (`VNRecognizeTextRequest`, `.accurate`) is on-device and
     available on macOS 13.
+- 2026-11-26 stage 3 done (native driver, unreachable). Ported whole from
+  `upstream/classic`: `Mac/Accessibility`, `ElementCache`, `Screenshot`,
+  `InputController`, `BackgroundDriver`, `SkyLightBridge`, `AutomationSession`,
+  `CaptureMode`, and `NativeMacDriver`. The stage-1 stand-ins (`InputRoute.swift`,
+  the trimmed `CaptureMode.swift`) are gone: the ported files own those types.
+  Nothing outside `ComputerUse/Driver` constructs `NativeMacDriver`; only
+  `ExternalPlugin` uses `AccessibilityManager.serialQueue` (it replaces the
+  one-member stand-in in `IntelPluginShims.swift`, same queue label).
+  - **Intel adaptations (3).** (a) `Screenshot.swift`: window and display capture
+    use ScreenCaptureKit on 14+ (`@available(macOS 14.0, *)` helpers) and, on
+    13, `CGDisplayCreateImage` for displays and `CGWindowListCreateImage` for a
+    window id, resolved with `dlopen`/`dlsym` because the call is `unavailable`
+    to the compiler on the current SDK (macOS 27.2). The Ventura window path sees
+    only windows on the current Space; others return nil ("not capturable").
+    (b) `BackgroundDriver.InputDebug` wrote through upstream's
+    `RuntimeDiagnostics` (vmlx package, not linked here); it writes to stderr
+    (only with `OSAURUS_CU_INPUT_DEBUG=1`). (c) the `AccessibilityManager` stand-in
+    removed. `SkyLightBridge` was already `dlsym`-based and nil-safe, no change.
+  - **No permission prompt anywhere in the driver.** It only calls
+    `AXIsProcessTrusted` / `CGPreflightScreenCaptureAccess` (checks). Requesting
+    permissions stays with stage 5's Permission Doctor, user click only.
+  - **Tests (Swift Testing, fakes only):** `BackgroundDriverRouteTests` (every
+    synthesized event goes through one injected spy transport; nothing is posted
+    to a real pid), `AccessibilitySelfGuardTests` (our own pid yields nothing),
+    `AccessibilityBoundedElementSourceTests` (source guard: one
+    `AXUIElementCreateApplication`, inside `axApp`, with a messaging timeout),
+    `OpenFolderPathTests` (temp dir only). **Not ported on purpose:**
+    upstream's `NativeMacDriverLiveTests` and `BackgroundDriverLiveInputTests`
+    (they capture the real screen and post real input) and `ComputerUseEvidencePackTests`
+    (needs the stage-4 loop). The plan's earlier note that `SnapshotIdFormat` /
+    `keyCode(for:)` had their own test classes was wrong: upstream has none.
+  - **XCTest conversion.** `InsightsImageRedactionTests` and
+    `ComputerUsePromptQueueTests` were XCTest and never ran under the gate; both
+    are now Swift Testing with the same assertions (see the result line below).
