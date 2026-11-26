@@ -33,8 +33,9 @@ Upstream has two optional "AI" detectors behind the rule layer:
 Evidence: both run on MLX GPU kernels (`RampartPrivacyDetector` documents the
 passes as "MLX GPU producers on the shared Metal device"); upstream's
 `Package.swift` targets `.macOS(.v15)` and takes `RampartPII` from
-`vmlx-swift`; Intel's build links only `IntelStubs` MLX stand-ins and its
-Metal kernels already fail on Intel (`UPSTREAM_SYNC.md` Apple Silicon rows).
+`vmlx-swift`; Intel's build links only `IntelStubs` MLX stand-ins, and local MLX
+inference is already classed Apple Silicon only (`UPSTREAM_SYNC.md`, Apple
+Silicon rows).
 Neither can run on macOS 13 x86_64, and a cloud or CPU-only substitute would
 break the owner policy, so the port keeps the rule-based layer only:
 
@@ -53,7 +54,7 @@ break the owner policy, so the port keeps the rule-based layer only:
 
 Built-in patterns (`RegexEntityDetector`): phone, email, URL, US SSN and
 Luhn-valid card numbers, plus numbers read out as words (spoken digits).
-Presets (about 6 regions, checksum validators in `PrivacyChecksums`): IBAN,
+Presets (regional lists in `PrivacyRulePresets+*.swift`, checksum validators in `PrivacyChecksums`): IBAN,
 national IDs, passports, driver's licences, tax numbers, AWS and GitHub keys
 and more, enabled per region. Custom rules (builder or raw regex). Not caught
 without a model: person names, street addresses, free-form dates and
@@ -89,4 +90,24 @@ free-form secrets. The UI and manual say so.
 
 ## Status
 
-- 2026-11-26: plan written; stage 1 in progress.
+- 2026-11-26: stage 1 done (rule engine, presets, config/stores; 15 test
+  files). Strings: 8 `privacy.category.*` and 445 `privacy.presets.*` catalog
+  entries came from `upstream/classic`'s catalog (`merge-upstream-keys.py`
+  reads `upstream/main`, so do not use it for this item). Intel's older
+  catalog had a stale English `privacy.presets.iban.description`; it now
+  matches the source summary (`PrivacyPresetCatalogTests` pins this).
+- 2026-11-26: stage 2 done. `PrivacyFilterEngine` is rule-only
+  (`isLoaded` false, `modelSpans` empty, `loadIfNeeded` throws), the pipeline
+  forces `useModel = false` so a config with `aiDetectionEnabled` on (the
+  decode default for old files) never blocks a send. Adaptations: Intel's
+  `ChatMessage` (in `HTTPHandler.swift`) has `anthropic_thinking_blocks` but no
+  `responses_output_items`, so `MessageScrubbing` and the pipeline scan only
+  the former (stage 3 adds the Responses scan if Intel gains the field);
+  `ChatExecutionContext.voiceCallPrivacy` lives in a `PrivacyFilterPipeline`
+  extension to keep the shared file untouched; `RedactionReviewState` and
+  `RedactionPreviewBuilder` (plain Foundation, stage 4 files) came early because
+  the review service and tests use them; `PostScrubInvariantTests` replaces
+  Intel's old excluded stub (removed from the test `exclude:` list). Rampart's
+  three `dropWordFragments` tests are not ported.
+- Next: stage 3 (wiring). Nothing in the app calls the pipeline yet, so the
+  filter is not active for any send.
