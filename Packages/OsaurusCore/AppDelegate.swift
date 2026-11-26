@@ -589,7 +589,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // slow: engine stops are quick; see IntelVoiceLaunch.shutdown).
             await IntelVoiceLaunch.shutdown()
             KnowledgeFolderWatcher.shared.stop()
-            await ClaudeCodeProcessRegistry.shared.terminateAll()
+            await HarnessProcessRegistry.shared.terminateAll()
             // Quit: bounded 1 s drain, as upstream (the default waits 8 s).
             RelayTunnelManager.shared.disconnectAll()
             await server.stop(gracefully: false)

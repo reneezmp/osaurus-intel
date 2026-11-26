@@ -99,7 +99,7 @@ struct HarnessBinaryArchitectureTests {
 struct HarnessControlCommandTests {
 
     @Test func childEnvironmentStripsTheReservedVariablesAndKeepsTheRest() {
-        let env = HarnessControlCommand.childEnvironment(
+        let env = HarnessProcess.childEnvironment(
             inherited: [
                 "PATH": "/usr/bin",
                 "CLAUDECODE": "1",
@@ -153,7 +153,7 @@ struct HarnessControlCommandTests {
             try Data((name == "pi" ? "#!/usr/bin/env node\n" : "#!/bin/sh\n").utf8).write(to: url)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         }
-        let path = HarnessControlCommand.prependingShebangSibling(
+        let path = HarnessProcess.prependingShebangSibling(
             of: dir.appendingPathComponent("pi").path,
             to: "/usr/bin:/bin"
         )
@@ -174,6 +174,9 @@ struct HarnessRuntimeProbeTests {
                 executable.map { HarnessControlCommand.Resolved(executable: $0, environment: [:]) }
             },
             claudeCodeState: { _, _ in state },
+            piState: { _ in
+                HarnessProbeResult(status: .ready, message: "pi answered", resolvedExecutable: executable)
+            },
             host: host
         )
     }
@@ -219,6 +222,10 @@ struct HarnessRuntimeProbeTests {
                 await asked.set()
                 return .signedOut
             },
+            piState: { _ in
+                await asked.set()
+                return HarnessProbeResult(status: .ready, message: "", resolvedExecutable: nil)
+            },
             host: .x86_64
         )
         for kind in HarnessKind.allCases {
@@ -232,13 +239,19 @@ struct HarnessRuntimeProbeTests {
         #expect(await asked.value == false)
     }
 
-    @Test func aPiRuntimeIsOnlyChecked() async {
-        let result = await HarnessRuntimeProbe.run(
+    @Test func aPiRuntimeIsAskedForItsStateOnlyOnceFound() async {
+        let found = await HarnessRuntimeProbe.run(
             HarnessRuntime(name: "Pi", kind: .piRPC),
             dependencies: fake()
         )
-        #expect(result.status == .ready)
-        #expect(result.message.contains("/fake/bin/tool"))
+        #expect(found.status == .ready)
+        #expect(found.message == "pi answered")
+
+        let missing = await HarnessRuntimeProbe.run(
+            HarnessRuntime(name: "Pi", kind: .piRPC),
+            dependencies: fake(executable: nil)
+        )
+        #expect(missing.status == .failed)
     }
 }
 

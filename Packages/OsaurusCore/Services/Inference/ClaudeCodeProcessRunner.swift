@@ -15,39 +15,6 @@ import Foundation
     import Darwin
 #endif
 
-/// Tracks live Claude Code children so app quit can't orphan them.
-///
-/// Deliberately *not* `LiveExecRegistry`: that registry drives the sandbox
-/// shell tool's live terminal card, and every inference turn does not want a
-/// terminal pane in the chat. This only needs kill-on-quit.
-actor ClaudeCodeProcessRegistry {
-    static let shared = ClaudeCodeProcessRegistry()
-
-    private var live: [UUID: ProcessTerminator] = [:]
-
-    func register(_ id: UUID, terminator: ProcessTerminator) {
-        live[id] = terminator
-    }
-
-    func unregister(_ id: UUID) {
-        live[id] = nil
-    }
-
-    /// Called from the app-quit teardown. Terminates every live child.
-    func terminateAll() async {
-        let terminators = Array(live.values)
-        live.removeAll()
-        for terminator in terminators { terminator.terminate() }
-        // App teardown must not depend on a detached escalation firing after
-        // the app process is already gone. Give SIGTERM a short grace period,
-        // then synchronously issue SIGKILL to any stubborn child.
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        for terminator in terminators { terminator.forceKillIfRunning() }
-    }
-
-    func liveCount() -> Int { live.count }
-}
-
 /// Lock-guarded decoder + stderr tail shared between Foundation's IO queue
 /// (which fires `readabilityHandler`) and the awaiting task.
 ///
@@ -272,10 +239,8 @@ public enum ClaudeCodeProcessRunner {
             stderrPump.stop()
             return nil
         }
-        await ClaudeCodeProcessRegistry.shared.register(runId, terminator: terminator)
-        defer {
-            Task { await ClaudeCodeProcessRegistry.shared.unregister(runId) }
-        }
+        HarnessProcessRegistry.shared.register(runId, terminator: terminator)
+        defer { HarnessProcessRegistry.shared.unregister(runId) }
 
         let timeoutTask = Task {
             let nanoseconds = UInt64(max(0, timeout) * 1_000_000_000)
@@ -344,10 +309,8 @@ public enum ClaudeCodeProcessRunner {
         let terminator = ProcessTerminator(process: process)
 
         let producerTask = Task {
-            await ClaudeCodeProcessRegistry.shared.register(runId, terminator: terminator)
-            defer {
-                Task { await ClaudeCodeProcessRegistry.shared.unregister(runId) }
-            }
+            HarnessProcessRegistry.shared.register(runId, terminator: terminator)
+            defer { HarnessProcessRegistry.shared.unregister(runId) }
 
             do {
                 try process.run()

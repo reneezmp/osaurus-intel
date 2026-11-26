@@ -448,7 +448,7 @@ extension Agent {
 /// Per-agent behavior for the Claude Code subprocess backend.
 ///
 /// Only consulted while the selected model is a `claude-code/…` model.
-public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable {
+public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable, Hashable {
     /// Whether Claude Code runs its own tool loop or only generates text.
     public var mode: ClaudeCodeMode
     /// Auto-approve Claude Code's file-writing built-ins.

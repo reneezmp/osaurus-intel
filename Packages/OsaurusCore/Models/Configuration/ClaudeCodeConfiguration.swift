@@ -193,6 +193,24 @@ public enum ClaudeCodeConfiguration {
     /// tool is denied rather than silently approved.
     public static let defaultAllowedTools = ["Read", "Grep", "Glob"]
 
+    /// The only way writes are granted. Claude Code's `Edit(...)` rules govern
+    /// every built-in that edits files (Edit, Write, NotebookEdit). `//` anchors
+    /// the gitignore-style pattern
+    /// at the filesystem root; the path goes through `realpath` because Claude
+    /// matches against real paths (`/tmp` is `/private/tmp`), and Foundation's
+    /// `resolvingSymlinksInPath` strips `/private` instead of adding it.
+    public static func scopedWriteRule(root: URL) -> String {
+        let standardized = root.standardizedFileURL.path
+        let resolved =
+            standardized.withCString { pointer -> String? in
+                guard let real = realpath(pointer, nil) else { return nil }
+                defer { free(real) }
+                return String(cString: real)
+            } ?? standardized
+        let trimmed = resolved.hasSuffix("/") ? String(resolved.dropLast()) : resolved
+        return "Edit(/\(trimmed)/**)"
+    }
+
     /// Tools added when the agent opts into writes.
     public static let writeTools = ["Edit", "Write", "NotebookEdit"]
 
@@ -248,22 +266,11 @@ public enum ClaudeCodeConfiguration {
 
     /// Osaurus config tools that only read. Safe to grant whenever the user
     /// turns Osaurus tools on.
-    public static let osaurusReadOnlyTools = [
-        "osaurus_status", "osaurus_list", "osaurus_describe", "osaurus_search",
-    ]
+    public static let osaurusReadOnlyTools = ["osaurus_inspect", "osaurus_help"]
 
-    /// Osaurus config tools that mutate app state. Behind their own opt-in:
-    /// granting these lets a run silently rewrite agents, providers, and
-    /// installed plugins.
-    public static let osaurusConfigWriteTools = [
-        "osaurus_agent", "osaurus_provider", "osaurus_model", "osaurus_plugin", "osaurus_mcp",
-    ]
-
-    /// Deliberately never exposed. `osaurus_schedule` can queue agent runs, so
-    /// a Claude Code subprocess could schedule work that starts another Claude
-    /// Code subprocess. `AGENTS.md` forbids recursive agent workers, and this
-    /// is the path that would create them.
-    public static let osaurusExcludedTools = ["osaurus_schedule"]
+    /// The Osaurus tool that mutates app state — agents, providers, models,
+    /// plugins, and schedules. Behind its own opt-in.
+    public static let osaurusConfigWriteTools = [HarnessGrantStore.configWriteToolName]
 
     /// The `--tools` value handed to `osaurus mcp`, so the proxy hides
     /// everything else at the source rather than trusting the client to skip it.
@@ -290,12 +297,10 @@ public enum ClaudeCodeConfiguration {
     /// A note appended to the system prompt describing which Osaurus tools this
     /// run actually has.
     ///
-    /// Osaurus agents are prompted to "read current state with `osaurus_status`"
-    /// and similar. That prompt reaches Claude Code verbatim, but the tools only
-    /// arrive when the MCP bridge is attached — so without this note the model
-    /// is told to use tools it cannot see, and spends the turn guessing at
-    /// permission errors instead of answering. Stating the real capability is
-    /// the fix; suppressing the agent's prompt would break every other backend.
+    /// An agent's own instructions may tell it to "check `osaurus_inspect`".
+    /// The tools only arrive when the MCP bridge is attached, so without this
+    /// note the model is told to use tools it cannot see and spends the turn
+    /// guessing at permission errors instead of answering.
     public static func osaurusToolsSystemNote(
         available: Bool,
         allowConfigWrites: Bool = false,
@@ -312,12 +317,12 @@ public enum ClaudeCodeConfiguration {
                 cause = L("this agent runs Claude Code in text-only mode, which disables all tools")
             case .notEnabled, nil:
                 cause = L(
-                    "they are switched off for this agent — tell the user to enable \"Give It Osaurus's Own Tools\" in Osaurus settings"
+                    "they are switched off for this agent — tell the user to turn on \"Allow Osaurus read tools\" in this agent's Claude Code Options"
                 )
             }
             return String(
                 format: L(
-                    "You do NOT have Osaurus's configuration tools (osaurus_status, osaurus_list, and similar) on this run, because %@. Do not try to call them and do not speculate about permission errors. If the user asks about Osaurus's configuration, say plainly that you can't read it right now, explain why, and offer what they can check themselves."
+                    "You do NOT have Osaurus's configuration tools (osaurus_inspect, osaurus_help, osaurus_config) on this run, because %@. Do not try to call them and do not speculate about permission errors. If the user asks about Osaurus's configuration, say plainly that you can't read it right now, explain why, and offer what they can check themselves."
                 ),
                 cause
             )
@@ -379,9 +384,7 @@ public enum ClaudeCodeConfiguration {
             "args": ["mcp", "--tools", patterns.joined(separator: ",")],
         ]
         if let bridgeGrant, !bridgeGrant.isEmpty {
-            // Keep the wire key independent of the optional upstream bridge
-            // store, which the Intel target does not compile yet.
-            server["env"] = ["OSAURUS_MCP_BRIDGE_GRANT": bridgeGrant]
+            server["env"] = [HarnessGrantStore.environmentKey: bridgeGrant]
         }
         let payload: [String: Any] = ["mcpServers": [mcpServerName: server]]
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
@@ -624,7 +627,7 @@ public enum ClaudeCodeConfiguration {
 
     /// Variables stripped from a Claude Code child so runs stay on the user's
     /// signed-in subscription (upstream `ClaudeCodeHarnessAdapter.removedEnvironment`).
-    static let removedEnvironment: Set<String> = ["ANTHROPIC_API_KEY"]
+    static let removedEnvironment: Set<String> = ClaudeCodeHarnessAdapter.removedEnvironment
 
     static func controlCommand(
         _ command: String,

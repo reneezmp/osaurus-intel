@@ -2,16 +2,14 @@
 //  HarnessRuntimeProbe.swift
 //  osaurus
 //
-//  The Agent Runtimes "Test" button: look at the runtime the way a chat would
-//  launch it, without starting a conversation. Claude Code reports its sign-in
-//  with `auth status`. Pi's `get_state` round trip needs the harness process
-//  and lands with it (`W-harness-runtimes` stage 3); until then a Pi runtime is
-//  only checked for "found, and runnable on this Mac".
+//  The Agent Runtimes "Test" button: start the runtime the way a chat would
+//  and ask it something harmless. Pi answers `get_state`; Claude Code reports
+//  its sign-in with `auth status`.
 //
 //  Intel differences from upstream (#3175): the `.incompatible` status and the
 //  Mach-O check (`HarnessBinaryArchitecture`), because an Intel Mac has no
-//  Rosetta; and every collaborator is injectable so tests never launch a real
-//  external process.
+//  Rosetta; and every collaborator (including Pi's `get_state` round trip) is
+//  injectable so tests never launch a real external process.
 //
 
 import Foundation
@@ -34,24 +32,6 @@ public struct HarnessProbeResult: Sendable, Equatable {
     public var message: String
     /// The executable that was actually resolved.
     public var resolvedExecutable: String?
-}
-
-/// Names of the variables Osaurus gives, or strips from, a harness process.
-/// Stage 3 adds upstream's `contract(context:token:)` to this enum.
-enum HarnessEnvironment {
-    static let chatId = "OSAURUS_CHAT_ID"
-    static let agentId = "OSAURUS_AGENT_ID"
-    static let agentToken = "OSAURUS_AGENT_TOKEN"
-    static let apiBase = "OSAURUS_API_BASE"
-    static let workingDirectory = "OSAURUS_WORKING_DIRECTORY"
-    /// Read by `osaurus mcp`; the same literal as `ClaudeCodeConfiguration`'s
-    /// `--mcp-config` block and the CLI's `MCPCommand`.
-    static let bridgeGrant = "OSAURUS_MCP_BRIDGE_GRANT"
-
-    /// Inherited variables no harness should see. `CLAUDECODE` makes a nested
-    /// `claude` refuse to start; the bridge grant must only ever be the one
-    /// Osaurus minted for this process.
-    static let alwaysRemoved: Set<String> = ["CLAUDECODE", bridgeGrant]
 }
 
 /// Resolution for one-shot control commands, using the same PATH a harness
@@ -86,7 +66,7 @@ enum HarnessControlCommand {
         inherited: [String: String],
         loginShellEntries: [String]?
     ) -> Resolved? {
-        var environment = childEnvironment(
+        var environment = HarnessProcess.childEnvironment(
             inherited: inherited,
             loginShellEntries: loginShellEntries,
             overlay: overlay,
@@ -96,7 +76,7 @@ enum HarnessControlCommand {
             FileManager.default.isExecutableFile(atPath: executable)
         else { return nil }
         if overlay["PATH"] == nil {
-            environment["PATH"] = prependingShebangSibling(of: executable, to: environment["PATH"] ?? "")
+            environment["PATH"] = HarnessProcess.prependingShebangSibling(of: executable, to: environment["PATH"] ?? "")
         }
         return Resolved(executable: executable, environment: environment)
     }
@@ -106,30 +86,6 @@ enum HarnessControlCommand {
         let entries = await LoginShellPath.shared.entries()
         return ExecutableLocator.childPath(inherited: inherited, loginShellEntries: entries)
     }
-
-    // Upstream keeps these two on `HarnessProcess`; they move there in stage 3.
-
-    static func childEnvironment(
-        inherited: [String: String],
-        loginShellEntries: [String]?,
-        overlay: [String: String],
-        removing: Set<String>
-    ) -> [String: String] {
-        var env = inherited
-        for key in removing { env[key] = nil }
-        env["PATH"] = ExecutableLocator.childPath(inherited: env, loginShellEntries: loginShellEntries)
-        for (key, value) in overlay { env[key] = value }
-        return env
-    }
-
-    /// `#!/usr/bin/env node` scripts (npm-installed `claude`, `pi`) need their
-    /// interpreter on the child's PATH, and the copy beside the script is the
-    /// one the user's version manager picked.
-    static func prependingShebangSibling(of executable: String, to path: String) -> String {
-        guard let sibling = ExecutableLocator.envShebangSiblingDirectory(executable: executable) else { return path }
-        let rest = path.split(separator: ":").map(String.init).filter { $0 != sibling }
-        return ([sibling] + rest).joined(separator: ":")
-    }
 }
 
 enum HarnessRuntimeProbe {
@@ -137,6 +93,9 @@ enum HarnessRuntimeProbe {
     struct Dependencies: Sendable {
         var resolve: @Sendable (_ command: String, _ overlay: [String: String]) async -> HarnessControlCommand.Resolved?
         var claudeCodeState: @Sendable (_ command: String, _ overlay: [String: String]) async -> ClaudeCodeSetupState
+        /// Pi's `get_state` round trip (starts the runtime). Tests replace it
+        /// so no process is launched.
+        var piState: @Sendable (_ runtime: HarnessRuntime) async -> HarnessProbeResult
         var host: HarnessBinaryArchitecture.Host
 
         static let live = Dependencies(
@@ -150,6 +109,7 @@ enum HarnessRuntimeProbe {
             claudeCodeState: { command, overlay in
                 await ClaudeCodeConfiguration.setupState(command: command, overlay: overlay)
             },
+            piState: { runtime in await HarnessRuntimeProbe.probePi(runtime, timeout: 20) },
             host: .current
         )
     }
@@ -180,14 +140,7 @@ enum HarnessRuntimeProbe {
         case .claudeCode:
             return await probeClaudeCode(runtime, resolved: resolved, dependencies: dependencies)
         case .piRPC:
-            return HarnessProbeResult(
-                status: .ready,
-                message: String(
-                    format: L("Found at %@. Osaurus checks that it answers when a chat starts it."),
-                    resolved.executable
-                ),
-                resolvedExecutable: resolved.executable
-            )
+            return await dependencies.piState(runtime)
         }
     }
 
@@ -226,6 +179,134 @@ enum HarnessRuntimeProbe {
                 message: account.map { String(format: L("Signed in as %@."), $0) } ?? L("Signed in."),
                 resolvedExecutable: resolved.executable
             )
+        }
+    }
+
+    // MARK: - Pi
+
+    static func probePi(_ runtime: HarnessRuntime, timeout: TimeInterval) async -> HarnessProbeResult {
+        let probeChatId = UUID()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("osaurus-harness-probe-\(probeChatId.uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let promptFile = directory.appendingPathComponent("system-prompt.md")
+        try? Data().write(to: promptFile)
+
+        var environment = runtime.environment
+        environment[HarnessEnvironment.chatId] = probeChatId.uuidString.lowercased()
+        environment[HarnessEnvironment.workingDirectory] = directory.path
+
+        let spec = HarnessProcess.LaunchSpec(
+            executable: runtime.executable,
+            arguments: runtime.resolvedArguments(
+                chatId: probeChatId,
+                agentId: Agent.defaultId,
+                workingDirectory: directory,
+                systemPromptFile: promptFile
+            ),
+            environment: environment,
+            removingEnvironment: HarnessEnvironment.alwaysRemoved,
+            workingDirectory: directory,
+            runtimeName: runtime.displayName
+        )
+
+        let process: HarnessProcess
+        do {
+            process = try await HarnessProcess.launch(spec)
+        } catch {
+            return HarnessProbeResult(
+                status: .failed,
+                message: error.localizedDescription,
+                resolvedExecutable: nil
+            )
+        }
+
+        let requestId = "osaurus-probe-\(UUID().uuidString)"
+        let outcome: PiProbeOutcome
+        do {
+            try await process.send(try HarnessJSON.encode(["id": requestId, "type": "get_state"]))
+            outcome = await awaitStateResponse(process: process, requestId: requestId, timeout: timeout)
+        } catch {
+            outcome = .exited
+        }
+        await process.shutdown(grace: 2)
+
+        let executable = process.resolvedExecutable
+        switch outcome {
+        case .state(let data):
+            let model = data["model"] as? [String: Any]
+            let provider = (model?["provider"] as? String) ?? ""
+            let modelId = (model?["id"] as? String) ?? ""
+            if modelId.isEmpty || modelId == "unknown" {
+                return HarnessProbeResult(
+                    status: .needsSetup,
+                    message: L(
+                        "Connected, but no model is configured. Run it in Terminal and use /login, or pass --provider and --model in the arguments."
+                    ),
+                    resolvedExecutable: executable
+                )
+            }
+            let label = provider.isEmpty || provider == "unknown" ? modelId : "\(provider)/\(modelId)"
+            return HarnessProbeResult(
+                status: .ready,
+                message: String(format: L("Connected. Model: %@."), label),
+                resolvedExecutable: executable
+            )
+        case .rejected(let detail):
+            return HarnessProbeResult(status: .failed, message: detail, resolvedExecutable: executable)
+        case .timedOut:
+            return HarnessProbeResult(
+                status: .failed,
+                message: L("It started but didn't answer an RPC get_state request. Check that the arguments include --mode rpc."),
+                resolvedExecutable: executable
+            )
+        case .exited:
+            let stderr = process.stderrText()
+            let code = process.exitCode ?? -1
+            return HarnessProbeResult(
+                status: .failed,
+                message: HarnessError.exited(runtime: runtime.displayName, code: code, stderrTail: stderr)
+                    .localizedDescription,
+                resolvedExecutable: executable
+            )
+        }
+    }
+
+    private enum PiProbeOutcome: @unchecked Sendable {
+        case state([String: Any])
+        case rejected(String)
+        case timedOut
+        case exited
+    }
+
+    private static func awaitStateResponse(
+        process: HarnessProcess,
+        requestId: String,
+        timeout: TimeInterval
+    ) async -> PiProbeOutcome {
+        await withTaskGroup(of: PiProbeOutcome.self) { group in
+            group.addTask {
+                for await line in process.lines {
+                    guard let root = HarnessJSON.object(line),
+                        (root["type"] as? String) == "response",
+                        (root["id"] as? String) == requestId
+                    else { continue }
+                    if (root["success"] as? Bool) == true {
+                        return .state((root["data"] as? [String: Any]) ?? [:])
+                    }
+                    return .rejected((root["error"] as? String) ?? L("The get_state request was rejected."))
+                }
+                return .exited
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return .timedOut
+            }
+            let first = await group.next() ?? .timedOut
+            group.cancelAll()
+            return first
         }
     }
 }
