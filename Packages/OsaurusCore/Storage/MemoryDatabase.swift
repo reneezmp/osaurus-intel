@@ -1453,6 +1453,15 @@ public final class MemoryDatabase: @unchecked Sendable {
         }
     }
 
+    /// Delete every pinned fact for an agent, regardless of status. Used by
+    /// the agent detail "Delete All Data" flow (upstream #2355). On Intel the
+    /// fact's embedding lives in the same row, so this also removes its vector.
+    public func deletePinnedFacts(forAgent agentId: String) throws {
+        _ = try executeUpdate("DELETE FROM pinned_facts WHERE agent_id = ?1") { stmt in
+            Self.bindText(stmt, index: 1, value: agentId)
+        }
+    }
+
     public func evictPinnedFacts(belowSalience floor: Double, idleDays: Int) throws -> Int {
         var evicted = 0
         try prepareAndExecute(
@@ -3009,6 +3018,31 @@ public final class MemoryDatabase: @unchecked Sendable {
             )
         }
         return (maxSoFar, deadLettered)
+    }
+
+    /// Delete every episode for an agent, regardless of status (upstream
+    /// #2355). The episode's embedding is a column of the row (Intel), so no
+    /// separate vector cleanup is needed.
+    public func deleteEpisodes(forAgent agentId: String) throws {
+        _ = try executeUpdate("DELETE FROM episodes WHERE agent_id = ?1") { stmt in
+            Self.bindText(stmt, index: 1, value: agentId)
+        }
+    }
+
+    /// Delete an agent's raw conversation memory: transcript chunks (with
+    /// their embeddings), buffered pending signals, and processing-log rows.
+    /// Paired with a chat-history wipe so the memory pipeline can't re-distill
+    /// conversations the user just deleted (upstream #2355).
+    public func deleteConversationMemory(forAgent agentId: String) throws {
+        for sql in [
+            "DELETE FROM transcript WHERE agent_id = ?1",
+            "DELETE FROM pending_signals WHERE agent_id = ?1",
+            "DELETE FROM processing_log WHERE agent_id = ?1",
+        ] {
+            _ = try executeUpdate(sql) { stmt in
+                Self.bindText(stmt, index: 1, value: agentId)
+            }
+        }
     }
 
     private static func readPendingSignal(_ stmt: OpaquePointer) -> PendingSignal {

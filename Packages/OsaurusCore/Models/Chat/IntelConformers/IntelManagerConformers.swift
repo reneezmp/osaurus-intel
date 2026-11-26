@@ -694,6 +694,22 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
             agent.customAvatarFilename = filename
             agent.avatar = nil
             update(agent)
+        // Upstream #2355: delete the agent's chat sessions and accumulated
+        // memory. Agent UUIDs are never reused, so without this its sessions,
+        // pinned facts, episodes and raw transcripts (embeddings are columns
+        // of those rows on Intel) would sit on disk with no UI that can reach
+        // them. Strictly this agent's rows; shared/other agents' data and
+        // `project-<uuid>` namespaces are untouched. The user confirmed the
+        // delete in the "Delete Agent" alert, which names this.
+        await ChatSessionsManager.shared.deleteAll(for: id)
+        let agentScope = id.uuidString
+        await Task.detached(priority: .userInitiated) {
+            let db = MemoryDatabase.shared
+            if !db.isOpen { try? db.open() }
+            try? db.deletePinnedFacts(forAgent: agentScope)
+            try? db.deleteEpisodes(forAgent: agentScope)
+            try? db.deleteConversationMemory(forAgent: agentScope)
+        }.value
 
             if let files = try? FileManager.default.contentsOfDirectory(
                 at: dir, includingPropertiesForKeys: nil
@@ -1667,6 +1683,24 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     /// `updatedAt`: pinning is a display-ordering concern handled by the
     /// sidebar and must not bubble the row up the recency list.
     func setPinned(id: UUID, pinned: Bool) {
+    /// Delete every session owned by an agent (upstream #2355). Strict
+    /// ownership match, unlike `sessions(for:)`: the Default agent's "show
+    /// everything" view must not turn a per-agent wipe into an all-agents
+    /// wipe, so only sessions whose `agentId` matches (or is nil, for the
+    /// Default agent's own chats) are removed. Each session goes through
+    /// `delete(id:)` (tombstone, JSON file, artifacts, file history); the call
+    /// returns once the queued file removals have finished. Main-thread state.
+    @MainActor func deleteAll(for agentId: UUID) async {
+        let ids = sessions.values
+            .filter { $0.agentId == agentId || (agentId == Agent.defaultId && $0.agentId == nil) }
+            .map(\.id)
+        guard !ids.isEmpty else { return }
+        for id in ids { delete(id: id) }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            Self.persistQueue.async { continuation.resume() }
+        }
+    }
+
         guard var s = sessions[id], s.pinned != pinned else { return }
         s.pinned = pinned
         sessions[id] = s
