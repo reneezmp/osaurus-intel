@@ -1629,6 +1629,17 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             && !Self.orchestratorOnlyToolNames.contains(name)
     }
 
+    /// Immutable snapshot of every name `isLoadableDynamicTool` classifies as
+    /// dynamic (upstream #2632 `dynamicToolNameSnapshot`). Feeds
+    /// `AgentTaskState.dynamicToolClassifier`: the registry is MainActor-bound
+    /// while the loop runs nonisolated, so the loop gets a value snapshot. The
+    /// classifier is advisory-only, so a tool registered mid-run is merely
+    /// missed until the next run.
+    @MainActor
+    func dynamicToolNameSnapshot() -> Set<String> {
+        Set(toolsByName.keys.filter { isLoadableDynamicTool($0) })
+    }
+
     /// Specs for the named registered tools (loaded capabilities), skipping
     /// names that are no longer registered.
     func openAISpecs(named names: [String]) -> [Tool] {

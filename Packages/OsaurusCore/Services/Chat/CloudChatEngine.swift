@@ -1624,6 +1624,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     // next-step bias. Notices are transient: they ride on the
                     // next request only.
                     let taskState = AgentTaskState()
+                    // Upstream #2632: dynamic (MCP/plugin) tool classification for
+                    // the same-name run advisory (4 consecutive calls with varying
+                    // arguments stage a nudge). One wiring point on Intel: chat,
+                    // the HTTP agent run, plugin inference and subagents all drive
+                    // this loop. A value snapshot because the registry is
+                    // MainActor-bound.
+                    let dynamicToolNames = await MainActor.run {
+                        ToolRegistry.shared.dynamicToolNameSnapshot()
+                    }
+                    taskState.dynamicToolClassifier = { dynamicToolNames.contains($0) }
                     // Upstream: "Allow for This Task" grants last for this run only.
                     let permissionRunScope = ToolPermissionRunScope()
                     var pendingHarnessNotices: [String] = request.transientNotices
