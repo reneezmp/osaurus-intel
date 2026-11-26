@@ -230,6 +230,26 @@ struct IntelToolStopPolicyTests {
         #expect(!engineDenial.contains("⛔️"))
     }
 
+    @Test func theTerminalRejectionEnvelopeIsTypedOrNothing() throws {
+        // A typed envelope passes through; the engine's untyped denial text becomes
+        // a non-retryable user_denied; other untyped text records nothing.
+        #expect(AgentToolLoop.terminalRejectionEnvelope(for: envelope(.rejected)) == envelope(.rejected))
+        let denial = try #require(
+            AgentToolLoop.terminalRejectionEnvelope(for: "⛔️ “file_write” was not run — you declined to run it."))
+        var state = DelegatedToolFailureState()
+        let run = UUID()
+        state.begin(runID: run)
+        state.record(denial, runID: run)
+        #expect(state.current?.kind == .userDenied)
+        #expect(state.current?.retryable == false)
+        #expect(state.current?.message.contains("was not run") == true)
+        #expect(AgentToolLoop.terminalRejectionEnvelope(for: "plain text") == nil)
+        let env = StreamingRunEndHint.encodeToolRejectionEnvelope(envelope(.userDenied))
+        #expect(StreamingRunEndHint.decodeToolRejectionEnvelope(env) == envelope(.userDenied))
+        #expect(StreamingRunEndHint.decodeToolRejected(env) == nil)
+        #expect(StreamingToolHint.isSentinel(env))
+    }
+
     @Test func theRunEndHintsRoundTripAndAreSentinels() {
         let rejected = StreamingRunEndHint.encodeToolRejected(text: "The requested action was not completed.")
         #expect(StreamingRunEndHint.decodeToolRejected(rejected) == "The requested action was not completed.")
@@ -356,6 +376,24 @@ struct IntelAnnounceAndStopEngineTests {
         let text = try #require(deltas.compactMap(StreamingRunEndHint.decodeToolRejected).first)
         #expect(text.hasPrefix("The requested action was not completed."))
         #expect(!deltas.contains("never sent"))
+    }
+
+    @Test("A denied call also hands its typed user_denied envelope to the chat (recordTerminalToolRejection)")
+    func deniedCallCarriesATypedEnvelope() async throws {
+        ToolRegistry.shared.setPolicy(.deny, for: "get_current_time")
+        defer { ToolRegistry.shared.clearPolicy(for: "get_current_time") }
+        let (deltas, _) = try await run([Self.toolCall(id: "call_1"), Self.answer("never sent")])
+        let envelope = try #require(deltas.compactMap(StreamingRunEndHint.decodeToolRejectionEnvelope).first)
+        var state = DelegatedToolFailureState()
+        let run = UUID()
+        state.begin(runID: run)
+        state.record(envelope, runID: run)
+        #expect(state.current?.kind == .userDenied)
+        #expect(state.current?.retryable == false)
+        // The envelope comes before the closing text.
+        let envelopeIndex = try #require(deltas.firstIndex { StreamingRunEndHint.decodeToolRejectionEnvelope($0) != nil })
+        let textIndex = try #require(deltas.firstIndex { StreamingRunEndHint.decodeToolRejected($0) != nil })
+        #expect(envelopeIndex < textIndex)
     }
 
     @Test("Outside the chat a denied call still goes back to the model")

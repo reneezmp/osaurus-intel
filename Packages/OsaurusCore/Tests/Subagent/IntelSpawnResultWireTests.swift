@@ -70,6 +70,9 @@ struct IntelSpawnResultWireTests {
         let engine = try String(
             contentsOf: root.appendingPathComponent("Services/Chat/CloudChatEngine.swift"), encoding: .utf8)
         #expect(engine.contains("IntelSpawnResultWire.modelVisible("))
+        // Both wires compact: Chat Completions and Responses / Codex (stage 6).
+        #expect(engine.components(separatedBy: "IntelSpawnResultWire.modelVisible(").count - 1 == 2)
+        #expect(engine.contains("results.append(.init(callID: call.callID, output: wireResult))"))
         let kind = try String(
             contentsOf: root.appendingPathComponent("Subagent/Kinds/TextSubagentKind.swift"), encoding: .utf8)
         #expect(kind.contains("SpawnResultCompaction.artifactPaths(forWorkerSession: outcome.sessionId)"))

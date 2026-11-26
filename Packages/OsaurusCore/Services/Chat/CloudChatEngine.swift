@@ -1910,6 +1910,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 continuation.yield(StreamingRunEndHint.encodeWrapUp(notice: notice))
                                 NSLog("[CloudChatEngine] Repeated retrieval failure; status step follows")
                             } else {
+                                if let envelope = AgentToolLoop.terminalRejectionEnvelope(for: stop.result) {
+                                    continuation.yield(StreamingRunEndHint.encodeToolRejectionEnvelope(envelope))
+                                }
                                 continuation.yield(
                                     StreamingRunEndHint.encodeToolRejected(
                                         text: AgentToolLoop.toolRejectionText(for: stop.result)))
@@ -2531,7 +2534,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         isError: result.hasPrefix("⛔️")
                                     )
                                 )
-                                results.append(.init(callID: call.callID, output: result))
+                                // #2936 on the Responses / Codex wire too (stage 4 left
+                                // this branch): the card and task state keep the full
+                                // `spawn_result`; the model reads the compact form.
+                                let wireResult = await IntelSpawnResultWire.modelVisible(
+                                    name: call.name, result: result, modelID: resolvedModel)
+                                results.append(.init(callID: call.callID, output: wireResult))
                                 roundOutcomes.append(
                                     IntelToolOutcome(
                                         toolName: call.name, argumentsJSON: call.arguments, result: result,

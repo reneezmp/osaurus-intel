@@ -720,6 +720,19 @@ extension AgentToolLoop {
         return repeatedRetrievalWrapUpNotice(tool: outcome.toolName, failures: replays + 1)
     }
 
+    /// What `recordTerminalToolRejection` receives for a stopping call: a typed
+    /// envelope as is, and the engine's own untyped denial text
+    /// (`⛔️ "x" was not run`) as a non-retryable `user_denied` envelope (upstream's
+    /// denial is typed). Any other untyped failure records nothing, as
+    /// upstream's recorder ignores non-envelopes.
+    static func terminalRejectionEnvelope(for result: String) -> String? {
+        if ToolEnvelope.isError(result) { return result }
+        guard result.hasPrefix("⛔️") else { return nil }
+        var message = String(result.dropFirst("⛔️".count)).trimmingCharacters(in: .whitespaces)
+        if message.isEmpty { message = "The tool call was not approved." }
+        return ToolEnvelope.failure(kind: .userDenied, message: message, tool: "tool", retryable: false)
+    }
+
     /// What the stopped turn shows (`emitToolRejectionText`): the canonical
     /// message after the fixed sentence.
     static func toolRejectionText(for result: String) -> String {
@@ -737,12 +750,22 @@ extension AgentToolLoop {
 enum StreamingRunEndHint {
     private static let rejectedPrefix = "\u{FFFE}run-rejected:"
     private static let wrapUpPrefix = "\u{FFFE}run-wrapup:"
+    private static let rejectionEnvelopePrefix = "\u{FFFE}run-rejected-envelope:"
 
     /// A denied or `rejected` tool call ended the run; `text` is what the
     /// closing line shows.
     static func encodeToolRejected(text: String) -> String { rejectedPrefix + text }
     static func decodeToolRejected(_ delta: String) -> String? {
         delta.hasPrefix(rejectedPrefix) ? String(delta.dropFirst(rejectedPrefix.count)) : nil
+    }
+
+    /// Upstream `recordTerminalToolRejection`: the typed envelope of the one
+    /// call that ended the run, sent just before the closing text so a
+    /// delegated child's refusal reaches its parent as the same typed error
+    /// (`DelegatedToolFailureState`).
+    static func encodeToolRejectionEnvelope(_ envelope: String) -> String { rejectionEnvelopePrefix + envelope }
+    static func decodeToolRejectionEnvelope(_ delta: String) -> String? {
+        delta.hasPrefix(rejectionEnvelopePrefix) ? String(delta.dropFirst(rejectionEnvelopePrefix.count)) : nil
     }
 
     /// The run ended on incomplete work: stream one tool-free status step
