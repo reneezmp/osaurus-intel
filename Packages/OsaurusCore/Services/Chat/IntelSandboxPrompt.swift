@@ -111,14 +111,53 @@ enum IntelSandboxPrompt {
     /// the read is capped like upstream's.
     static let soulMaxBytes = 8 * 1024
 
-    static func soul(agentName: String) -> String {
-        let url = OsaurusPaths.containerAgentDir(agentName).appendingPathComponent("SOUL.md")
-        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return "" }
+    static func soul(agentName: String, workspace: URL = OsaurusPaths.containerWorkspace()) -> String {
+        guard
+            let data = readConfined(
+                workspace: workspace, agentName: agentName, file: "SOUL.md", maxBytes: soulMaxBytes + 1),
+            !data.isEmpty
+        else { return "" }
         var text = String(decoding: data.prefix(soulMaxBytes), as: UTF8.self)
         if data.count > soulMaxBytes, let cut = text.lastIndex(of: "\n") {
             text = String(text[..<cut])
         }
         let section = SystemPromptTemplates.soulSection(text)
         return section.isEmpty ? "" : "\n\n" + section
+    }
+
+    /// App-side read of a file in the agent's home, which the sandbox can write
+    /// to: so the file may be a symlink, or sit behind a symlinked folder. The
+    /// final component is opened with `O_NOFOLLOW`; the opened descriptor must
+    /// be a regular file whose real path is exactly
+    /// `<real workspace>/agents/<name>/<file>`, so a link anywhere on the path
+    /// that leads elsewhere is refused. At most `maxBytes` are read.
+    static func readConfined(workspace: URL, agentName: String, file: String, maxBytes: Int) -> Data? {
+        guard !agentName.isEmpty, !agentName.contains("/"), agentName != ".", agentName != "..",
+            !file.contains("/"), file != "..", file != "."
+        else { return nil }
+        guard let realWorkspace = realPath(workspace.path) else { return nil }
+        let expected = "\(realWorkspace)/agents/\(agentName)/\(file)"
+        let path = workspace.appendingPathComponent("agents/\(agentName)/\(file)").path
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else { return nil }
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard fcntl(fd, F_GETPATH, &buffer) == 0, String(cString: buffer) == expected else { return nil }
+        var data = Data()
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while data.count < maxBytes {
+            let n = read(fd, &chunk, min(chunk.count, maxBytes - data.count))
+            if n <= 0 { break }
+            data.append(chunk, count: n)
+        }
+        return data
+    }
+
+    private static func realPath(_ path: String) -> String? {
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard realpath(path, &buffer) != nil else { return nil }
+        return String(cString: buffer)
     }
 }

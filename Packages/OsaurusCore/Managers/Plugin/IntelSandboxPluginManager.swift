@@ -252,10 +252,19 @@ final class SandboxPluginManager: @unchecked Sendable {
     /// files live in the agent's sandbox home, removed with it.
     @discardableResult
     func removeAgentState(for agentId: String) -> Bool {
+        load(agentId)
+        let removedIds = lock.withLock { (installed[agentId] ?? []).map(\.id) }
         let had = lock.withLock { () -> Bool in
             let existed = installed.removeValue(forKey: agentId) != nil
             loadedAgents.remove(agentId)
             return existed
+        }
+        // Tools disappear once no other agent has the plugin.
+        if managerOverride == nil {
+            for id in removedIds {
+                let stillUsed = lock.withLock { installed.values.contains { $0.contains { $0.id == id } } }
+                if !stillUsed { ToolRegistry.shared.unregisterSandboxPluginTools(pluginId: id) }
+            }
         }
         let dir = storeDirectory(for: agentId)
         let onDisk = FileManager.default.fileExists(atPath: dir.path)

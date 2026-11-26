@@ -343,3 +343,19 @@ have; stage 5 did not add them. The user adds secrets in the agent's Sandbox tab
 (the existing secrets list) and the prompt says so. When the overlay lands, add
 `SandboxSecretSetTool` to `BuiltinSandboxTools.register()` and
 `sandbox_secret_set` to the prompt's tool list.
+
+## Hardening after stage 5 (2026-11-26)
+
+- **App-side reads of the agent home never follow links.** The sandbox can write
+  its own home, so a planted symlink could have put an outside file into the
+  prompt. `IntelSandboxPrompt.soul` now reads SOUL.md through
+  `readConfined`: `O_NOFOLLOW`, regular file only, the descriptor's real path
+  (`F_GETPATH`) must equal `<real workspace>/agents/<name>/SOUL.md` (so a
+  symlinked agent folder is refused too), names with `/` or `..` are refused,
+  and at most 8 KB is read. Any new app-side read of a path in the workspace
+  must use the same helper (or a confined command). Tests:
+  `IntelSandboxSoulTests`.
+- **Agent deletion** (`AgentManager.delete`) now stops that agent's background
+  jobs and calls `SandboxPluginManager.removeAgentState(for:)` (its plugin record;
+  the tools unregister when no other agent has the plugin). Other agents'
+  records are untouched (tested).

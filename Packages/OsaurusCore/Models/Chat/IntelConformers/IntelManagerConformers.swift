@@ -697,6 +697,12 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         // values, per-agent keys) so they don't sit in Keychain Access
         // forever. Done only AFTER plugin teardown completed (see above).
         ToolSecretsKeychain.deleteAllSecrets(forAgent: id)
+        // W-seatbelt-sandbox: this agent's sandbox plugin record and running
+        // background jobs go with it (upstream `SandboxAgentProvisioner.unprovision`
+        // calls `removeAgentState`). Strictly this agent's.
+        await SandboxBackgroundJobs.shared.stopAll(
+            agentName: SandboxToolRegistrar.hostAgentName(for: id.uuidString))
+        SandboxPluginManager.shared.removeAgentState(for: id.uuidString)
         // Upstream #2355: delete the agent's chat sessions and accumulated
         // memory. Agent UUIDs are never reused, so without this its sessions,
         // pinned facts, episodes and raw transcripts (embeddings are columns
