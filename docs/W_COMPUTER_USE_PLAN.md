@@ -51,7 +51,7 @@ native implementation, perception, the loop, and the tool and kind.
 | # | Content | Status |
 |---|---|---|
 | 1 | Model and policy: `AgentAction`, `AgentView`, the `MacDriver` contract with `MockMacDriver`, `TargetResolver`, un-fenced `EffectClassifier`, `Gate` (`ComputerUseGating`, `HardwiredGate`) and `ComputerUseGate`; upstream tests for each | done |
-| 2 | Perception with fakes: `CloudVisionConsent`, `FrameScrubber` (Vision), `VisionAttachment`, `CaptureRouter`, `ScreenContextSnapshot`; consent and scrub-failure tests | planned |
+| 2 | Perception with fakes: `CloudVisionConsent`, `FrameScrubber` (Vision; fail-closed, see log), `VisionAttachment`, `CaptureRouter`, `ScreenContextSnapshot`, `AxResolvableSweep`, `ComputerUseRunMetrics`; router, consent, scrub, attachment and metrics tests | done |
 | 3 | Native driver, not yet reachable: `Accessibility`, `ElementCache`, `Screenshot` (ScreenCaptureKit 14+, `CGWindowListCreateImage` / `CGDisplayCreateImage` on 13), `InputController`, `BackgroundDriver`, `SkyLightBridge` (dlsym, nil-safe), `NativeMacDriver`, `AutomationSession`, `CaptureMode`; route and bounds tests over fakes | planned |
 | 4 | `ComputerUseLoop`, `ComputerUseRunMetrics`, `AxResolvableSweep`, `ComputerUseTool`, `ComputerUseKind`; registry and `resolveTools` gates; loop tests on `MockMacDriver` and a scripted model step | planned |
 | 5 | Settings and consent UI: `ComputerUseSettingsView`, `ComputerUseDiagnosticsPanel`, `ComputerUsePermissionDoctor`, `ComputerUseGateInspector`, Abilities switch, quit/stop wiring, `/computer-use/prompts` consumers; i18n | planned |
@@ -115,3 +115,22 @@ Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
     their two test classes; `InputRoute` (from `BackgroundDriver.swift`) and the
     `CaptureMode` enum live in small stand-in files until then (stage 3 removes
     the duplicates when it ports those files whole).
+- 2026-11-26 stage 2 done. Filtered gate: 342 tests in 65 suites passed. One
+  live hit (`~/.osaurus/memory/memory.sqlite-wal`, 10:56:50 inside the window)
+  is held open by the user's running upstream `osaurus` app (`lsof`); no test
+  here touches memory.
+  - **`FrameScrubber` is fail-closed on Intel.** Upstream's `.pii` mode masks
+    only regions flagged by the Privacy Filter (`RegexEntityDetector`,
+    `PrivacyFilterStore`, `PrivacyFilterEngine`), which Intel lacks
+    (`W-privacy-filter`). The port keeps the API (`ScrubbedFrame` stays
+    unconstructible outside the scrubber, `honorUserRules` /
+    `useModelDetection` are accepted and ignored) but `.pii` masks every
+    recognized text region like `.allText`, so a cloud-bound screenshot never
+    carries readable text. When `W-privacy-filter` lands, restore upstream's
+    detector branch in `recognizeAndDetect` / `scrub`. #3084 (a scrub failure
+    stops the cloud attachment) is the loop-level part and lands in stage 4.
+  - `FrameScrubFailureTests` keeps its scrubber half; its cloud-send loop half
+    needs `ComputerUseLoop` and returns in stage 4 (the full upstream file is
+    in the stage 4 notes: re-take it from `upstream/classic`).
+  - Vision OCR (`VNRecognizeTextRequest`, `.accurate`) is on-device and
+    available on macOS 13.
