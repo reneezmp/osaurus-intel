@@ -582,3 +582,11 @@ write there: `ToolsPaths.root()` (OsaurusRepository) follows
 `OSAURUS_TEST_ROOT` like `OsaurusPaths.root()`. A stale
 `central.staging-…` folder from 2026-05-22 is the app's, too.
 
+**Timing flake, 2026-11-26:** `SkillArchiveProcessRunnerTests.cancellationReapsProcessAndJoinsReaderBeforeThrowing`
+failed once in a full run (`.outputDrainIncomplete`) while another agent was
+building, then passed 3 of 3 alone on the same tree. Treat a lone failure there
+like the `MCPRobustnessTests` one: rerun the suite alone before concluding.
+Merge rule: gate on the summary line `Test run with … passed`, never on any
+"passed after" line (individual tests print that too; a failed run was merged
+once because of it, harmlessly).
+
