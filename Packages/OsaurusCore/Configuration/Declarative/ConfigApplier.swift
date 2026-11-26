@@ -87,9 +87,52 @@ enum ConfigApplier {
         options: ConfigApplyOptions = .default
     ) async -> [ConfigApplyResult] {
         await ConfigApplySerialQueue.shared.acquire()
+        // The launching conversation's runnable spawn targets before the apply
+        // (nil outside a live chat turn), so an apply that grows them can
+        // stage `spawn_agent` for the SAME turn (upstream, stage 6).
+        let spawnBaseline = await MainActor.run { liveRunnableSpawnTargets() }
         let results = await applyLocked(document: document, prune: prune, options: options)
+        await stageSpawnToolsIfTargetsGrew(baseline: spawnBaseline)
         await ConfigApplySerialQueue.shared.release()
         return results
+    }
+
+    // MARK: - Same-turn spawn activation
+
+    /// The launching conversation's runnable `spawn_agent` targets, or `nil`
+    /// when this apply does not run inside a live `ChatSession` turn (CLI /
+    /// bare HTTP completion with no session bound). Intel: the pool is Gate 4
+    /// (`IntelSpawnPool`) and each target must also be admitted and available
+    /// (`IntelSpawnAdmission`), so only an approved `delegation` apply that
+    /// allows an agent AND admits its model grows it; creating an agent never
+    /// does (stage 4).
+    @MainActor
+    private static func liveRunnableSpawnTargets() -> [UUID]? {
+        guard let session = ChatExecutionContext.currentChatSessionBox?.session else { return nil }
+        return IntelSpawnAdmission.resolveTargets(launcherID: session.agentId ?? Agent.defaultId).runnableAgentIDs
+    }
+
+    /// An apply that grows the launching conversation's runnable targets must
+    /// make `spawn_agent` callable in the SAME turn: the turn's tool schema
+    /// was frozen at compose, when the pool may have been empty, and the
+    /// engine's scope gate refuses any tool absent from it. The name staged
+    /// here is adopted by the engine's `CapabilityLoadBuffer` path and offered
+    /// to the next round. Execution still enforces Gate 4 admission and asks
+    /// permission per call; staging only makes the tool visible. Already
+    /// visible spawn tools keep their frozen schema until the next compose.
+    private static func stageSpawnToolsIfTargetsGrew(baseline: [UUID]?) async {
+        guard let baseline else { return }
+        let grew: Bool = await MainActor.run {
+            guard let session = ChatExecutionContext.currentChatSessionBox?.session else { return false }
+            let targets = IntelSpawnAdmission.resolveTargets(launcherID: session.agentId ?? Agent.defaultId)
+                .runnableAgentIDs
+            return !Set(targets).subtracting(baseline).isEmpty
+        }
+        guard grew else { return }
+        // Intel's buffer carries tool NAMES; the engine adopts the registered
+        // spec (without the per-launcher agent enum, which the next compose
+        // restores). Outside an engine run no buffer is bound: a no-op.
+        await CapabilityLoadBuffer.current?.add([SubagentCapabilityRegistry.spawnAgentToolName])
     }
 
     private static func applyLocked(
