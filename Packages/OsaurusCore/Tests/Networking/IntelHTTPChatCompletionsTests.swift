@@ -277,6 +277,31 @@ extension IntelHTTPChatCompletionsTests {
         #expect(ollamaObject["eval_count"] as? Int == 3)
     }
 
+    /// #3212: a provider's prompt-cache hits reach the streamed usage chunk and
+    /// the non-streaming `usage` as `prompt_tokens_details.cached_tokens`.
+    @Test func cachedPromptTokensReachChatUsage() async throws {
+        let usage = StreamingUsageHint.encode(promptTokens: 12, completionTokens: 3, cachedPromptTokens: 8)
+        #expect(
+            IntelHTTPInference.classify(usage) == .usage(promptTokens: 12, completionTokens: 3, cachedPromptTokens: 8))
+        #expect(
+            StreamingUsageHint.encode(promptTokens: 12, completionTokens: 3, cachedPromptTokens: 0)
+                == StreamingUsageHint.encode(promptTokens: 12, completionTokens: 3))
+        let engine = ScriptedChatEngine(["Hi", usage])
+        let server = try await startChatTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+
+        let (_, stream) = try await postPath(server, "/v1/chat/completions",
+            #"{"model":"m","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"x"}]}"#)
+        #expect(stream.contains(#""cached_tokens":8"#), "include_usage chunk: \(stream)")
+
+        let (_, chat) = try await postPath(server, "/v1/chat/completions",
+            #"{"model":"m","messages":[{"role":"user","content":"x"}]}"#)
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(chat.utf8)) as? [String: Any])
+        let reported = try #require(object["usage"] as? [String: Any])
+        let details = try #require(reported["prompt_tokens_details"] as? [String: Int])
+        #expect(details["cached_tokens"] == 8)
+    }
+
     @Test func anthropicMessagesAnswersWithBlocksAndUsage() async throws {
         let call = StreamingToolHint.ProposedCall(callId: "toolu_1", name: "get_weather", arguments: #"{"city":"Rome"}"#)
         let engine = ScriptedChatEngine([

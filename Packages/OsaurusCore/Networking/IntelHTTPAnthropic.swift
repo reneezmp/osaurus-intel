@@ -69,7 +69,7 @@ extension HTTPHandler {
         if blocks.isEmpty { blocks.append(.textBlock("")) }
         let response = AnthropicMessagesResponse(
             id: messageId, model: model, content: blocks, stopReason: anthropicStopReason(collected),
-            usage: AnthropicUsage(promptTokens: usage.prompt, outputTokens: usage.completion, cachedPromptTokens: nil))
+            usage: AnthropicUsage(promptTokens: usage.prompt, outputTokens: usage.completion, cachedPromptTokens: collected.cachedPromptTokens))
         return String(decoding: try JSONEncoder.osaurusCanonical().encode(response), as: UTF8.self)
     }
 

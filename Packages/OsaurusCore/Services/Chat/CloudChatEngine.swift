@@ -1519,20 +1519,23 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 var runUsage = AgentRunUsage()
                 var roundPromptTokens: Int?
                 var roundCompletionTokens: Int?
+                // Prompt-cache hits the provider reported for this round (#3212).
+                var roundCachedTokens: Int?
                 var roundUsageOpen = false
                 func closeRoundUsage() {
                     guard roundUsageOpen else { return }
                     roundUsageOpen = false
                     runUsage.append(
                         promptTokens: roundPromptTokens, completionTokens: roundCompletionTokens,
-                        tokensPerSecond: nil)
+                        tokensPerSecond: nil, cachedPromptTokens: roundCachedTokens)
                 }
                 func yieldUsageIfRequested() {
                     closeRoundUsage()
                     guard request.reportsUsage, runUsage.hasCompleteTokenCounts else { return }
                     continuation.yield(
                         StreamingUsageHint.encode(
-                            promptTokens: runUsage.promptTokens, completionTokens: runUsage.completionTokens))
+                            promptTokens: runUsage.promptTokens, completionTokens: runUsage.completionTokens,
+                            cachedPromptTokens: runUsage.cachedPromptTokens))
                 }
 
                 func captureResponseText(_ emission: String) {
@@ -1688,6 +1691,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         closeRoundUsage()
                         roundPromptTokens = nil
                         roundCompletionTokens = nil
+                        roundCachedTokens = nil
                         roundUsageOpen = true
 
                         // Upstream's mid-run steering (#1433, #2653): a
@@ -2295,6 +2299,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 completionTokens = usage.outputTokens
                                 roundPromptTokens = usage.inputTokens
                                 roundCompletionTokens = usage.outputTokens
+                                roundCachedTokens = usage.cachedInputTokens
                                 NSLog(
                                     "[CloudChatEngine] Responses usage in=\(usage.inputTokens) out=\(usage.outputTokens) cached=\(usage.cachedInputTokens ?? -1) round=\(round)"
                                 )
@@ -2825,6 +2830,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     completionTokens = usage["completion_tokens"] as? Int ?? completionTokens
                                     roundPromptTokens = usage["prompt_tokens"] as? Int ?? roundPromptTokens
                                     roundCompletionTokens = usage["completion_tokens"] as? Int ?? roundCompletionTokens
+                                    if let details = usage["prompt_tokens_details"] as? [String: Any],
+                                        let cached = details["cached_tokens"] as? Int
+                                    {
+                                        roundCachedTokens = cached
+                                    }
                                     let hit = usage["prompt_cache_hit_tokens"] as? Int ?? -1
                                     let miss = usage["prompt_cache_miss_tokens"] as? Int ?? -1
                                     let promptTok = usage["prompt_tokens"] as? Int ?? -1

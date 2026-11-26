@@ -541,6 +541,7 @@ extension HTTPHandler {
             var loggedResponseText = ""
             var loggedToolCalls: [ToolCallLog] = []
             var usage: (prompt: Int, completion: Int)?
+            var cachedPromptTokens: Int?
             var finalIntercept: String?
             let timer = AgentToolTraceTimer()
             do {
@@ -626,8 +627,9 @@ extension HTTPHandler {
                                 writer.writeReasoning(
                                     text, model: model, responseId: responseId, created: created, context: $0)
                             }
-                        case .usage(let prompt, let completion):
+                        case .usage(let prompt, let completion, let cached):
                             usage = (prompt, completion)
+                            cachedPromptTokens = cached
                         case .toolCalls, .stats, nil:
                             break
                         }
@@ -665,11 +667,13 @@ extension HTTPHandler {
                     }
                 }
                 let finalUsage = usage
+                let finalCached = cachedPromptTokens
                 onLoop { ctx in
                     writer.writeFinishWithReason("stop", model: model, responseId: responseId, created: created, context: ctx)
                     if includeUsage, let finalUsage {
                         writer.writeUsageChunk(
                             promptTokens: finalUsage.prompt, completionTokens: finalUsage.completion,
+                            cachedPromptTokens: finalCached,
                             model: model, responseId: responseId, created: created, context: ctx)
                     }
                     writer.writeEnd(ctx)

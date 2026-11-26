@@ -1914,6 +1914,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                     if includeUsage, let usage = finished.usage {
                         writer.writeUsageChunk(
                             promptTokens: usage.prompt, completionTokens: usage.completion,
+                            cachedPromptTokens: finished.cachedPromptTokens,
                             model: model, responseId: responseId, created: created, context: ctx)
                     }
                     writer.writeEnd(ctx)
@@ -1961,10 +1962,17 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             "choices": [["index": 0, "message": message, "finish_reason": collected.finishReason.rawValue]],
         ]
         if let usage = collected.usage {
-            object["usage"] = [
+            var usageObject: [String: Any] = [
                 "prompt_tokens": usage.prompt, "completion_tokens": usage.completion,
                 "total_tokens": usage.prompt + usage.completion,
             ]
+            // #3212: the prompt-cache hit count, when the provider reported one.
+            if let details = Usage.cachedPromptDetails(collected.cachedPromptTokens, promptTokens: usage.prompt),
+                let cached = details.cached_tokens
+            {
+                usageObject["prompt_tokens_details"] = ["cached_tokens": cached]
+            }
+            object["usage"] = usageObject
         }
         return String(
             decoding: try JSONSerialization.data(withJSONObject: object, options: .osaurusCanonical), as: UTF8.self)

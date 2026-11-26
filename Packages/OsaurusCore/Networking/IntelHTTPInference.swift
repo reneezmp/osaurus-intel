@@ -32,7 +32,7 @@ enum IntelInferenceEvent: Sendable, Equatable {
     case toolCalls([StreamingToolHint.ProposedCall])
     case stats(tokenCount: Int, tokensPerSecond: Double, stopReason: String?)
     /// Provider-measured usage (Intel's `StreamingUsageHint`).
-    case usage(promptTokens: Int, completionTokens: Int)
+    case usage(promptTokens: Int, completionTokens: Int, cachedPromptTokens: Int? = nil)
 }
 
 /// Intel: the provider's measured token counts, sent once at the end of an
@@ -41,15 +41,25 @@ enum IntelInferenceEvent: Sendable, Equatable {
 enum StreamingUsageHint {
     private static let prefix = "\u{FFFE}usage:"
 
-    static func encode(promptTokens: Int, completionTokens: Int) -> String {
-        "\(prefix)\(promptTokens);\(completionTokens)"
+    /// `cachedPromptTokens` (#3212) is the provider-reported prompt-cache hit
+    /// count; omitted from the hint when nil or zero.
+    static func encode(promptTokens: Int, completionTokens: Int, cachedPromptTokens: Int? = nil) -> String {
+        var hint = "\(prefix)\(promptTokens);\(completionTokens)"
+        if let cachedPromptTokens, cachedPromptTokens > 0 { hint += ";\(cachedPromptTokens)" }
+        return hint
     }
 
-    static func decode(_ delta: String) -> (promptTokens: Int, completionTokens: Int)? {
+    static func decode(_ delta: String) -> (promptTokens: Int, completionTokens: Int, cachedPromptTokens: Int?)? {
         guard delta.hasPrefix(prefix) else { return nil }
         let parts = delta.dropFirst(prefix.count).split(separator: ";")
-        guard parts.count == 2, let prompt = Int(parts[0]), let completion = Int(parts[1]) else { return nil }
-        return (max(0, prompt), max(0, completion))
+        guard parts.count == 2 || parts.count == 3, let prompt = Int(parts[0]), let completion = Int(parts[1])
+        else { return nil }
+        var cached: Int?
+        if parts.count == 3 {
+            guard let value = Int(parts[2]) else { return nil }
+            cached = value > 0 ? min(value, max(0, prompt)) : nil
+        }
+        return (max(0, prompt), max(0, completion), cached)
     }
 }
 
@@ -62,7 +72,9 @@ enum IntelHTTPInference {
             return reasoning.isEmpty ? nil : .reasoning(reasoning)
         }
         if let usage = StreamingUsageHint.decode(delta) {
-            return .usage(promptTokens: usage.promptTokens, completionTokens: usage.completionTokens)
+            return .usage(
+                promptTokens: usage.promptTokens, completionTokens: usage.completionTokens,
+                cachedPromptTokens: usage.cachedPromptTokens)
         }
         if let stats = StreamingStatsHint.decode(delta) {
             return .stats(tokenCount: stats.tokenCount, tokensPerSecond: stats.tokensPerSecond, stopReason: stats.stopReason)
@@ -114,11 +126,14 @@ enum IntelHTTPInference {
         var stopReason: String?
         /// Provider-measured usage; `nil` when the provider reported none.
         var usage: (prompt: Int, completion: Int)?
+        /// Provider-reported prompt-cache hits (#3212); `nil` when none.
+        var cachedPromptTokens: Int?
 
         static func == (lhs: Collected, rhs: Collected) -> Bool {
             lhs.content == rhs.content && lhs.reasoning == rhs.reasoning && lhs.toolCalls == rhs.toolCalls
                 && lhs.completionTokens == rhs.completionTokens && lhs.stopReason == rhs.stopReason
                 && lhs.usage?.prompt == rhs.usage?.prompt && lhs.usage?.completion == rhs.usage?.completion
+                && lhs.cachedPromptTokens == rhs.cachedPromptTokens
         }
 
         /// Upstream's finish reasons: tool calls win, then a length stop.
@@ -136,8 +151,9 @@ enum IntelHTTPInference {
             case .stats(let count, _, let stop):
                 completionTokens = count
                 stopReason = stop
-            case .usage(let prompt, let completion):
+            case .usage(let prompt, let completion, let cached):
                 usage = (prompt, completion)
+                cachedPromptTokens = cached
             }
         }
     }
@@ -414,6 +430,7 @@ final class SSEResponseWriter: @unchecked Sendable {
         promptTokens: Int,
         completionTokens: Int,
         tokensPerSecond: Double? = nil,
+        cachedPromptTokens: Int? = nil,
         model: String,
         responseId: String,
         created: Int,
@@ -430,7 +447,9 @@ final class SSEResponseWriter: @unchecked Sendable {
             prompt_tokens: promptTokens,
             completion_tokens: completionTokens,
             total_tokens: promptTokens + completionTokens,
-            tokens_per_second: tokensPerSecond
+            tokens_per_second: tokensPerSecond,
+            // #3212: `prompt_tokens_details.cached_tokens` on a prefix-cache hit.
+            prompt_tokens_details: Usage.cachedPromptDetails(cachedPromptTokens, promptTokens: promptTokens)
         )
         writeSSEChunk(chunk, context: context)
     }
