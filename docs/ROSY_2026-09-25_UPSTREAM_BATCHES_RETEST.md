@@ -3684,3 +3684,11 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Router model with vision: attach a large photo (over 4 MB or wider than 2048 px) and ask about it: it answers. A Router model without vision says it can't see images instead of failing.
 - [ ] Any cloud model: a large screenshot attachment still works (it is resized before sending).
 - [ ] OpenCode (if used): chats keep their context across turns.
+
+## Settings search and a Ventura spacing fix (2026-11-26)
+
+`W-settings-ux-2950` / `W-settings-ventura-gaps`. Not in candidate 69.
+
+- [ ] Settings search finds "pairing", "Browser Use", "Osaurus ID", "Web Search", "Codex" and voice options, and each result lands on its control.
+- [ ] Settings → Chat → Folder Tool Permissions: the gaps between rows are even. **Take a screenshot** of this list for comparison with the old one.
+- [ ] Still uneven anywhere else in Settings (for example the Behavior rows)? Screenshot it too.
