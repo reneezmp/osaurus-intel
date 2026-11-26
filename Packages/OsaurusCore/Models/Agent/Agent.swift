@@ -102,6 +102,10 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     /// Behavior of the Claude Code subprocess backend when this agent uses a
     /// `claude-code/…` model. `nil` uses the safe read-only defaults.
     public var claudeCode: ClaudeCodeAgentConfig?
+    /// Which loop runs this agent's chats. Nil = Osaurus's built-in loop.
+    /// Persisted shape only until the harness session lands (#3175,
+    /// `W-harness-runtimes` stage 3); nothing reads it yet.
+    public var runtime: AgentRuntime?
     /// Per-agent plugin instruction overrides keyed by plugin ID
     public var pluginInstructions: [String: String]?
     /// Whether this agent is advertised via Bonjour on the local network
@@ -182,6 +186,7 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         agentDeviceScope: String? = nil,
         autonomousExec: AutonomousExecConfig? = nil,
         claudeCode: ClaudeCodeAgentConfig? = nil,
+        runtime: AgentRuntime? = nil,
         pluginInstructions: [String: String]? = nil,
         bonjourEnabled: Bool = false,
         toolSelectionMode: ToolSelectionMode? = nil,
@@ -221,6 +226,7 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         self.agentDeviceScope = agentDeviceScope
         self.autonomousExec = autonomousExec
         self.claudeCode = claudeCode
+        self.runtime = runtime
         self.pluginInstructions = pluginInstructions
         self.bonjourEnabled = bonjourEnabled
         self.toolSelectionMode = toolSelectionMode
@@ -399,6 +405,7 @@ extension Agent {
         agentDeviceScope = try c.decodeIfPresent(String.self, forKey: .agentDeviceScope)
         autonomousExec = try c.decodeIfPresent(AutonomousExecConfig.self, forKey: .autonomousExec)
         claudeCode = try c.decodeIfPresent(ClaudeCodeAgentConfig.self, forKey: .claudeCode)
+        runtime = try? c.decodeIfPresent(AgentRuntime.self, forKey: .runtime)
         pluginInstructions = try c.decodeIfPresent([String: String].self, forKey: .pluginInstructions)
         bonjourEnabled = try c.decodeIfPresent(Bool.self, forKey: .bonjourEnabled) ?? false
         toolSelectionMode = try c.decodeIfPresent(ToolSelectionMode.self, forKey: .toolSelectionMode)
@@ -452,6 +459,11 @@ public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable {
     public var allowOsaurusTools: Bool
     /// Nested under `allowOsaurusTools`: permit configuration-changing tools.
     public var allowOsaurusConfigWrites: Bool
+    /// `--model` value for the Claude Code runtime: an alias (`sonnet`, `opus`,
+    /// `fable`, `haiku`) or a full model id. Nil = `sonnet` (#3175). Unused
+    /// until the harness session lands; the `claude-code/<alias>` picker ids
+    /// still choose the model.
+    public var model: String?
     /// `--effort` value (`ClaudeCodeEffort`). Nil = the CLI's per-model default.
     public var effort: String?
 
@@ -461,6 +473,7 @@ public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable {
         allowShell: Bool = false,
         allowOsaurusTools: Bool = false,
         allowOsaurusConfigWrites: Bool = false,
+        model: String? = nil,
         effort: String? = nil
     ) {
         self.mode = mode
@@ -468,10 +481,17 @@ public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable {
         self.allowShell = allowShell
         self.allowOsaurusTools = allowOsaurusTools
         self.allowOsaurusConfigWrites = allowOsaurusConfigWrites
+        self.model = model
         self.effort = effort
     }
 
     public static let `default` = ClaudeCodeAgentConfig()
+
+    /// The `--model` value to launch with.
+    public var resolvedModel: String {
+        let trimmed = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? ClaudeCodeModel.sonnet.rawValue : trimmed
+    }
 
     /// The `--effort` value to launch with, or nil to leave the CLI default.
     public var resolvedEffort: ClaudeCodeEffort? {
@@ -479,7 +499,7 @@ public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case mode, allowWrites, allowShell, allowOsaurusTools, allowOsaurusConfigWrites, effort
+        case mode, allowWrites, allowShell, allowOsaurusTools, allowOsaurusConfigWrites, model, effort
     }
 
     /// Older JSON and future unknown mode values must not make its entire
@@ -492,6 +512,7 @@ public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable {
         allowOsaurusTools = try c.decodeIfPresent(Bool.self, forKey: .allowOsaurusTools) ?? false
         allowOsaurusConfigWrites =
             try c.decodeIfPresent(Bool.self, forKey: .allowOsaurusConfigWrites) ?? false
+        model = try c.decodeIfPresent(String.self, forKey: .model)
         effort = try? c.decodeIfPresent(String.self, forKey: .effort)
     }
 }
