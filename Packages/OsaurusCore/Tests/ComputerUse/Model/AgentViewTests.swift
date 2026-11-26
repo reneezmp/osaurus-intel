@@ -1,0 +1,251 @@
+//
+//  AgentViewTests.swift
+//  OsaurusCoreTests — Computer Use
+//
+//  The model's compact, id-free picture of an app + the verify-delta builder.
+//  These pin the behaviour the loop and the model both depend on:
+//   • 1-based marks in stable element order (the model's only handle),
+//   • the changed/removed delta that is the verify signal,
+//   • duplicate (role|label) matching across captures, and
+//   • the 120-item truncation hint + empty-view rendering.
+//
+
+import Foundation
+import Testing
+
+@testable import OsaurusCore
+
+@Suite struct AgentViewTests {
+
+    private func el(_ id: String, _ role: String, _ label: String?, value: String? = nil) -> CUElement {
+        CUElement(id: id, role: role, label: label, value: value)
+    }
+
+    private func snapshot(_ elements: [CUElement], id: Int = 1) -> CUSnapshot {
+        CUSnapshot(
+            snapshotId: id,
+            pid: 1,
+            app: "App",
+            focusedWindow: "Main",
+            tier: .ax,
+            truncated: false,
+            windows: [],
+            elements: elements,
+            image: nil
+        )
+    }
+
+    // MARK: - Marks
+
+    @Test func testMarksAreOneBasedInOrder() {
+        let view = AgentView.build(
+            from: snapshot([el("a", "button", "A"), el("b", "button", "B"), el("c", "button", "C")]),
+            previous: nil
+        )
+        #expect(view.items.map { $0.mark } == [1, 2, 3])
+        #expect(view.items.map { $0.elementId } == ["a", "b", "c"])
+    }
+
+    @Test func testItemLookupByMark() {
+        let view = AgentView.build(
+            from: snapshot([el("a", "button", "A"), el("b", "button", "B")]),
+            previous: nil
+        )
+        #expect((view.item(mark: 2)?.elementId) == "b")
+        #expect(view.item(mark: 5) == nil)
+    }
+
+    // MARK: - Change delta
+
+    @Test func testFirstCaptureHasNoChanges() {
+        let view = AgentView.build(from: snapshot([el("a", "textfield", "F", value: "x")]), previous: nil)
+        #expect(!(view.hasChanges))
+        #expect(!(view.items.contains { $0.changed }))
+    }
+
+    @Test func testChangedValueIsFlagged() {
+        let prev = AgentView.build(from: snapshot([el("a", "textfield", "F", value: "old")]), previous: nil)
+        let next = AgentView.build(
+            from: snapshot([el("a", "textfield", "F", value: "new")], id: 2),
+            previous: prev
+        )
+        #expect(next.items.first?.changed ?? false)
+        #expect(next.hasChanges)
+    }
+
+    @Test func testUnchangedValueIsNotFlagged() {
+        let prev = AgentView.build(from: snapshot([el("a", "textfield", "F", value: "same")]), previous: nil)
+        let next = AgentView.build(
+            from: snapshot([el("a", "textfield", "F", value: "same")], id: 2),
+            previous: prev
+        )
+        #expect(!(next.items.first?.changed ?? true))
+        #expect(!(next.hasChanges))
+    }
+
+    @Test func testNewElementIsFlaggedChanged() {
+        let prev = AgentView.build(from: snapshot([el("a", "textfield", "F")]), previous: nil)
+        let next = AgentView.build(
+            from: snapshot([el("a", "textfield", "F"), el("b", "button", "New")], id: 2),
+            previous: prev
+        )
+        #expect((next.item(mark: 2)?.changed) == true)
+    }
+
+    @Test func testRemovedElementCounted() {
+        let prev = AgentView.build(
+            from: snapshot([el("a", "textfield", "F"), el("b", "button", "Gone")]),
+            previous: nil
+        )
+        let next = AgentView.build(from: snapshot([el("a", "textfield", "F")], id: 2), previous: prev)
+        #expect(next.removedCount == 1)
+        #expect(next.hasChanges)
+        #expect(next.renderForModel().localizedCaseInsensitiveContains("disappeared"))
+    }
+
+    @Test func testDuplicateLabelChangeDetection() {
+        // Two same-keyed rows; only the second value changes. The build's
+        // per-key "consumed" counter must attribute the change to the right one.
+        let prev = AgentView.build(
+            from: snapshot([
+                el("r1", "textfield", "Row", value: "a"),
+                el("r2", "textfield", "Row", value: "b"),
+            ]),
+            previous: nil
+        )
+        let next = AgentView.build(
+            from: snapshot(
+                [
+                    el("r1", "textfield", "Row", value: "a"),
+                    el("r2", "textfield", "Row", value: "c"),
+                ],
+                id: 2
+            ),
+            previous: prev
+        )
+        #expect((next.item(mark: 1)?.changed) == false)
+        #expect((next.item(mark: 2)?.changed) == true)
+    }
+
+    @Test func testDuplicateTextareasStayBoundToTheirWindowsAndRenderWindowContext() {
+        let windows = [
+            CUWindowSummary(id: 10, title: "Target", focused: true, x: 0, y: 0, w: 400, h: 300),
+            CUWindowSummary(id: 20, title: "Other", focused: false, x: 10, y: 10, w: 400, h: 300),
+        ]
+        func multiSnapshot(_ first: String, _ second: String, id: Int) -> CUSnapshot {
+            CUSnapshot(
+                snapshotId: id,
+                pid: 1,
+                app: "TextEdit",
+                focusedWindow: "Target",
+                tier: .ax,
+                truncated: false,
+                windows: windows,
+                elements: [
+                    CUElement(id: "target", role: "textarea", value: first, windowId: 10),
+                    CUElement(id: "other", role: "textarea", value: second, windowId: 20),
+                ],
+                image: nil
+            )
+        }
+
+        let previous = AgentView.build(
+            from: multiSnapshot("Hello from OracHQ", "Hello again", id: 1),
+            previous: nil
+        )
+        let next = AgentView.build(
+            from: multiSnapshot("Hello again", "Hello again", id: 2),
+            previous: previous
+        )
+
+        #expect((next.item(mark: 1)?.windowTitle) == "Target")
+        #expect((next.item(mark: 1)?.changed) == true)
+        #expect((next.item(mark: 2)?.changed) == false)
+        #expect(next.renderForModel().contains("[window \"Target\", focused]"))
+        #expect(next.renderForModel().contains("[window \"Other\"]"))
+    }
+
+    // MARK: - Rendering
+
+    @Test func testTruncationHintBeyond120() {
+        let many = (0 ..< 130).map { el("e\($0)", "button", "B\($0)") }
+        let view = AgentView.build(from: snapshot(many), previous: nil)
+        let render = view.renderForModel()
+        #expect(render.contains("10 more elements"), "Expected a truncation hint; got tail: \(render.suffix(120))")
+    }
+
+    @Test func testEmptyViewRendersNoElements() {
+        let view = AgentView.build(from: snapshot([]), previous: nil)
+        #expect(view.renderForModel().contains("(no actionable elements found)"))
+    }
+
+    @Test func testChangedItemRendersMarker() {
+        let prev = AgentView.build(from: snapshot([el("a", "textfield", "F", value: "old")]), previous: nil)
+        let next = AgentView.build(
+            from: snapshot([el("a", "textfield", "F", value: "new")], id: 2),
+            previous: prev
+        )
+        #expect(next.renderForModel().contains("* ["), "Changed elements should render a `*` marker")
+    }
+
+    @Test func testSecureFieldValueDoesNotRenderForModel() {
+        let view = AgentView.build(
+            from: snapshot([
+                el("email", "textfield", "Email", value: "ops@example.com"),
+                el("password", "securetextfield", "Password", value: "p@ssw0rd-do-not-leak"),
+            ]),
+            previous: nil
+        )
+        let render = view.renderForModel()
+
+        #expect(render.contains("Email"))
+        #expect(render.contains("ops@example.com"))
+        #expect(render.contains("Password"))
+        #expect(!(render.contains("p@ssw0rd-do-not-leak")))
+        #expect((view.items.first(where: { $0.elementId == "password" })?.value) == nil)
+    }
+
+    @Test func testSecureFieldValueChangeDoesNotRenderMarker() {
+        let prev = AgentView.build(
+            from: snapshot([el("password", "securetextfield", "Password", value: "old-secret")]),
+            previous: nil
+        )
+        let next = AgentView.build(
+            from: snapshot([el("password", "securetextfield", "Password", value: "new-secret")], id: 2),
+            previous: prev
+        )
+
+        #expect(!(next.hasChanges))
+        #expect(!(next.items.first?.changed ?? true))
+        #expect(!(next.renderForModel().contains("* [")))
+        #expect(!(next.renderForModel().contains("new-secret")))
+    }
+
+    // MARK: - Value clipping
+
+    /// A terminal is one textarea whose value is the whole scrollback. The
+    /// model must see the latest output (the tail), not the login banner.
+    @Test func testLongTextareaRendersTailSoCommandOutputIsVisible() {
+        let banner = "Last login: Thu Sep 17 12:07:13 on ttys003\nrcn@Mac ~ % "
+        let filler = String(repeating: "older output line\n", count: 200)
+        let output = "ls -la ~/Desktop/PII-Test\nbudget.xlsx\nsetup.dmg\nrcn@Mac ~ % "
+        let view = AgentView.build(
+            from: snapshot([el("t", "textarea", "shell", value: banner + filler + output)]),
+            previous: nil
+        )
+        let render = view.renderForModel()
+        #expect(render.contains("budget.xlsx"), "latest command output must reach the model")
+        #expect(render.contains("earlier characters not shown"))
+        #expect(!(render.contains("Last login")), "the head is the part that gets dropped")
+    }
+
+    @Test func testShortTextareaRendersWholeValue() {
+        let value = String(repeating: "a", count: AgentView.contentValueChars)
+        #expect(AgentView.renderedValue(value, role: "textarea") == value)
+    }
+
+    @Test func testOtherRolesKeepShortHeadClip() {
+        let value = String(repeating: "b", count: 100)
+        #expect(AgentView.renderedValue(value, role: "textfield") == String(repeating: "b", count: AgentView.fieldValueChars) + "…")
+    }
+}

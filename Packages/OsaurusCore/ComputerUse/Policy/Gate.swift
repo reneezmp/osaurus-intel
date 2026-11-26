@@ -67,11 +67,6 @@ public enum GateDecision: Sendable, Equatable {
     case reject(reason: String)
 }
 
-// Intel (docs/SUBAGENTS_INTEL.md): the gate itself judges Computer Use's
-// `AgentAction`, which comes with `W-computer-use`; AppleScript uses only
-// `ActionPreview` and `GateDecision` above.
-#if !OSAURUS_INTEL
-
 /// The autonomy decision seam.
 public protocol ComputerUseGating: Sendable {
     func evaluate(
@@ -107,4 +102,3 @@ public struct HardwiredGate: ComputerUseGating {
         )
     }
 }
-#endif

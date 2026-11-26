@@ -24,9 +24,6 @@ import Foundation
 /// trivially unit-testable with the mock driver.
 public enum EffectClassifier {
 
-    // Intel (docs/SUBAGENTS_INTEL.md): classifying Computer Use's `AgentAction`
-    // comes with `W-computer-use`; AppleScript reuses the word lists below.
-    #if !OSAURUS_INTEL
     /// Classify a proposed action. `resolvedRole` / `resolvedLabel` come from
     /// the `TargetResolver` (the live element the mark/describe matched);
     /// `appName` is the focused app. `recipeSignals` are per-app refinements
@@ -122,8 +119,6 @@ public enum EffectClassifier {
     }
 
     // MARK: - Signal vocabularies
-
-    #endif
 
     /// Whole-word / phrase match. Single words match against tokens (so "pay"
     /// won't fire on "display"); entries containing a space match as a
