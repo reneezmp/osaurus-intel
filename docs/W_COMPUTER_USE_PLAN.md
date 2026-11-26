@@ -168,4 +168,7 @@ Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
     `keyCode(for:)` had their own test classes was wrong: upstream has none.
   - **XCTest conversion.** `InsightsImageRedactionTests` and
     `ComputerUsePromptQueueTests` were XCTest and never ran under the gate; both
-    are now Swift Testing with the same assertions (see the result line below).
+    are now Swift Testing with the same assertions; both pass unchanged, no code bug found.
+  - **Gate results.** Filtered: 293 tests in 65 suites passed, live hits empty, mdat
+    unchanged. Full suite (`gate_pty.sh`): 6518 tests in 847 suites passed with 6
+    known issues, live hits empty.

@@ -19,12 +19,13 @@
 //
 
 import Foundation
-import XCTest
+import Testing
 
 @testable import OsaurusCore
 
 @MainActor
-final class ComputerUsePromptQueueTests: XCTestCase {
+@Suite
+struct ComputerUsePromptQueueTests {
     private var queue: ComputerUsePromptQueue { .shared }
 
     private func preview(_ app: String = "Notes", effect: EffectClass = .edit) -> ActionPreview {
@@ -44,13 +45,12 @@ final class ComputerUsePromptQueueTests: XCTestCase {
         _ predicate: () -> Bool,
         timeout: TimeInterval = 2.0,
         _ what: String = "condition",
-        file: StaticString = #filePath,
-        line: UInt = #line
+        sourceLocation: SourceLocation = #_sourceLocation
     ) async {
         let start = Date()
         while !predicate() {
             if Date().timeIntervalSince(start) > timeout {
-                XCTFail("timed out waiting for \(what)", file: file, line: line)
+                Issue.record("timed out waiting for \(what)", sourceLocation: sourceLocation)
                 return
             }
             try? await Task.sleep(nanoseconds: 3_000_000)
@@ -63,56 +63,56 @@ final class ComputerUsePromptQueueTests: XCTestCase {
 
     // MARK: Confirm resolution
 
-    func testApproveResolvesTrue() async {
+    @Test func approveResolvesTrue() async {
         let id = "approve-\(UUID().uuidString)"
         let task = Task { await self.queue.requestConfirmation(self.preview(), toolCallId: id) }
         await waitUntil({ self.pendingId(forToolCallId: id) != nil }, "the prompt to park")
         guard let reqId = pendingId(forToolCallId: id) else { return }
         queue.resolve(id: reqId, approved: true)
         let approved = await task.value
-        XCTAssertTrue(approved)
-        XCTAssertNil(pendingId(forToolCallId: id))
+        #expect(approved)
+        #expect(pendingId(forToolCallId: id) == nil)
     }
 
-    func testDeclineResolvesFalse() async {
+    @Test func declineResolvesFalse() async {
         let id = "decline-\(UUID().uuidString)"
         let task = Task { await self.queue.requestConfirmation(self.preview(), toolCallId: id) }
         await waitUntil({ self.pendingId(forToolCallId: id) != nil }, "the prompt to park")
         guard let reqId = pendingId(forToolCallId: id) else { return }
         queue.resolve(id: reqId, approved: false)
         let approved = await task.value
-        XCTAssertFalse(approved)
+        #expect(!approved)
     }
 
     // MARK: Stop-during-confirm
 
     /// The feed's Stop calls `cancelAll(forToolCallId:)`; a confirm that's still
     /// on screen must resolve as DENIED and clear, so the loop unblocks.
-    func testCancelAllResolvesPendingConfirmAsDenied() async {
+    @Test func cancelAllResolvesPendingConfirmAsDenied() async {
         let id = "stop-\(UUID().uuidString)"
         let task = Task { await self.queue.requestConfirmation(self.preview(), toolCallId: id) }
         await waitUntil({ self.pendingId(forToolCallId: id) != nil }, "the prompt to park")
         queue.cancelAll(forToolCallId: id)
         let approved = await task.value
-        XCTAssertFalse(approved)
-        XCTAssertNil(pendingId(forToolCallId: id))
+        #expect(!approved)
+        #expect(pendingId(forToolCallId: id) == nil)
     }
 
     /// Structured cancellation of the awaiting Task (the loop's own teardown
     /// path) resolves the suspended call as DENIED via the cancellation handler.
-    func testTaskCancellationResolvesConfirmAsDenied() async {
+    @Test func taskCancellationResolvesConfirmAsDenied() async {
         let id = "cancel-\(UUID().uuidString)"
         let task = Task { await self.queue.requestConfirmation(self.preview(), toolCallId: id) }
         await waitUntil({ self.pendingId(forToolCallId: id) != nil }, "the prompt to park")
         task.cancel()
         let approved = await task.value
-        XCTAssertFalse(approved)
+        #expect(!approved)
         await waitUntil({ self.pendingId(forToolCallId: id) == nil }, "the prompt to clear")
     }
 
     // MARK: Approve-remaining
 
-    func testApproveRemainingAutoApprovesSameOrLowerEffectInApp() async {
+    @Test func approveRemainingAutoApprovesSameOrLowerEffectInApp() async {
         let id = "auto-\(UUID().uuidString)"
 
         // First edit in Notes → approve the rest.
@@ -121,12 +121,12 @@ final class ComputerUsePromptQueueTests: XCTestCase {
         guard let firstId = pendingId(forToolCallId: id) else { return }
         queue.resolveApprovingRest(id: firstId)
         let firstApproved = await first.value
-        XCTAssertTrue(firstApproved)
+        #expect(firstApproved)
 
         // A second edit in the same app auto-approves WITHOUT ever parking.
         let secondApproved = await queue.requestConfirmation(preview(), toolCallId: id)
-        XCTAssertTrue(secondApproved)
-        XCTAssertNil(pendingId(forToolCallId: id))
+        #expect(secondApproved)
+        #expect(pendingId(forToolCallId: id) == nil)
 
         // A higher-effect action (consequential) still prompts.
         let third = Task {
@@ -139,7 +139,7 @@ final class ComputerUsePromptQueueTests: XCTestCase {
         guard let thirdId = pendingId(forToolCallId: id) else { return }
         queue.resolve(id: thirdId, approved: false)
         let thirdApproved = await third.value
-        XCTAssertFalse(thirdApproved)
+        #expect(!thirdApproved)
 
         // Auto-approve is scoped per app: a different app still prompts.
         let other = Task {
@@ -152,7 +152,7 @@ final class ComputerUsePromptQueueTests: XCTestCase {
 
     // MARK: Cloud-vision consent
 
-    func testConsentResolvesToChoice() async {
+    @Test func consentResolvesToChoice() async {
         let id = "consent-\(UUID().uuidString)"
         let task = Task { await self.queue.requestCloudVisionConsent(toolCallId: id) }
         await waitUntil(
@@ -162,11 +162,11 @@ final class ComputerUsePromptQueueTests: XCTestCase {
         guard let reqId = queue.pendingConsent.first(where: { $0.toolCallId == id })?.id else { return }
         queue.resolveConsent(id: reqId, choice: .allowOnce)
         let choice = await task.value
-        XCTAssertEqual(choice, .allowOnce)
-        XCTAssertFalse(queue.pendingConsent.contains { $0.toolCallId == id })
+        #expect(choice == .allowOnce)
+        #expect(!queue.pendingConsent.contains { $0.toolCallId == id })
     }
 
-    func testCancelAllResolvesPendingConsentAsDeny() async {
+    @Test func cancelAllResolvesPendingConsentAsDeny() async {
         let id = "consent-stop-\(UUID().uuidString)"
         let task = Task { await self.queue.requestCloudVisionConsent(toolCallId: id) }
         await waitUntil(
@@ -175,6 +175,6 @@ final class ComputerUsePromptQueueTests: XCTestCase {
         )
         queue.cancelAll(forToolCallId: id)
         let choice = await task.value
-        XCTAssertEqual(choice, .deny)
+        #expect(choice == .deny)
     }
 }
