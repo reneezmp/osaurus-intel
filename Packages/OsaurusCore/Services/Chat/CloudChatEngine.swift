@@ -1281,6 +1281,24 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             + "Increase the agent's Max Tokens setting and retry."
     }
 
+    /// The Insights row's finish reason from the provider's `finish_reason`
+    /// (upstream `dispatchFinal` stats hint `stopReason`, stage 5d row 37):
+    /// `length` and `tool_calls` are kept; `function_call` reads as
+    /// `tool_calls`; everything else (`stop`, `content_filter`, a missing
+    /// value) is `stop`. A round that ended with tool calls pending is
+    /// `tool_calls` whatever the provider said (upstream sets it from the
+    /// parsed calls).
+    nonisolated static func insightsFinishReason(
+        wire: String?, hasToolCalls: Bool = false
+    ) -> RequestLog.FinishReason {
+        if hasToolCalls { return .toolCalls }
+        switch wire?.lowercased() {
+        case "length": return .length
+        case "tool_calls", "function_call": return .toolCalls
+        default: return .stop
+        }
+    }
+
     /// Token counts for the run's Insights row: the sum over every model
     /// round when any round reported usage (a round that reported none adds
     /// nothing, so the row never claims more than the provider said), else
@@ -1479,6 +1497,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 var completionTokens: Int?
                 var insightToolCalls: [ToolCallLog] = []
                 var didLogInference = false
+                // The latest round's real finish reason for the Insights row.
+                var loggedFinishReason: RequestLog.FinishReason = .stop
                 // Key of the Router request in flight (ledger / Insights request id).
                 var routerRequestKey: String?
 
@@ -1552,7 +1572,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         temperature: request.temperature.map(Float.init),
                         maxTokens: request.max_tokens,  // upstream #3308: nil when the request set no limit
                         toolCalls: insightToolCalls.isEmpty ? nil : insightToolCalls,
-                        finishReason: error == nil ? .stop : .error,
+                        finishReason: error == nil ? loggedFinishReason : .error,
                         errorMessage: error?.localizedDescription,
                         requestBody: requestBody,
                         responseBody: responseText.isEmpty ? nil : responseText,
@@ -2197,6 +2217,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // The round's finish reason (upstream #2108): `length`
                         // with tool calls pending means the arguments were cut.
                         var roundFinishReason: String?
+                        loggedFinishReason = .stop
                         var announcedNames: Set<Int> = []
                         var slotResolver = IntelToolCallSlotResolver()
                         // Row 24 (upstream `state.thinkSplitter`): MiniMax inlines
@@ -2324,6 +2345,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         toolName: toolName, argumentCharacters: characters)
                                 }
                             }
+                            loggedFinishReason = Self.insightsFinishReason(
+                                wire: nil, hasToolCalls: !finalized.completion.toolCalls.isEmpty)
                             if finalized.completion.toolCalls.isEmpty {
                                 // An incomplete response already failed the
                                 // stream, so this path has no `length` stop.
@@ -2816,6 +2839,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                                 if let reason = (json["choices"] as? [[String: Any]])?.first?["finish_reason"] as? String {
                                     roundFinishReason = reason
+                                    loggedFinishReason = Self.insightsFinishReason(wire: reason)
                                 }
                                 guard let choices = json["choices"] as? [[String: Any]],
                                     let delta = choices.first?["delta"] as? [String: Any]
@@ -2958,6 +2982,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         {
                             NSLog("[CloudChatEngine] Fallback: detected inline tool call '\(name)' in text")
                             partials[0] = PartialToolCall(id: Self.mintCallId(), name: name, arguments: args)
+                        }
+                        if !partials.isEmpty, loggedFinishReason == .stop {
+                            loggedFinishReason = .toolCalls
                         }
 
                         // Upstream #2108: the output cap ended the round while
@@ -3663,7 +3690,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 durationMs: Date().timeIntervalSince(started) * 1_000,
                 temperature: request.temperature.map(Float.init),
                 maxTokens: request.max_tokens,  // upstream #3308: nil when the request set no limit
-                finishReason: error == nil ? .stop : .error,
+                finishReason: error == nil
+                    ? ChatEngine.insightsFinishReason(
+                        wire: response?.choices.first?.finish_reason,
+                        hasToolCalls: response?.choices.first?.message?.tool_calls?.isEmpty == false)
+                    : .error,
                 errorMessage: error?.localizedDescription,
                 requestBody: ChatEngine.serializeRequestForInsights(request),
                 responseBody: text,

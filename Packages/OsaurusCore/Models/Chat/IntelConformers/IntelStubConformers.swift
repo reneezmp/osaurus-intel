@@ -470,8 +470,31 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         // A transport failure (offline, DNS, timeout) is thrown, as upstream:
         // the provider shows the error instead of "connected, 0 models", and
         // a transient one is retried when the network returns (#2415).
-        let (data, response) = try await discoveryTransport(req)
-        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        // Upstream `requestFailedWithDiagnostics` (stage 5d row 38): a failed
+        // discovery keeps a redacted request / response bundle for the
+        // provider's Request evidence row. Intel carries it beside the thrown
+        // error (`pendingReplayDiagnostics`) so error classification is unchanged.
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await discoveryTransport(req)
+        } catch {
+            pendingReplayDiagnostics[provider.id] = ProviderReplayDiagnosticBundle(
+                phase: "model_discovery", request: req, transportError: error,
+                configuredSecretHeaderKeys: provider.secretHeaderKeys)
+            throw error
+        }
+        guard let http = response as? HTTPURLResponse else {
+            pendingReplayDiagnostics[provider.id] = ProviderReplayDiagnosticBundle(
+                phase: "model_discovery", request: req,
+                configuredSecretHeaderKeys: provider.secretHeaderKeys)
+            throw URLError(.badServerResponse)
+        }
+        if !(200...299).contains(http.statusCode) {
+            pendingReplayDiagnostics[provider.id] = ProviderReplayDiagnosticBundle(
+                phase: "model_discovery", request: req, response: http, responseData: data,
+                configuredSecretHeaderKeys: provider.secretHeaderKeys)
+        }
         // Upstream: typed rate limit / unavailable before the generic decode,
         // so the connect phase can honour Retry-After with a bounded retry.
         // Discovery is an idempotent GET, so a plain 503 is retryable too.
@@ -510,8 +533,16 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
                 return (infos.map(\.id).sorted(), AnthropicModelCatalog.contextLengths(of: infos))
             }
         }
-        let decoded = try IntelProviderDiscoveryExtras.decodeModelList(
-            data: data, providerType: provider.providerType, manualModelIds: provider.manualModelIds)
+        let decoded: (ids: [String], contextLengths: [String: Int])
+        do {
+            decoded = try IntelProviderDiscoveryExtras.decodeModelList(
+                data: data, providerType: provider.providerType, manualModelIds: provider.manualModelIds)
+        } catch {
+            pendingReplayDiagnostics[provider.id] = ProviderReplayDiagnosticBundle(
+                phase: "model_discovery", request: req, response: http, responseData: data,
+                configuredSecretHeaderKeys: provider.secretHeaderKeys)
+            throw error
+        }
         // Upstream: Fireworks' `/models` lists only the account's own
         // deployments; merge the serverless catalog after them.
         if IntelProviderDiscoveryExtras.isFireworksProvider(provider) {
@@ -538,6 +569,9 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     var testRetrySleepOverride: (@MainActor (TimeInterval) async -> Void)?
     /// Test seam: the `/models` transport (tests never reach the network).
     var discoveryTransport: IntelProviderDiscoveryExtras.Transport = IntelProviderDiscoveryExtras.defaultTransport
+    /// The redacted request / response evidence of the latest failed discovery
+    /// per provider; `applyDiscovery` moves it to `lastReplayDiagnostics`.
+    var pendingReplayDiagnostics: [UUID: ProviderReplayDiagnosticBundle] = [:]
     /// Test seam: the signed Router catalog fetch.
     var testRouterModelsOverride: (@MainActor () async throws -> [OsaurusRouterModel])?
 
@@ -599,12 +633,14 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     /// connected with its models, or disconnected with the real error and the
     /// transient flag (so the network-recovery sweep can retry it).
     private func applyDiscovery(for provider: RemoteProvider) async {
+        pendingReplayDiagnostics.removeValue(forKey: provider.id)
         do {
             let (models, contextLengths) = try await discoverModels(for: provider)
             var state = providerStates[provider.id] ?? RemoteProviderState(providerId: provider.id)
             state.isConnected = true
             state.isConnecting = false
             state.lastError = nil
+            state.lastReplayDiagnostics = nil
             state.lastFailureWasTransient = false
             state.requiresAuth = false
             state.discoveredModels = models
@@ -617,6 +653,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
             state.isConnected = false
             state.isConnecting = false
             state.lastError = error.localizedDescription
+            state.lastReplayDiagnostics = pendingReplayDiagnostics.removeValue(forKey: provider.id)
             state.lastFailureWasTransient = Self.isTransientConnectError(error)
             // Upstream: a failed discovery leaves no stale rows in the picker.
             state.discoveredModels = []
