@@ -1,0 +1,344 @@
+import Foundation
+import Testing
+
+@testable import OsaurusCore
+
+/// Unit coverage for the Seatbelt (`sandbox-exec`) fallback backend used
+/// on macOS versions before 26. Pins the pieces that must not drift:
+/// backend selection never picks Seatbelt on Tahoe+, the generated
+/// profile is deny-by-default with the right write grants, "proxy"
+/// network mode fails closed, and the `/workspace` → host path rewrite
+/// only touches whole path components.
+@Suite
+struct SeatbeltSandboxTests {
+
+    /// Run a real `sandbox-exec` command, treating an executor inactivity
+    /// timeout as "this host cannot run Seatbelt right now" rather than a
+    /// product failure. CI runners intermittently wedge the sandbox XPC
+    /// services (observed as `Failed to create NSXPCConnection` storms), and
+    /// a sandboxed child that stalls there says nothing about the profile
+    /// under test. Same spirit as the `sandbox-exec`-missing guards: the
+    /// end-to-end tests only assert when the environment can actually
+    /// execute them. Returns nil to signal "skip".
+    private func runOrSkip(
+        _ request: SeatbeltExecutor.Request
+    ) async throws -> ContainerExecResult? {
+        // The inactivity timeout alone was not enough: with the runner's
+        // sandbox XPC services wedged, a denied `/bin/cat` sat in an
+        // uninterruptible kernel wait and the suite hit the 180 s harness
+        // limit twice in one day, on this branch and on main. Probe the host
+        // once with a hard wall-clock bound before running anything real.
+        guard Self.hostCanRunSeatbelt else { return nil }
+        do {
+            return try await SeatbeltExecutor.run(request)
+        } catch SandboxError.timeout {
+            return nil
+        }
+    }
+
+    /// One-shot host health probe, computed once per process.
+    ///
+    /// Runs the smallest command that exercises the exact path that wedges:
+    /// a sandbox violation (deny-default profile, then exec), which the
+    /// kernel reports through sandboxd. On a healthy host this exits in
+    /// milliseconds with a denial. On a wedged host it never returns, so the
+    /// wait is a dispatch semaphore with a 5 s ceiling rather than anything
+    /// the cooperative pool has to schedule, and the stuck child is
+    /// SIGKILLed and abandoned. `false` skips every end-to-end assertion in
+    /// this suite, which is the same contract as `sandbox-exec` being
+    /// missing: the profile under test is only judged where it can run.
+    private static let hostCanRunSeatbelt: Bool = {
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec")
+        else { return false }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+        process.arguments = ["-p", "(version 1)(deny default)", "/bin/cat", "/etc/hosts"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+        if exited.wait(timeout: .now() + 5) == .timedOut {
+            _ = Darwin.kill(process.processIdentifier, SIGKILL)
+            return false
+        }
+        return true
+    }()
+
+    // MARK: - Backend selection
+
+    /// `isSupported` is read on the main actor from hot paths (chat preview
+    /// recomposition via `effectiveAutonomousExec`), so it must be a
+    /// process-lifetime constant rather than a filesystem probe per access.
+    @Test("isSupported is resolved once and matches the host binary")
+    func isSupportedIsStableAndAccurate() {
+        let expected = FileManager.default.isExecutableFile(atPath: SeatbeltSandbox.sandboxExecPath)
+        #expect(SeatbeltSandbox.isSupported == expected)
+        #expect(SeatbeltSandbox.isSupported == SeatbeltSandbox.isSupported)
+    }
+
+    @Test("the Intel build always selects seatbelt; upstream's resolution stays on the OS version")
+    func intelBackendAlwaysSeatbelt() {
+        #expect(SandboxBackend.current == .seatbelt)
+        #expect(SandboxBackend.resolveFromEnvironment(environment: [:], majorVersion: 13) == .seatbelt)
+        #expect(SandboxBackend.resolveFromEnvironment(environment: [:], majorVersion: 26) == .virtualMachine)
+        #expect(
+            SandboxBackend.resolveFromEnvironment(
+                environment: ["OSAURUS_FORCE_SEATBELT": "1"], majorVersion: 26) == .seatbelt)
+    }
+
+    // MARK: - Profile generation
+
+    @Test("profile is deny-by-default and grants workspace + temp writes")
+    func profileShape() {
+        let profile = SeatbeltSandbox.profile(
+            workspaceRoot: "/Users/me/.osaurus/container/workspace",
+            tempDir: "/tmp/osaurus-seatbelt",
+            network: .allowed,
+            developerDirectory: "/Applications/Xcode.app/Contents/Developer"
+        )
+        #expect(profile.hasPrefix("(version 1)\n(deny default)"))
+        #expect(profile.contains("(subpath \"/Users/me/.osaurus/container/workspace\")"))
+        #expect(profile.contains("(subpath \"/private/tmp/osaurus-seatbelt\")"))
+        #expect(profile.contains("(subpath \"/Applications/Xcode.app/Contents\")"))
+        for cacheFile in SeatbeltSandbox.xcrunCacheFiles {
+            #expect(profile.contains("(literal \"\(cacheFile)\")"))
+        }
+        #expect(profile.contains("(allow network*)"))
+        // No blanket home-directory read grant.
+        #expect(!profile.contains("(subpath \"/Users\")"))
+        // Filesystem confinement is not enough if arbitrary code can connect
+        // to every user-session XPC service.
+        #expect(!profile.contains("(allow mach-lookup"))
+
+        // The developer tree is read-only. It must appear only in the
+        // read grant, never in the workspace/scratch write section.
+        let writeSection = profile.components(separatedBy: "(allow file-read* file-write*").last ?? ""
+        #expect(!writeSection.contains("/Applications/Xcode.app/Contents"))
+        for cacheFile in SeatbeltSandbox.xcrunCacheFiles {
+            #expect(!writeSection.contains(cacheFile))
+        }
+    }
+
+    @Test("profile omits an unavailable developer directory")
+    func profileWithoutDeveloperDirectory() {
+        let profile = SeatbeltSandbox.profile(
+            workspaceRoot: "/w",
+            tempDir: "/t",
+            network: .denied,
+            developerDirectory: nil
+        )
+        #expect(!profile.contains("/Applications"))
+    }
+
+    @Test("generated profile launches Apple's Python shim through selected tools")
+    func profileLaunchesPythonShim() async throws {
+        guard let developerDirectory = SeatbeltSandbox.activeDeveloperDirectory,
+              FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec"),
+              FileManager.default.isExecutableFile(atPath: "/usr/bin/python3")
+        else { return }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("osaurus-seatbelt-python-\(UUID().uuidString)")
+        let workspace = root.appendingPathComponent("workspace")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: workspace, withIntermediateDirectories: true)
+        let scratch = SeatbeltSandbox.scratchDir
+        try FileManager.default.createDirectory(
+            atPath: scratch, withIntermediateDirectories: true)
+        let cacheReadChecks = SeatbeltSandbox.xcrunCacheFiles
+            .map { "/bin/cat '\($0)' >/dev/null" }
+            .joined(separator: " && ")
+        let profile = SeatbeltSandbox.profile(
+            workspaceRoot: workspace.path,
+            tempDir: scratch,
+            network: .denied,
+            developerDirectory: developerDirectory
+        )
+
+        guard let result = try await runOrSkip(
+            SeatbeltExecutor.Request(
+                command: "\(cacheReadChecks) && /bin/pwd >/dev/null && "
+                    + "/bin/test \"$HOME\" = '\(workspace.path)' && "
+                    + "/usr/bin/python3 -c \"print('seatbelt-python-ok')\"",
+                // Prove the executor replaces a caller-supplied TMPDIR that
+                // the deny-default profile cannot write.
+                env: [
+                    "TMPDIR": "/var/empty/osaurus-denied",
+                    // HOME changes xcrun's cache key. It must be replaced by
+                    // the mapped confined cwd before host-side preparation.
+                    "HOME": "/var/empty/osaurus-denied",
+                    // A caller cannot redirect the developer shim outside the
+                    // validated toolchain tree granted by the profile.
+                    "DEVELOPER_DIR": "/var/empty/osaurus-denied",
+                ],
+                cwd: workspace.path,
+                timeout: 10,
+                profile: profile,
+                stdoutTee: nil,
+                stderrTee: nil,
+                onProcessStarted: nil
+            )
+        ) else { return }
+        #expect(
+            result.exitCode == 0,
+            "sandboxed Python failed: \(result.stderr)\nProfile:\n\(profile)"
+        )
+        #expect(result.stdout.contains("seatbelt-python-ok"))
+        #expect(!result.stderr.contains("error retrieving current directory"))
+        #expect(!result.stderr.contains("couldn't create cache file"))
+        #expect(!result.stderr.contains("xcrun_db-"))
+    }
+
+    @Test("real profile denies reads and writes outside confined roots")
+    func profileConfinesHostFiles() async throws {
+        guard FileManager.default.isExecutableFile(atPath: "/usr/bin/sandbox-exec")
+        else { return }
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("osaurus-seatbelt-boundary-\(UUID().uuidString)")
+        let workspace = root.appendingPathComponent("workspace")
+        let outsideSecret = root.appendingPathComponent("outside-secret")
+        let outsideWrite = root.appendingPathComponent("outside-write")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: workspace, withIntermediateDirectories: true)
+        try Data("do-not-read".utf8).write(to: outsideSecret)
+
+        let profile = SeatbeltSandbox.profile(
+            workspaceRoot: workspace.path,
+            tempDir: SeatbeltSandbox.scratchDir,
+            network: .denied
+        )
+        guard let read = try await runOrSkip(
+            SeatbeltExecutor.Request(
+                command: "/bin/cat '\(outsideSecret.path)'",
+                env: [:],
+                cwd: workspace.path,
+                timeout: 10,
+                profile: profile,
+                stdoutTee: nil,
+                stderrTee: nil,
+                onProcessStarted: nil
+            )) else { return }
+        #expect(read.exitCode != 0)
+        #expect(!read.stdout.contains("do-not-read"))
+
+        guard let write = try await runOrSkip(
+            SeatbeltExecutor.Request(
+                command: "/usr/bin/printf 'escaped' > '\(outsideWrite.path)'",
+                env: [:],
+                cwd: workspace.path,
+                timeout: 10,
+                profile: profile,
+                stdoutTee: nil,
+                stderrTee: nil,
+                onProcessStarted: nil
+            )) else { return }
+        #expect(write.exitCode != 0)
+        #expect(!FileManager.default.fileExists(atPath: outsideWrite.path))
+    }
+
+    @Test("network none denies network in the profile")
+    func profileDeniesNetwork() {
+        let profile = SeatbeltSandbox.profile(
+            workspaceRoot: "/w", tempDir: "/t", network: .denied)
+        #expect(profile.contains("(deny network*)"))
+        #expect(!profile.contains("(allow network*)"))
+    }
+
+    @Test("every unknown or empty network mode fails closed to no network")
+    func unknownNetworkModeIsDenied() {
+        for mode in ["", "none", "proxy", "OUTBOUND", "filtered", "anything"] {
+            #expect(SeatbeltSandbox.NetworkPolicy.from(configNetwork: mode) == .denied)
+        }
+    }
+
+    @Test("profile only uses operations that exist on macOS 13")
+    func profileUsesVenturaOperationsOnly() {
+        let profile = SeatbeltSandbox.profile(
+            workspaceRoot: "/w", tempDir: "/t", network: .allowed, developerDirectory: nil)
+        // Every top-level rule is `(allow|deny <operation> ...)`; each operation
+        // below is in Ventura's Seatbelt operation set.
+        let ventura: Set<String> = [
+            "default", "process-fork", "process-exec*", "process-info*", "signal",
+            "sysctl-read", "file-read-metadata", "file-ioctl", "file-read*",
+            "file-write*", "network*", "system-socket",
+        ]
+        let regex = try! NSRegularExpression(pattern: #"^\((?:allow|deny) ([a-z*\-]+)"#, options: .anchorsMatchLines)
+        let range = NSRange(profile.startIndex..., in: profile)
+        let found = regex.matches(in: profile, range: range).compactMap { m -> String? in
+            Range(m.range(at: 1), in: profile).map { String(profile[$0]) }
+        }
+        #expect(!found.isEmpty)
+        for op in found { #expect(ventura.contains(op), "unexpected operation \(op)") }
+        // Nothing grants the whole file tree or arbitrary services.
+        #expect(!profile.contains("(allow default)"))
+        #expect(!profile.contains("(allow file-write*)"))
+        #expect(!profile.contains("mach-lookup"))
+    }
+
+    @Test("proxy allowlist mode fails closed to no network")
+    func proxyModeFailsClosed() {
+        #expect(SeatbeltSandbox.NetworkPolicy.from(configNetwork: "outbound") == .allowed)
+        #expect(SeatbeltSandbox.NetworkPolicy.from(configNetwork: "none") == .denied)
+        // Seatbelt can't enforce a domain allowlist — it must not silently
+        // widen "proxy" to unrestricted egress.
+        #expect(SeatbeltSandbox.NetworkPolicy.from(configNetwork: "proxy") == .denied)
+    }
+
+    @Test("profile paths with quotes are escaped")
+    func profileEscaping() {
+        #expect(SeatbeltSandbox.escapeProfilePath(#"/a/"b"/c"#) == #"/a/\"b\"/c"#)
+        #expect(SeatbeltSandbox.escapeProfilePath(#"/a\b"#) == #"/a\\b"#)
+    }
+
+    // MARK: - Path mapping
+
+    private let root = "/Users/me/.osaurus/container/workspace"
+
+    @Test("guest workspace paths map to the host workspace")
+    func mapsWorkspacePaths() {
+        #expect(
+            SeatbeltPathMapper.mapToHost("cat /workspace/agents/a/notes.txt", workspaceRoot: root)
+                == "cat \(root)/agents/a/notes.txt")
+        #expect(SeatbeltPathMapper.mapToHost("ls /workspace", workspaceRoot: root) == "ls \(root)")
+        #expect(
+            SeatbeltPathMapper.mapToHost("cd /workspace && ls /workspace/shared", workspaceRoot: root)
+                == "cd \(root) && ls \(root)/shared")
+    }
+
+    @Test("non-workspace tokens are left untouched")
+    func leavesOtherPathsAlone() {
+        #expect(
+            SeatbeltPathMapper.mapToHost("ls /workspaces/other", workspaceRoot: root)
+                == "ls /workspaces/other")
+        #expect(
+            SeatbeltPathMapper.mapToHost("ls foo/workspace/bar", workspaceRoot: root)
+                == "ls foo/workspace/bar")
+        #expect(
+            SeatbeltPathMapper.mapToHost("echo no paths here", workspaceRoot: root)
+                == "echo no paths here")
+    }
+
+    @Test("trailing slash on the host root does not double up")
+    func trailingSlashRoot() {
+        #expect(
+            SeatbeltPathMapper.mapToHost("/workspace/x", workspaceRoot: root + "/")
+                == "\(root)/x")
+    }
+
+    @Test("env values are mapped")
+    func mapsEnvValues() {
+        let mapped = SeatbeltPathMapper.mapEnvToHost(
+            ["HOME": "/workspace/agents/a", "LANG": "C"], workspaceRoot: root)
+        #expect(mapped["HOME"] == "\(root)/agents/a")
+        #expect(mapped["LANG"] == "C")
+    }
+}

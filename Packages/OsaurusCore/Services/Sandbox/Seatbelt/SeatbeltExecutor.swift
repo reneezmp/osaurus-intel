@@ -1,0 +1,378 @@
+//
+//  SeatbeltExecutor.swift
+//  osaurus
+//
+//  Runs one command on the host under `sandbox-exec` confinement and
+//  returns the same `ContainerExecResult` envelope the VM path produces,
+//  so callers behind `SandboxManager.exec(...)` cannot tell the backends
+//  apart. Mirrors the VM path's semantics: buffered stdout/stderr
+//  collection, optional live tee writers, an inactivity timeout that
+//  resets on output, and a `ProcessHandle` for the UI's Terminate button.
+//
+
+import Foundation
+
+// Intel fork: upstream's executor writes to Containerization's `Writer` and
+// throws `SandboxManager`'s `SandboxError`. Neither exists without the VM
+// stack, so Intel has two small stand-ins below (same shape, same cases).
+
+/// Output observer (stand-in for Containerization's `Writer`).
+public protocol SeatbeltOutputWriter: AnyObject, Sendable {
+    func write(_ data: Data) throws
+    func close() throws
+}
+
+/// Errors of the sandbox exec path (the cases upstream's executor throws).
+public enum SandboxError: Error, LocalizedError {
+    case unavailable
+    case containerNotRunning
+    case execFailed(String)
+    case timeout
+
+    public var errorDescription: String? {
+        switch self {
+        case .unavailable: L("Sandbox is not available on this system")
+        case .containerNotRunning: "Container is not running"
+        case .execFailed(let msg): "Execution failed: \(msg)"
+        case .timeout: "Command timed out"
+        }
+    }
+}
+
+enum SeatbeltExecutor {
+
+    /// Populate xcrun's Python lookup before entering deny-default Seatbelt.
+    /// xcrun keys its shared database by `HOME`, so warming it once with the
+    /// host environment is insufficient when the confined command uses an
+    /// agent workspace as home. Resolve (but never execute) the tool with the
+    /// exact sanitized environment for this request. That lets xcrun perform
+    /// any atomic cache refresh before confinement without running caller code
+    /// or granting sandboxed work write access to the host's temp directory.
+    ///
+    /// Async and bounded: this used to `waitUntilExit()` on the cooperative
+    /// thread pool with no limit. On a CI runner whose XPC services are
+    /// wedged, xcrun can hang, and a hung cooperative thread starves every
+    /// other async test in the process, so an unrelated test gets blamed
+    /// with "Time limit was exceeded". The wait now parks a continuation
+    /// instead of a thread, and a dispatch timer abandons xcrun after
+    /// `shimCacheDeadline`; the confined launch then surfaces the real tool
+    /// error, which is the existing best-effort contract.
+    private static let shimCacheDeadline: TimeInterval = 15
+
+    private static func preparePythonShimCache(home: String) async {
+        guard let developerDirectory = SeatbeltSandbox.activeDeveloperDirectory,
+              FileManager.default.isExecutableFile(atPath: "/usr/bin/xcrun")
+        else { return }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["--find", "python3"]
+        process.environment = [
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "DEVELOPER_DIR": developerDirectory,
+            "HOME": home,
+        ]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let gate = ResumeOnce(continuation)
+            process.terminationHandler = { _ in gate.take()?.resume() }
+            do {
+                try process.run()
+            } catch {
+                // The confined launch will surface the real tool error. Cache
+                // preparation is best effort and must not execute a retry loop.
+                gate.take()?.resume()
+                return
+            }
+            // Only `pid` and the Sendable gate cross into the timer closure;
+            // `Process` itself is not Sendable. Taking the continuation FIRST
+            // guarantees the kill only targets a child that has not reported
+            // termination, so a recycled pid is never signalled.
+            let pid = process.processIdentifier
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + shimCacheDeadline) {
+                guard let pending = gate.take() else { return }
+                _ = Darwin.kill(pid, SIGKILL)
+                pending.resume()
+            }
+        }
+    }
+
+    /// Hands out a continuation exactly once, to whichever of the termination
+    /// handler and the deadline timer asks first.
+    private final class ResumeOnce: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        init(_ continuation: CheckedContinuation<Void, Never>) {
+            self.continuation = continuation
+        }
+
+        func take() -> CheckedContinuation<Void, Never>? {
+            lock.lock()
+            defer { lock.unlock() }
+            let pending = continuation
+            continuation = nil
+            return pending
+        }
+    }
+
+    /// Absolute wall-clock ceiling on one confined run, enforced from a
+    /// dispatch timer rather than the cooperative pool.
+    ///
+    /// The inactivity timeout below is polled by an async loop, so it only
+    /// fires if that loop gets scheduled. Under pool starvation (any test or
+    /// caller blocking cooperative threads while a sandboxed child is wedged
+    /// in an uninterruptible sandboxd wait) the loop never runs, the child
+    /// never dies, and the caller sits until the test harness's 180 s limit
+    /// fails the job. The watchdog SIGKILLs the child regardless of what the
+    /// pool is doing; the loop then observes the exit. A nil `timeout` keeps
+    /// the documented wait-forever semantics.
+    private static func hardDeadline(for timeout: TimeInterval?) -> TimeInterval? {
+        guard let timeout else { return nil }
+        return timeout * 2 + 30
+    }
+
+    struct Request {
+        /// Shell command, already host-path-mapped by the caller.
+        let command: String
+        let env: [String: String]
+        /// Host cwd, already mapped. `nil` runs in the workspace root.
+        let cwd: String?
+        /// Inactivity timeout (seconds); resets whenever the process
+        /// emits output. `nil` waits indefinitely.
+        let timeout: TimeInterval?
+        let profile: String
+        let stdoutTee: (any SeatbeltOutputWriter)?
+        let stderrTee: (any SeatbeltOutputWriter)?
+        let onProcessStarted: (@Sendable (ProcessHandle) -> Void)?
+    }
+
+    /// Bytes collected from one pipe plus the last-output clock the
+    /// inactivity timeout reads. `@unchecked Sendable` — all state is
+    /// behind the lock.
+    private final class Collector: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data = Data()
+        private let tee: (any SeatbeltOutputWriter)?
+        private let touch: @Sendable () -> Void
+
+        init(tee: (any SeatbeltOutputWriter)?, touch: @escaping @Sendable () -> Void) {
+            self.tee = tee
+            self.touch = touch
+        }
+
+        func append(_ chunk: Data) {
+            guard !chunk.isEmpty else { return }
+            lock.lock()
+            data.append(chunk)
+            lock.unlock()
+            touch()
+            // Observer failures never disturb collection (same
+            // contract as TeeWriter's secondary).
+            try? tee?.write(chunk)
+        }
+
+        var string: String {
+            lock.lock()
+            defer { lock.unlock() }
+            return String(data: data, encoding: .utf8) ?? ""
+        }
+    }
+
+    /// Reads whatever is already buffered in the pipe without ever blocking,
+    /// even while an orphaned descendant still holds the write end open.
+    private static func drainBufferedBytes(_ handle: FileHandle) -> Data {
+        let fd = handle.fileDescriptor
+        let flags = fcntl(fd, F_GETFL)
+        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) >= 0 else { return Data() }
+        var drained = Data()
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        while true {
+            let count = read(fd, &buffer, buffer.count)
+            guard count > 0 else { break }
+            drained.append(buffer, count: count)
+        }
+        return drained
+    }
+
+    /// EOF remains readable until the handler is detached. Keeping it installed
+    /// schedules empty reads repeatedly and can saturate Foundation's worker pool.
+    static func consumeAvailableData(
+        from handle: FileHandle,
+        append: (Data) -> Void
+    ) {
+        let chunk = handle.availableData
+        if chunk.isEmpty {
+            handle.readabilityHandler = nil
+        } else {
+            append(chunk)
+        }
+    }
+
+    private final class ActivityClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var last = Date()
+        func touch() {
+            lock.lock()
+            last = Date()
+            lock.unlock()
+        }
+        var secondsIdle: TimeInterval {
+            lock.lock()
+            defer { lock.unlock() }
+            return Date().timeIntervalSince(last)
+        }
+    }
+
+    static func run(_ request: Request) async throws -> ContainerExecResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: SeatbeltSandbox.sandboxExecPath)
+        process.arguments = ["-p", request.profile, "/bin/sh", "-c", request.command]
+
+        var env = request.env
+        if env["PATH"] == nil {
+            env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        }
+        // Point tools' scratch writes at a directory the profile
+        // actually allows, instead of the user's default $TMPDIR
+        // (which is deny-listed).
+        let scratch = SeatbeltSandbox.scratchDir
+        try? FileManager.default.createDirectory(
+            atPath: scratch, withIntermediateDirectories: true)
+        // This is a confinement boundary, not a caller preference. An
+        // inherited or tool-supplied TMPDIR points outside the profile's
+        // writable scratch grant and breaks xcrun-backed shims such as
+        // `/usr/bin/python3`; always replace it with the allowed path.
+        env["TMPDIR"] = scratch
+        // Use the same validated developer directory as the exact shim
+        // preparation above. A caller override could select an ungranted tree
+        // and force xcrun to refresh its host cache from inside confinement.
+        if let developerDirectory = SeatbeltSandbox.activeDeveloperDirectory {
+            env["DEVELOPER_DIR"] = developerDirectory
+        } else {
+            env.removeValue(forKey: "DEVELOPER_DIR")
+        }
+        // HOME participates in xcrun's cache key. It is also a confinement
+        // boundary: never let a caller redirect the host-side preparation to
+        // an arbitrary directory. Seatbelt requests already carry a mapped,
+        // path-sanitized cwd; fall back to the writable scratch directory.
+        let confinedHome = request.cwd ?? scratch
+        env["HOME"] = confinedHome
+        process.environment = env
+
+        // `run()` raises an uncatchable Objective-C exception for a NUL in the
+        // model-supplied command or env.
+        do {
+            try ProcessInputValidation.validate(process)
+        } catch {
+            throw SandboxError.execFailed("sandbox-exec launch failed: \(error.localizedDescription)")
+        }
+
+        if request.command.contains("python3") {
+            await preparePythonShimCache(home: confinedHome)
+        }
+
+        if let cwd = request.cwd {
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd)
+        }
+
+        let clock = ActivityClock()
+        let stdoutCollector = Collector(tee: request.stdoutTee) { clock.touch() }
+        let stderrCollector = Collector(tee: request.stderrTee) { clock.touch() }
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        process.standardInput = FileHandle.nullDevice
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            consumeAvailableData(from: handle, append: stdoutCollector.append)
+        }
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            consumeAvailableData(from: handle, append: stderrCollector.append)
+        }
+        defer {
+            stdoutPipe.fileHandleForReading.readabilityHandler = nil
+            stderrPipe.fileHandleForReading.readabilityHandler = nil
+        }
+
+        do {
+            try process.run()
+        } catch {
+            throw SandboxError.execFailed(
+                "sandbox-exec launch failed: \(error.localizedDescription)")
+        }
+
+        let pid = process.processIdentifier
+        request.onProcessStarted?(
+            ProcessHandle(pid: pid) { signal in
+                // ESRCH (already exited) is a no-op, matching the VM
+                // handle's idempotent-kill contract.
+                _ = Darwin.kill(pid, signal)
+            })
+
+        // Wall-clock watchdog (see `hardDeadline`). Cancelled on every exit
+        // path of this function, so it can only fire while the run is still
+        // in progress, i.e. while `pid` is ours. Captures the pid alone:
+        // `Process` is not Sendable, and `kill` on a pid that exited a moment
+        // earlier is ESRCH and harmless.
+        var watchdog: DispatchWorkItem?
+        if let ceiling = Self.hardDeadline(for: request.timeout) {
+            let item = DispatchWorkItem { _ = Darwin.kill(pid, SIGKILL) }
+            watchdog = item
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + ceiling, execute: item)
+        }
+        defer { watchdog?.cancel() }
+
+        // Wait off the main thread with an inactivity timeout that
+        // resets on output — the same semantics as the VM path's
+        // `waitWithInactivityTimeout`.
+        var timedOut = false
+        while process.isRunning {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            if let timeout = request.timeout, clock.secondsIdle > timeout {
+                timedOut = true
+                process.terminate()
+                // Grace period, then hard kill.
+                for _ in 0..<20 where process.isRunning {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
+                if process.isRunning { _ = Darwin.kill(pid, SIGKILL) }
+                break
+            }
+        }
+        // Foundation observes/reaps its child independently. Once isRunning
+        // is false, terminationStatus is available; a second synchronous
+        // waitUntilExit can still hang pumping Foundation's run loop (observed
+        // in CI after this polling loop completed). Never introduce that
+        // unbounded wait onto the cooperative executor. After a timeout, keep
+        // the existing bounded grace period for SIGKILL to take effect.
+        if timedOut {
+            for _ in 0..<20 where process.isRunning {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+        }
+
+        // Detach the handlers, then drain any bytes still buffered in the
+        // pipes. The drain must never block: `availableData` waits while any
+        // write end is open, and a killed `sandbox-exec` can leave an orphaned
+        // grandchild of the shell holding the write end — which turned an
+        // already-handled inactivity timeout into an indefinite hang.
+        stdoutPipe.fileHandleForReading.readabilityHandler = nil
+        stderrPipe.fileHandleForReading.readabilityHandler = nil
+        stdoutCollector.append(drainBufferedBytes(stdoutPipe.fileHandleForReading))
+        stderrCollector.append(drainBufferedBytes(stderrPipe.fileHandleForReading))
+
+        if timedOut {
+            throw SandboxError.timeout
+        }
+
+        return ContainerExecResult(
+            stdout: stdoutCollector.string,
+            stderr: stderrCollector.string,
+            exitCode: process.terminationStatus
+        )
+    }
+}
