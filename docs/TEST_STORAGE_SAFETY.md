@@ -158,8 +158,11 @@ corrupt them.
   Known read-only leak: `DirectoryPickerService.effectiveModelsDirectory()`
   (Intel stub in `IntelDataConformers.swift`) hard-codes `~/.osaurus/models`.
   It only checks whether that folder exists, and never writes.
-  Not yet tried end to end: do a first launch carefully and update this
-  section with what it shows.
+  **Script (2026-11-26):** `scripts/test/run_dev_app.sh` does steps 2–5
+  (refuses any bundle id but the dev one, turns Sparkle off for the dev
+  domain, launches, then runs the postflight checks and cleans up after you
+  quit). Build command is in its last lines. First end-to-end launch:
+  record what it shows here.
 
 ## Preflight and postflight
 
