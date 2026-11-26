@@ -227,6 +227,8 @@ mdat and live-folder checks).
   nothing user-visible yet (`W_HARNESS_RUNTIMES_PLAN.md`).
 - **Harness runtimes stage 3** (2026-11-26): process and session core, not
   wired in yet. Stage 4 waits for Renée's subprocess-environment decision.
+- **Subagents stage 6** (2026-11-26): waves, background spawn, report-back,
+  Stop. `W-subagents` is complete apart from media kinds. Combined suite 6,241.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

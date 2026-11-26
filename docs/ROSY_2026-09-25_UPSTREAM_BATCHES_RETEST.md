@@ -3699,3 +3699,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 
 - [ ] Insights for a reply that hit Max Tokens shows finish reason `length`; a reply that called a tool shows `tool_calls`; a normal reply shows `stop`.
 - [ ] Add a provider with a wrong key: Providers shows a "Request evidence" row with the request and response, with the key hidden. Fix the key: the row goes away.
+
+## Subagents stages 5–6: settings, Delegations, background spawn (2026-11-26)
+
+`W-subagents` stages 5–6. Not in candidate 69. **Take screenshots** of the new settings and the Delegations list.
+
+- [ ] Settings → Orchestrator shows the delegation section (allowed agents, admitted models, permission, budgets); an agent's Abilities tab has a delegation switch. Nothing there can admit a cloud model or raise a budget past upstream's limits.
+- [ ] Ask for two independent research tasks at once: two delegations run in one wave (with a permission card each unless Always Allow), and both results come back.
+- [ ] Ask for a background delegation: the reply continues, the worker shows in Activity, and its result is reported back into the chat when done.
+- [ ] Press Stop while a background worker runs: the worker stops too, and no new reply starts on its own afterwards.
+- [ ] The Delegations list shows past runs, and opening one replays its log.
