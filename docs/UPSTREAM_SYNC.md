@@ -225,6 +225,8 @@ mdat and live-folder checks).
   request evidence on failed discovery. **Stage 5d is complete.**
 - **Harness runtimes stages 1–2** (2026-11-26): model, registry, detection;
   nothing user-visible yet (`W_HARNESS_RUNTIMES_PLAN.md`).
+- **Harness runtimes stage 3** (2026-11-26): process and session core, not
+  wired in yet. Stage 4 waits for Renée's subprocess-environment decision.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
