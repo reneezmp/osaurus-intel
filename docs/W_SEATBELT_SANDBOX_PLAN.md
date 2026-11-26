@@ -70,7 +70,7 @@ Facts from upstream's profile that matter:
 |---|-------|--------|
 | 1 | **Seatbelt core, unwired.** `SeatbeltSandbox` (profile, backend enum, path mapper), `SeatbeltExecutor` (pipes, idle timeout, hard deadline, NUL check), Intel stand-ins for `Writer` and `SandboxError`. Tests. No behaviour change. | Done |
 | 2 | **Host sandbox runtime.** A compiled Intel `SandboxManager` slice with upstream's `exec` / Seatbelt branch, workspace folders under `OsaurusPaths.containerWorkspace()`, per-agent homes, `SandboxLogBuffer`, availability cache (#3094, #3105), `SandboxError` merge. Default network denied. A confinement self-test (upstream's diagnostic: a write outside the workspace must fail). | Done (2026-11-26) |
-| 3 | **Tools.** Compile the host-capable part of `BuiltinSandboxTools` (`sandbox_exec`, read, write, search, `sandbox_secret_set` with #2157 scrubbing), `SandboxToolRegistrar`, per-agent `AutonomousExecConfig` (`enabled`, `maxCommandsPerTurn`, `pluginCreate`, `backgroundProcessEnabled`), `ToolRegistry` wiring, permission "Ask", composer sections (`sandboxState`, `sandboxUnavailable`, `secretHandling`, `selfImprovement`, `pluginCreator`, `soul`). | Not started |
+| 3 | **Tools.** Host-capable slice of `BuiltinSandboxTools` as Intel files: `sandbox_exec` (foreground), `sandbox_read_file`, `sandbox_write_file`, `sandbox_search_files`, `sandbox_secret_check` (#2157 output scrubbing), per-agent `AutonomousExecConfig` (`enabled`, `maxCommandsPerTurn`, `sandboxNetworkEnabled`, `backgroundProcessEnabled`), `ToolRegistry` gating, permission "Ask" for write/exec, composer sections (environment, `sandboxState`, `sandboxUnavailable`, `secretHandling`, `soul`). `sandbox_secret_set` is written but not registered; `selfImprovement` / `pluginCreator` wait for stage 4. | Done (2026-11-26) |
 | 4 | **Background processes and plugins.** `sandbox_exec(background:true)`, `sandbox_process`, sandbox plugins on the host backend. Avoid `BackgroundTaskManager` and the spawn tools while `W-subagents` is open. | Not started |
 | 5 | **UI and declarative config.** Seatbelt variant of the Sandbox page (`isSeatbelt` branches), per-agent switches in the agent editor including an explicit network switch that defaults off, `sandbox.*` keys in declarative config. Ventura rules apply. | Not started |
 
@@ -125,3 +125,93 @@ validates the process before launch), `OSAURUS_KEYCHAIN_FREE_SANDBOX`.
 - Tests: `Tests/Sandbox/SandboxManagerHostTests.swift` (temp workspaces only;
   `SandboxManager(workspaceRoot:)` does not touch `State`, logs or
   `sandbox.json`). Nothing in the app calls the manager yet.
+
+## Stage 3 notes (2026-11-26)
+
+Files: `Tools/IntelSandboxTools.swift`, `Tools/IntelSandboxSecretTools.swift`,
+`Tools/SecretScrubber.swift` (upstream's, verbatim),
+`Services/Sandbox/IntelSandboxToolRegistrar.swift` (`SandboxToolGate`,
+`SandboxToolRegistrar`), `Services/Chat/IntelSandboxPrompt.swift`; edits in
+`Agent.swift`, `IntelManagerConformers.swift`, `IntelStubConformers.swift` (the
+Intel `ToolRegistry`), `IntelDataConformers.swift` (composer, snapshot).
+`Package.swift` now compiles `Services/Sandbox/SandboxSecurity.swift` (path
+sanitizer, exec limiter). Tests: `Tests/Sandbox/IntelSandboxToolsTests.swift`
+(real confined commands on temp workspaces).
+
+**Who gets the sandbox.** Only a custom agent whose own
+`autonomousExec.enabled` is true, on a Mac where `sandbox-exec` exists
+(`SandboxToolGate.config(for:)`). Upstream resolves an unconfigured custom
+agent to ON; Intel resolves it to off, and the Default agent never gets it.
+There is no UI switch yet (stage 5), so today the only ways to opt in are
+declarative config or an agent file that already says `enabled: true`.
+`SandboxManager.publishesAvailabilityToUI` stays `false`, so Onboarding, the
+agent editor and the chat chip behave as before.
+
+**What changes for everyone else: nothing.** The tools are not even
+registered until an opted-in agent first composes or sends. After that the
+registry hides them from every agent that did not opt in
+(`openAISpecs(for:)`, `openAISpecs(named:)`, `listTools()`), refuses their
+execution (`runtimeCapabilityDenial`), and denies them to external surfaces
+(`externallyDeniedHostToolNames`: MCP bridge, HTTP).
+
+**What a sandboxed agent can and cannot do.**
+
+- Tools: `sandbox_read_file`, `sandbox_search_files` (grep/find, not `rg`),
+  `sandbox_secret_check` ask nothing; `sandbox_write_file` and `sandbox_exec`
+  default to "Ask" (the user can set Auto per tool). Names and schemas follow
+  upstream's classic `sandbox_*` vocabulary. Upstream's newer unified
+  `file_*` / `shell_run` routing into the sandbox ("combined mode") is not
+  ported; the Intel folder tools are unchanged and independent.
+- Every file operation is a confined command, never an app-side read or
+  write, so a symlink planted in the workspace cannot make the app touch
+  anything outside. Paths must be under the agent home (`/workspace/agents/<id>`)
+  or `/workspace/shared` (stricter than upstream: a sibling home such as
+  `<home>-two` is rejected).
+- Commands can read system tools and the workspace, and write only the
+  workspace and the private scratch folder. They cannot read the user's home
+  folder, and cannot write outside the workspace (both pinned by tests).
+  The whole workspace is one writable root, so one sandboxed agent can still
+  modify another agent's home; per-agent narrowing is a possible later
+  restriction, not done.
+- Network is off. It turns on only when the agent's own
+  `sandboxNetworkEnabled` is true (default false; missing key decodes to
+  false) AND the shared sandbox config allows it. A command that fails to
+  resolve a host while the network is off gets a warning naming the setting.
+- `sandbox_exec`: per-turn command cap (`maxCommandsPerTurn`, default 10),
+  idle timeout (default 120 s, max 1800 s; the registry's 120 s wall clock is
+  bypassed like upstream, so cancelling the run kills the process), output
+  capped at ~50 KB head+tail, stored secrets injected as env vars and
+  scrubbed from stdout/stderr by exact value.
+
+**Deliberate differences from upstream.**
+
+- `sandbox_secret_set` is not registered. Upstream's prompt path returns a
+  marker that the chat view turns into a secure dialog; Intel's tool loop runs
+  inside `CloudChatEngine`, which does not intercept it, so the marker would
+  reach the model and nothing would be stored. The direct `value` argument is
+  not offered at all (it would put a secret in the tool call, and Intel has
+  not ported `SecretArgumentScrubber`'s recording-side redaction). The
+  secret-handling prompt tells the model to ask the user to add the secret in
+  the agent's settings. The tool, the real `SecretPromptParser` and
+  `SecretToolResult` are in place for when the engine intercept lands
+  (it is in code the unattended-approvals work owns).
+- Prompt wording is Intel's own (`IntelSandboxPrompt`): upstream's blocks
+  describe the Linux VM or the unified file tools. No `selfImprovement` or
+  `pluginCreator` yet (they reference plugins, stage 4). The sandboxState
+  section lists secret names only (no package manifest: no `sandbox_install`).
+- SOUL.md is read from the agent home on every compose (capped at 8 KB);
+  upstream freezes it per session. Edits therefore show on the next message.
+- No file-history journalling for sandbox writes (the Intel registry's journal
+  only knows the chat's folder root), no live terminal row / Terminate button
+  (`LiveExecSink` is Containerization-only); the run's cancel button kills the
+  process instead.
+- `SandboxAgentProvisioner.linuxName` on Intel still returns a constant for
+  the older callers (`share_artifact`, plugin host); the sandbox uses
+  `SandboxToolRegistrar.hostAgentName` (upstream's real logic). Sharing a
+  sandbox file with `share_artifact` is therefore not wired yet.
+
+**Manual checks on Ventura** (profile behaviour on 13 is only confirmed by
+hand; the suite runs on the build Mac): see the stage 3 report steps. Short
+form: an opted-in agent runs `echo hi`; a write outside the workspace fails;
+`ls ~` fails; `curl` fails with the network warning; an agent that did not opt
+in shows no sandbox tool.
