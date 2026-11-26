@@ -22,8 +22,8 @@ import Foundation
 public struct AgentConfigSnapshot: Sendable, Equatable {
 
     /// OR of the request-scoped `toolsDisabled` flag and the agent's
-    /// `effectiveToolsDisabled`. Already factors in the global
-    /// `ChatConfiguration.disableTools` switch.
+    /// `effectiveToolsDisabled`. The chat-wide persisted switch is gone
+    /// (upstream #2505): the agent's own setting governs.
     public let toolsDisabled: Bool
 
     /// Mirrors `AgentManager.effectiveMemoryDisabled` (folds in the
@@ -87,9 +87,9 @@ public struct AgentConfigSnapshot: Sendable, Equatable {
     /// Read every `effective*` field in one MainActor batch.
     ///
     /// `requestToolsDisabled` is the per-request override the caller
-    /// passes through (`ChatConfiguration.disableTools` already lives on
-    /// the agent flag, so callers should only pass `true` when the
-    /// caller itself wants to force tools off for a single compose).
+    /// passes through; callers pass `true` only when they want to
+    /// force tools off for a single compose (no persisted chat-wide switch,
+    /// upstream #2505).
     /// `modelOverride` lets the caller pin a specific model id (e.g. an
     /// HTTP request that named a model the agent doesn't default to);
     /// when nil, the agent's effective model is used.

@@ -38,7 +38,6 @@ struct ChatSettingsView: View {
     @State private var tempChatContextLength: String = ""
     @State private var tempChatTopP: String = ""
     @State private var tempChatMaxToolAttempts: String = ""
-    @State private var tempDisableTools: Bool = true
     @State private var tempEnableClipboardMonitoring: Bool = false
     @State private var tempAutoGenerateChatTitles: Bool = true
     /// Upstream follow-up suggestions switch, default on.
@@ -203,14 +202,6 @@ struct ChatSettingsView: View {
                     "New Window moves to ⇧+⌘+N, matching other chat apps. Turn off to keep ⌘+N opening a new window.",
                 anchorId: "settings.chat.newChatShortcut",
                 isOn: $cmdNStartsNewChatInCurrentWindow
-            )
-
-            SettingsToggle(
-                title: L("Disable Tools"),
-                description:
-                    "Send messages directly to the model with no tool specs or capability injection. Turn off to let agents use built-in and plugin tools.",
-                anchorId: "settings.chat.disableTools",
-                isOn: $tempDisableTools
             )
 
             SettingsToggle(
@@ -472,7 +463,6 @@ struct ChatSettingsView: View {
         var contextLength: String
         var topP: String
         var maxToolAttempts: String
-        var disableTools: Bool
         var clipboard: Bool
         var autoTitles: Bool
         var followUps: Bool
@@ -490,7 +480,6 @@ struct ChatSettingsView: View {
             contextLength: tempChatContextLength,
             topP: tempChatTopP,
             maxToolAttempts: tempChatMaxToolAttempts,
-            disableTools: tempDisableTools,
             clipboard: tempEnableClipboardMonitoring,
             autoTitles: tempAutoGenerateChatTitles,
             followUps: tempGenerateFollowUpSuggestions,
@@ -509,7 +498,6 @@ struct ChatSettingsView: View {
         tempChatContextLength = chat.contextLength.map(String.init) ?? ""
         tempChatTopP = chat.topPOverride.map { String($0) } ?? ""
         tempChatMaxToolAttempts = chat.maxToolAttempts.map(String.init) ?? ""
-        tempDisableTools = chat.disableTools
         tempEnableClipboardMonitoring = chat.enableClipboardMonitoring
         tempAutoGenerateChatTitles = chat.autoGenerateChatTitles
         tempGenerateFollowUpSuggestions = chat.generateFollowUpSuggestions
@@ -562,7 +550,6 @@ struct ChatSettingsView: View {
         chat.contextLength = Int(trimmed(form.contextLength)).map { max(2048, $0) }
         chat.topPOverride = Double(trimmed(form.topP)).map { max(0, min(1, $0)) }
         chat.maxToolAttempts = Int(trimmed(form.maxToolAttempts)).map { max(1, min(50, $0)) }
-        chat.disableTools = form.disableTools
         chat.enableClipboardMonitoring = form.clipboard
         chat.autoGenerateChatTitles = form.autoTitles
         chat.generateFollowUpSuggestions = form.followUps

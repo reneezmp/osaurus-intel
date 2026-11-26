@@ -101,7 +101,8 @@ struct SettingsSearchIndexTests {
         // Same label in another section must not steal the anchor.
         #expect(SettingsSearchIndex.anchorID(section: "Advanced", label: "Temperature") == "settings.chat.temperature")
         #expect(SettingsSearchIndex.anchorID(section: "Work", label: "Temperature") == nil)
-        #expect(SettingsSearchIndex.anchorID(section: "Behavior", label: "Disable Tools") == "settings.chat.disableTools")
+        // The chat-wide Disable Tools switch is gone (upstream #2505).
+        #expect(SettingsSearchIndex.anchorID(section: "Behavior", label: "Disable Tools") == nil)
     }
 
     @Test("Search ranks title hits first and needs every word")

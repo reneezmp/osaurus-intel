@@ -694,6 +694,22 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         // values, per-agent keys) so they don't sit in Keychain Access
         // forever. Done only AFTER plugin teardown completed (see above).
         ToolSecretsKeychain.deleteAllSecrets(forAgent: id)
+        // Upstream #2355: delete the agent's chat sessions and accumulated
+        // memory. Agent UUIDs are never reused, so without this its sessions,
+        // pinned facts, episodes and raw transcripts (embeddings are columns
+        // of those rows on Intel) would sit on disk with no UI that can reach
+        // them. Strictly this agent's rows; shared/other agents' data and
+        // `project-<uuid>` namespaces are untouched. The user confirmed the
+        // delete in the "Delete Agent" alert, which names this.
+        await ChatSessionsManager.shared.deleteAll(for: id)
+        let agentScope = id.uuidString
+        await Task.detached(priority: .userInitiated) {
+            let db = MemoryDatabase.shared
+            if !db.isOpen { try? db.open() }
+            try? db.deletePinnedFacts(forAgent: agentScope)
+            try? db.deleteEpisodes(forAgent: agentScope)
+            try? db.deleteConversationMemory(forAgent: agentScope)
+        }.value
         // Upstream wipes the agent's own browser profile. On Ventura the
         // profile is shared by every agent, so only its record goes.
         if BrowserProfileStore.isolatesAgents {
@@ -737,22 +753,6 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
             agent.customAvatarFilename = filename
             agent.avatar = nil
             update(agent)
-        // Upstream #2355: delete the agent's chat sessions and accumulated
-        // memory. Agent UUIDs are never reused, so without this its sessions,
-        // pinned facts, episodes and raw transcripts (embeddings are columns
-        // of those rows on Intel) would sit on disk with no UI that can reach
-        // them. Strictly this agent's rows; shared/other agents' data and
-        // `project-<uuid>` namespaces are untouched. The user confirmed the
-        // delete in the "Delete Agent" alert, which names this.
-        await ChatSessionsManager.shared.deleteAll(for: id)
-        let agentScope = id.uuidString
-        await Task.detached(priority: .userInitiated) {
-            let db = MemoryDatabase.shared
-            if !db.isOpen { try? db.open() }
-            try? db.deletePinnedFacts(forAgent: agentScope)
-            try? db.deleteEpisodes(forAgent: agentScope)
-            try? db.deleteConversationMemory(forAgent: agentScope)
-        }.value
 
             if let files = try? FileManager.default.contentsOfDirectory(
                 at: dir, includingPropertiesForKeys: nil
@@ -1058,9 +1058,10 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         }
     }
     func effectiveToolsDisabled(for agentId: UUID) -> Bool {
-        let globalDisabled = ChatConfigurationStore.load().disableTools
-        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return globalDisabled }
-        return (agent.disableTools ?? false) || globalDisabled
+        // Upstream #2505: the chat-wide persisted `disableTools` switch is
+        // gone; tool availability is the agent's own setting.
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        return agent.disableTools ?? false
     }
 
     func effectiveDBEnabled(for agentId: UUID) -> Bool {
@@ -1682,6 +1683,24 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         // snapshot blobs (upstream #2907 part A).
         Task { await FileChangeJournal.shared.purgeSession(id.uuidString) }
     }
+    /// Delete every session owned by an agent (upstream #2355). Strict
+    /// ownership match, unlike `sessions(for:)`: the Default agent's "show
+    /// everything" view must not turn a per-agent wipe into an all-agents
+    /// wipe, so only sessions whose `agentId` matches (or is nil, for the
+    /// Default agent's own chats) are removed. Each session goes through
+    /// `delete(id:)` (tombstone, JSON file, artifacts, file history); the call
+    /// returns once the queued file removals have finished. Main-thread state.
+    @MainActor func deleteAll(for agentId: UUID) async {
+        let ids = sessions.values
+            .filter { $0.agentId == agentId || (agentId == Agent.defaultId && $0.agentId == nil) }
+            .map(\.id)
+        guard !ids.isEmpty else { return }
+        for id in ids { delete(id: id) }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            Self.persistQueue.async { continuation.resume() }
+        }
+    }
+
     func rename(id: UUID, title: String) {
         rename(id: id, title: title, retainedTaskManager: nil)
     }
@@ -1726,24 +1745,6 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     /// `updatedAt`: pinning is a display-ordering concern handled by the
     /// sidebar and must not bubble the row up the recency list.
     func setPinned(id: UUID, pinned: Bool) {
-    /// Delete every session owned by an agent (upstream #2355). Strict
-    /// ownership match, unlike `sessions(for:)`: the Default agent's "show
-    /// everything" view must not turn a per-agent wipe into an all-agents
-    /// wipe, so only sessions whose `agentId` matches (or is nil, for the
-    /// Default agent's own chats) are removed. Each session goes through
-    /// `delete(id:)` (tombstone, JSON file, artifacts, file history); the call
-    /// returns once the queued file removals have finished. Main-thread state.
-    @MainActor func deleteAll(for agentId: UUID) async {
-        let ids = sessions.values
-            .filter { $0.agentId == agentId || (agentId == Agent.defaultId && $0.agentId == nil) }
-            .map(\.id)
-        guard !ids.isEmpty else { return }
-        for id in ids { delete(id: id) }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            Self.persistQueue.async { continuation.resume() }
-        }
-    }
-
         guard var s = sessions[id], s.pinned != pinned else { return }
         s.pinned = pinned
         sessions[id] = s
@@ -2038,7 +2039,6 @@ final class ChatConfiguration: @unchecked Sendable {
     }()
 
     // Tool / generation behaviour
-    var disableTools: Bool = false
     var maxToolAttempts: Int? = nil
     // Kept as `Double?` to match the consumer at `ChatView.swift:2148`
     // (which forwards it to a `Double?` API). Upstream uses `Float?`
@@ -2134,7 +2134,6 @@ final class ChatConfiguration: @unchecked Sendable {
         workTopPOverride: Float? = nil,
         workMaxIterations: Int? = nil,
         preflightSearchMode: PreflightSearchMode? = nil,
-        disableTools: Bool = false,
         defaultToolSelectionMode: Any? = nil,
         defaultManualToolNames: [String]? = nil,
         enableClipboardMonitoring: Bool = true,
@@ -2158,7 +2157,6 @@ final class ChatConfiguration: @unchecked Sendable {
         self.workTopPOverride = workTopPOverride
         self.workMaxIterations = workMaxIterations
         self.preflightSearchMode = preflightSearchMode
-        self.disableTools = disableTools
         self.defaultToolSelectionMode = defaultToolSelectionMode
         self.defaultManualToolNames = defaultManualToolNames
         self.enableClipboardMonitoring = enableClipboardMonitoring
@@ -2186,7 +2184,6 @@ final class ChatConfiguration: @unchecked Sendable {
         self.workTopPOverride = other.workTopPOverride
         self.workMaxIterations = other.workMaxIterations
         self.preflightSearchMode = other.preflightSearchMode
-        self.disableTools = other.disableTools
         self.defaultToolSelectionMode = other.defaultToolSelectionMode
         self.defaultManualToolNames = other.defaultManualToolNames
         self.enableClipboardMonitoring = other.enableClipboardMonitoring
@@ -2214,7 +2211,8 @@ final class ChatConfiguration: @unchecked Sendable {
     // only field intentionally excluded — it is not Codable and is re-derived
     // from `defaultManualToolNames` at the call site.
     private struct DiskSnapshot: Codable {
-        var disableTools: Bool? = nil
+        // `disableTools` (upstream #2505): deliberately absent. A stale key in
+        // an existing chat.json is ignored on decode and not written back.
         var maxToolAttempts: Int? = nil
         var topPOverride: Double? = nil
         var hotkey: Hotkey? = nil
@@ -2251,7 +2249,6 @@ final class ChatConfiguration: @unchecked Sendable {
             return
         }
         print("[ChatConfiguration] loadFromDisk: coreModel=\(s.coreModelProvider ?? "nil")/\(s.coreModelName ?? "nil") maxToolAttempts=\(String(describing: s.maxToolAttempts))")
-        if let v = s.disableTools { disableTools = v }
         if let v = s.maxToolAttempts { maxToolAttempts = v }
         if let v = s.topPOverride { topPOverride = v }
         if let v = s.hotkey { hotkey = v }
@@ -2280,7 +2277,6 @@ final class ChatConfiguration: @unchecked Sendable {
     /// Write the current settings to `config/chat.json` atomically.
     func persistToDisk() {
         var s = DiskSnapshot()
-        s.disableTools = disableTools
         s.maxToolAttempts = maxToolAttempts
         s.topPOverride = topPOverride
         s.hotkey = hotkey

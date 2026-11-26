@@ -76,7 +76,7 @@ enum PhoneContextUsage {
 
         let model = model ?? AgentManager.shared.effectiveModel(for: agentId)
         let persona = AgentManager.shared.effectiveSystemPrompt(for: agentId)
-        let tools = ChatConfiguration.shared.disableTools ? [] : ToolRegistry.shared.openAISpecs()
+        let tools = AgentManager.shared.effectiveToolsDisabled(for: agentId) ? [] : ToolRegistry.shared.openAISpecs()
         var sections: [PromptSection] = []
         if !persona.isEmpty {
             sections.append(PromptSection(id: "persona", label: "Persona", text: persona, tint: .purple))

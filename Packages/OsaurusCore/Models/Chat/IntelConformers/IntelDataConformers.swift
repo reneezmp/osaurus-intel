@@ -970,7 +970,6 @@ final class AppConfiguration: ObservableObject, @unchecked Sendable {
     var foundationModelAvailable: Bool { false }
 }
 struct AppChatConfigStub: Sendable {
-    var disableTools = false
     var maxToolAttempts = 5
     var topPOverride: Double? = nil
     /// Tracks the upstream `AppConfiguration.chatConfig.enableClipboardMonitoring`

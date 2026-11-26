@@ -1367,7 +1367,8 @@ final class ChatSession: ObservableObject {
         let preview = SystemPromptComposer.composePreviewContext(
             agentId: effectiveId,
             model: selectedModel,
-            toolsDisabled: ChatConfiguration.shared.disableTools,
+            // Upstream #2505: tool availability belongs to the active agent.
+            toolsDisabled: false,
             projectId: projectId,
             folderContext: folderState.context,
             offerFolderPrompt: canPromptForWorkingFolder
@@ -3759,7 +3760,8 @@ final class ChatSession: ObservableObject {
                     model: selectedModel,
                     query: trimmed,
                     messages: priorUserMessages,
-                    toolsDisabled: chatCfg.disableTools,
+                    // Upstream #2505: tool availability belongs to the active agent.
+                    toolsDisabled: false,
                     cachedPreflight: cachedSession?.initialPreflight,
                     additionalToolNames: composeExtraToolNames,
                     // Upstream #2171: the first compose's baseline names, tool

@@ -164,7 +164,7 @@ struct AgentAbilityContextPreview: Equatable {
         let context = SystemPromptComposer.composePreviewContext(
             snapshot: snapshot,
             model: model,
-            toolsDisabled: ChatConfiguration.shared.disableTools
+            toolsDisabled: false
         )
         var breakdown = ContextBreakdown.from(context: context)
         // The agent database state rides Intel's per-turn prefix and prices

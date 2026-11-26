@@ -61,7 +61,6 @@ struct IntelSettingsRedesignTests {
             contextLength: "100",
             topP: "0.9",
             maxToolAttempts: "99",
-            disableTools: false,
             clipboard: false,
             autoTitles: false,
             followUps: true,
@@ -79,7 +78,6 @@ struct IntelSettingsRedesignTests {
         #expect(chat.contextLength == 2048)  // clamped up
         #expect(chat.topPOverride == 0.9)
         #expect(chat.maxToolAttempts == 50)  // clamped
-        #expect(chat.disableTools == false)
         #expect(chat.enableClipboardMonitoring == false)
         #expect(chat.autoGenerateChatTitles == false)
         #expect(chat.backfillAgentDescriptions == true)

@@ -271,9 +271,6 @@ public enum SettingsSearchIndex {
             title: "⌘+N Starts a New Chat in the Current Window",
             keywords: ["cmd n", "command n", "new chat", "new window", "shortcut"]),
         .init(
-            id: "settings.chat.disableTools", tab: .chat, section: "Behavior",
-            title: "Disable Tools", keywords: ["tools", "tool calling", "no tools", "plain chat"]),
-        .init(
             id: "settings.chat.memory", tab: .chat, section: "Behavior",
             title: "Enable Memory", keywords: ["memory", "remember", "recall", "pinned facts"],
             disambiguation: "Turns memory on or off for chats; the Memory tab has the details."),
