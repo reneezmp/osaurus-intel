@@ -750,6 +750,18 @@ public final class BackgroundTaskManager: ObservableObject {
         request.externalSurface || ChatExecutionContext.isExternalSurface
     }
 
+    /// Upstream #1815: an unattended, app-authored trigger (recurring
+    /// schedule, self-scheduled wake-up, watcher) that is not an external
+    /// surface. Bound as `ChatExecutionContext.isUnattendedDispatch`.
+    /// Intel: widen-only like `resolvedExternalSurface`, so a helper a
+    /// schedule delegates to (source `.delegation`) stays unattended instead
+    /// of reaching a card nobody is there to answer.
+    nonisolated static func resolvedUnattendedDispatch(for request: DispatchRequest) -> Bool {
+        if ChatExecutionContext.isUnattendedDispatch { return true }
+        return !resolvedExternalSurface(for: request)
+            && (request.source == .schedule || request.source == .selfSchedule || request.source == .watcher)
+    }
+
     public func dispatchChat(_ request: DispatchRequest) async -> DispatchHandle? {
         // Background dispatch is an external surface (schedules, watchers,
         // self-scheduled wakes, plugins): built-in agents (the Default agent)
@@ -904,12 +916,17 @@ public final class BackgroundTaskManager: ObservableObject {
             let externalSurface = Self.resolvedExternalSurface(for: request)
             // Upstream: the request's source is the run's `currentSessionSource`
             // (a delegated child's composer strips every spawn tool from it).
+            // Upstream #1815: bound for schedule / self-schedule / watcher runs;
+            // here it makes `.ask` tools refuse (owner policy, see the task-local).
+            let unattended = Self.resolvedUnattendedDispatch(for: request)
             await ChatExecutionContext.$currentSessionSource.withValue(request.source) {
-                await ChatExecutionContext.$isExternalSurface.withValue(externalSurface) {
-                    await ChatExecutionContext.$currentRunId.withValue(boundRunId) {
-                        await ChatExecutionContext.$currentRunActor.withValue(boundActor) {
-                            await ChatExecutionContext.$currentBackgroundId.withValue(context.id) {
-                                await context.start(prompt: request.prompt)
+                await ChatExecutionContext.$isUnattendedDispatch.withValue(unattended) {
+                    await ChatExecutionContext.$isExternalSurface.withValue(externalSurface) {
+                        await ChatExecutionContext.$currentRunId.withValue(boundRunId) {
+                            await ChatExecutionContext.$currentRunActor.withValue(boundActor) {
+                                await ChatExecutionContext.$currentBackgroundId.withValue(context.id) {
+                                    await context.start(prompt: request.prompt)
+                                }
                             }
                         }
                     }

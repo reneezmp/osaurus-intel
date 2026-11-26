@@ -276,6 +276,10 @@ enum ToolPermissionPromptService {
     ) async -> ApprovalOutcome {
         if isHeadlessTestProcess { return .denied }
         if Task.isCancelled { return .denied }
+        // Intel (owner policy): an unattended schedule / watcher run never
+        // shows or auto-answers a card; every tool's own prompt (image,
+        // video, file history) is refused here as the backstop.
+        if ChatExecutionContext.isUnattendedDispatch { return .denied }
 
         let resolution = await enqueue(
             PromptRequest(
@@ -324,6 +328,7 @@ enum ToolPermissionPromptService {
     ) async -> PolicyApprovalOutcome {
         if isHeadlessTestProcess { return .denied }
         if Task.isCancelled { return .denied }
+        if ChatExecutionContext.isUnattendedDispatch { return .denied }  // see requestApprovalOutcome
 
         var mappedRevalidate: Revalidation?
         if let hook = revalidate {

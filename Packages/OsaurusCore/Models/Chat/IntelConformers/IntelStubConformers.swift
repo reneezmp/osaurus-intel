@@ -1729,7 +1729,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         // Intel asks for approval in the chat engine, before `execute`, so an
         // external caller would bypass the card. Upstream's gate refuses
         // `.ask` tools for callers with no approval UI; refuse them here.
-        if ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts {
+        if ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts
+            || ChatExecutionContext.isUnattendedDispatch
+        {
             switch effectivePolicy(for: name, argumentsJSON: argumentsJSON) {
             case .deny:
                 throw NSError(

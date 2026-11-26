@@ -486,7 +486,8 @@ public final class OsaurusConfigTool: OsaurusTool, PermissionedTool, @unchecked 
         // headless task locals are re-checked HERE, mirroring
         // `ToolRegistry.runPermissionGate`: external/headless surfaces are
         // auto-denied (never park a card nobody can answer). Intel has no
-        // eval lane to auto-approve and no `isUnattendedDispatch` flag, so
+        // eval lane to auto-approve, and `isUnattendedDispatch` (stage 3) refuses
+        // schedule and watcher runs outright, so
         // an attended run is exactly an interactive chat turn
         // (`interactiveChatRun`) or the owner's paired phone; schedules,
         // watchers and background dispatches are refused, never reconfigure
@@ -498,6 +499,7 @@ public final class OsaurusConfigTool: OsaurusTool, PermissionedTool, @unchecked 
         if RuntimeEnvironment.isUnderTests, let override = Self.approvalOverrideForTests {
             approval = await override(plan, prune)
         } else if ChatExecutionContext.denyUnapprovedToolPrompts
+            || ChatExecutionContext.isUnattendedDispatch
             || (ChatExecutionContext.isExternalSurface && !ChatExecutionContext.hasRemoteReviewer)
             || !(ChatExecutionContext.interactiveChatRun || ChatExecutionContext.hasRemoteReviewer)
         {

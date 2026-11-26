@@ -136,7 +136,9 @@ enum SpawnPermissionGate {
         // No one to answer: refuse, never approve. External callers (a
         // non-loopback HTTP run) and runs that deny unapproved prompts cannot
         // reach the user's card.
-        if ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts {
+        if ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts
+            || ChatExecutionContext.isUnattendedDispatch
+        {
             return .userDenied("Spawn permission was not approved.")
         }
         if Task.isCancelled {

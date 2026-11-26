@@ -328,6 +328,8 @@ final class MCPElicitationCoordinator: @unchecked Sendable {
     /// this Mac), so the only runs that cancel are the ones whose caller is
     /// not at this Mac: the local HTTP API and peer (P2P) requests.
     static var currentTaskCanPrompt: Bool {
+        // Upstream #1815: an unattended schedule / watcher run cancels too.
+        if ChatExecutionContext.isUnattendedDispatch { return false }
         switch ChatExecutionContext.currentRequestSource {
         case .httpAPI, .p2p: return false
         default: return true

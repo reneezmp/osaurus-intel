@@ -291,8 +291,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// Why an `.ask` tool didn't run: the user declined the card, or the
     /// caller has no approval UI (upstream's external-surface refusal).
     static var unapprovedReason: String {
-        (ChatExecutionContext.isExternalSurface && !ChatExecutionContext.hasRemoteReviewer)
-            || ChatExecutionContext.denyUnapprovedToolPrompts
+        ChatExecutionContext.isUnattendedDispatch
+            ? "it needs approval in the Osaurus app, and a scheduled or watcher run has no one there to give it (set it to Auto in Tools to allow it)"
+            : ChatExecutionContext.approvalCardUnanswerable
             ? "it needs approval in the Osaurus app, which this caller can't give (set it to Auto in Tools to allow it)"
             : "you declined to run it this time"
     }
@@ -2615,9 +2616,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         // a remote dispatch) is refused instead of shown a card nobody
                                         // there can answer. The owner's paired phone can: its run falls
                                         // through to the card, which `GET /approvals` relays to it.
-                                        if (ChatExecutionContext.isExternalSurface && !ChatExecutionContext.hasRemoteReviewer)
-                                            || ChatExecutionContext.denyUnapprovedToolPrompts
-                                        {
+                                        // Intel (owner policy): an unattended schedule or
+                                        // watcher run is refused too, before the auto-allow
+                                        // switch, so it never approves on its own.
+                                        if ChatExecutionContext.approvalCardUnanswerable {
                                             approved = false
                                             break
                                         }
@@ -3353,9 +3355,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     // a remote dispatch) is refused instead of shown a card nobody
                                     // there can answer. The owner's paired phone can: its run falls
                                     // through to the card, which `GET /approvals` relays to it.
-                                    if (ChatExecutionContext.isExternalSurface && !ChatExecutionContext.hasRemoteReviewer)
-                                        || ChatExecutionContext.denyUnapprovedToolPrompts
-                                    {
+                                    // Intel (owner policy): unattended runs are refused too.
+                                    if ChatExecutionContext.approvalCardUnanswerable {
                                         approved = false
                                         break
                                     }

@@ -181,6 +181,24 @@ public enum ChatExecutionContext {
     /// that would ask is refused instead of hanging on a card nobody sees.
     @TaskLocal static var denyUnapprovedToolPrompts: Bool = false
 
+    /// Upstream #1815/#2190: true when the run is an UNATTENDED, app-authored
+    /// dispatch (a recurring schedule, a self-scheduled wake-up or a folder
+    /// watcher) with no one present to answer an approval card. Bound by
+    /// `BackgroundTaskManager.dispatchChat`, and only when the run is not an
+    /// external surface. Intel difference (owner policy, 2026-11-26): upstream
+    /// lets such a run reach the card (and auto-approves a short allow list,
+    /// empty today); on Intel a `.ask` call in an unattended run is REFUSED,
+    /// never shown and never approved, so a schedule can't spend money or
+    /// change configuration on its own, and can't wait on a card nobody sees.
+    @TaskLocal static var isUnattendedDispatch: Bool = false
+
+    /// True when the current run has nobody who can answer an approval card:
+    /// an external caller without the owner's phone, a headless lane, or an
+    /// unattended schedule / watcher run. `.ask` tools are refused here.
+    static var approvalCardUnanswerable: Bool {
+        (isExternalSurface && !hasRemoteReviewer) || denyUnapprovedToolPrompts || isUnattendedDispatch
+    }
+
     /// Default idle-timeout (seconds) for `shell_run`, applied ONLY when the
     /// model passed no `timeout` argument. Bound by headless drivers
     /// (`AgentLoopEvaluator`) where no user [Terminate] button exists, so a
