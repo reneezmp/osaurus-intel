@@ -15,9 +15,9 @@
 //     `ChatTaskIntent`, so the flag keeps the report out of the user's memory
 //     (it is host text, not the user's words);
 //   - no `promoteWorkerSharedArtifacts` (Intel's parent session has no
-//     artifact drain for worker deposits yet; see docs/W_SUBAGENTS_PLAN.md);
-//   - delivery is skipped for a run the user stopped (a Stop must not start a
-//     new, paid parent turn): see `SubagentSession.dispatchInBackground`.
+//     artifact drain for worker deposits yet; see docs/W_SUBAGENTS_PLAN.md).
+//  A worker the user stopped is reported back like any other, as upstream
+//  does (owner decision 2026-11-26).
 //
 
 import Foundation

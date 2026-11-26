@@ -8,9 +8,8 @@
 //  the interrupt center (and a Stop on the launching turn trips it); the
 //  terminal digest is delivered to the launching session as a follow-up turn
 //  once that session is idle (never mid-stream, never into a pending clarify),
-//  and NEVER after the user stopped the worker (Intel owner policy: a Stop
-//  must not start a new paid turn). Scripted kinds; no model, network or
-//  keychain.
+//  also after the user stopped the worker (as upstream; owner decision
+//  2026-11-26). Scripted kinds; no model, network or keychain.
 //
 
 import Foundation
@@ -182,8 +181,8 @@ struct SubagentBackgroundDispatchTests {
         }
     }
 
-    @Test("a worker the user stopped is never reported back as a new turn")
-    func stoppedWorkerIsNotReported() async throws {
+    @Test("a worker the user stopped is reported back like any other, as upstream does")
+    func stoppedWorkerIsReported() async throws {
         try await ChatHistoryTestStorage.run {
             let (session, context) = makeSession()
             _ = context
@@ -209,8 +208,11 @@ struct SubagentBackgroundDispatchTests {
                 if case .finished(let success, _) = feed.currentStatus() { return !success }
                 return false
             }
-            try await Task.sleep(for: .milliseconds(600))
-            #expect(!session.turns.contains { $0.content.contains("[Helper report]") }, "a Stop starts no new turn")
+            try await waitUntil {
+                session.turns.contains {
+                    $0.role == .user && $0.content.contains("[Helper report]") && $0.content.contains("failed")
+                }
+            }
             SubagentFeedRegistry.shared.removeNow(toolCallId: toolCallId)
         }
     }
