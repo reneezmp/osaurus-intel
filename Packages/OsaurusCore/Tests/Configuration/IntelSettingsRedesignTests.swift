@@ -95,4 +95,15 @@ struct IntelSettingsRedesignTests {
         }
         #expect(TTSModeSettingsTab.advancedAnchorIds.contains("voice.tts.engine"))
     }
+
+    /// `W-settings-ventura-gaps`: a spacer-like `Color.clear.frame(width:)` with
+    /// no height is vertically greedy and made the non-destructive Folder
+    /// Tool Permission rows tall on Ventura. Settings rows must pin its height.
+    @Test func settingsRowsHaveNoVerticallyGreedyClearSpacer() throws {
+        let source = try String(
+            contentsOf: Self.viewsRoot.appendingPathComponent("Settings/ChatSettingsView.swift"),
+            encoding: .utf8)
+        #expect(!source.contains("Color.clear.frame(width: 16)\n"))
+        #expect(source.contains("Color.clear.frame(width: 16, height: 1)"))
+    }
 }

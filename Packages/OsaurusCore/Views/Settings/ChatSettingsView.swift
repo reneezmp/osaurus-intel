@@ -712,7 +712,12 @@ private struct FolderToolPermissionRow: View {
                     .foregroundColor(themeManager.currentTheme.warningColor)
                     .frame(width: 16)
             } else {
-                Color.clear.frame(width: 16)
+                // `W-settings-ventura-gaps`: a bare `Color.clear.frame(width:)`
+                // is a vertically greedy view. The two non-destructive rows
+                // (Write / Edit Files) carried it instead of the warning
+                // icon, which matches Rosy's uneven gaps (only some rows
+                // tall). Pin its height to the icon's line.
+                Color.clear.frame(width: 16, height: 1)
             }
 
             VStack(alignment: .leading, spacing: 2) {
