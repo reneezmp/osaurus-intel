@@ -77,7 +77,8 @@ no port.
    `ClaudeCodeConfiguration.setupState(command:overlay:)` and friends,
    `HarnessRuntimeProbe` for Claude Code (`claude auth status`) and a
    detection-only Pi probe. No process is spawned by tests (fake runners).
-3. **Process and session core.** `HarnessProcess` (pipe reader, framing, stderr
+3. **Process and session core** (done in this branch, see Status).
+   `HarnessProcess` (pipe reader, framing, stderr
    drain #3210, escalating shutdown, `HarnessProcessRegistry` wired into app
    quit), `HarnessError`, `HarnessAdapter` / codec, `ClaudeCodeHarnessAdapter`,
    `PiRPCAdapter` + `Resources/Harness/osaurus-pi-extension.ts`,
@@ -106,7 +107,8 @@ no port.
 |---|---|
 | 1 | Done (see the commit "Port #3175 (stage 1)") |
 | 2 | Done (see the commit "Port #3175 (stage 2)") |
-| 3-6 | Not started |
+| 3 | Done, nothing calls it yet (see "Stage 3 notes") |
+| 4-6 | Not started |
 
 ## Facts learned
 
@@ -123,3 +125,65 @@ no port.
 - Adding `ClaudeCodeAgentConfig.model` / `resolvedModel` is inert until stage 4.
   `Agent.runtime` encodes only when set, so agents written by this build stay
   readable by the previous one.
+
+## Stage 3 notes (process and session core)
+
+Ported from Classic's final state of `Services/Harness` (so #3210's stderr
+drain and #3293's effort and hidden tools are included). Nothing in the app
+calls `HarnessSession` yet: the only callers are the tests, so no user can
+start a harness process until stage 4 wires `Agent.runtime` into the chat.
+
+- **Files.** `HarnessProcess` (with `HarnessLineFramer`,
+  `HarnessProcessRegistry`, `HarnessDrainGate`), `HarnessError`,
+  `HarnessAdapter` (events, codec protocol, `HarnessEnvironment.contract`),
+  `ClaudeCodeHarnessAdapter` (+ `ClaudeCodeSessionLocator`, `HarnessScratch`),
+  `PiRPCAdapter` (+ `PiRPCCodec`), `HarnessSession` /
+  `HarnessSessionManager`, `HarnessTurnDriver`, `HarnessGrantStore`. The Pi
+  probe is now the real `get_state` round trip (`HarnessRuntimeProbe.probePi`,
+  injectable as `Dependencies.piState`).
+- **Launch is gated by construction.** The only path to a process is
+  `HarnessSession.send` -> `HarnessProcess.launch`; stage 3 adds no caller.
+  `HarnessProcess.init` also refuses an Incompatible (arm64-only) binary
+  before spawning, with the Test button's message (`launchFailed`).
+- **Secrets.** The agent token is minted per process
+  (`HarnessGrantStore.mint`, `HarnessSession.launch`), handed to the child only
+  in its environment (`OSAURUS_AGENT_TOKEN`, `OSAURUS_MCP_BRIDGE_GRANT`) and,
+  for Claude Code, inside the 0600 `--mcp-config` file's server `env`. The
+  system prompt goes through a 0600 file (`--append-system-prompt-file`),
+  written in `harness/.private/<chat id>/` (0700), beside the scratch cwd. No
+  secret is on a command line or in a log (the grant store logs agent ids
+  only). Revoked when the process exits, the session closes or the app quits.
+- **Subprocess environment is injectable and still Intel's narrow one.**
+  `HarnessProcess.defaultInheritedEnvironment` returns
+  `ClaudeCodeConfiguration.subprocessEnvironment()` (PATH, HOME, USER, LOGNAME,
+  TMPDIR, locale) and is the single place to flip to upstream's
+  `ProcessInfo.processInfo.environment`. `HarnessSession(chatId:inheritedEnvironment:)`
+  and `HarnessProcess.launch(_:inheritedEnvironment:)` take it as an input.
+  Owner decision still open; needed before stage 4 (a narrow environment drops
+  things a Pi wrapper may expect, e.g. provider API keys, `NVM_DIR`).
+- **Registry.** `ClaudeCodeProcessRegistry` (actor) is gone; the one-shot
+  Claude Code runs and every harness child register with
+  `HarnessProcessRegistry.shared`, and `AppDelegate` quit calls its
+  `terminateAll()`. `HarnessSessionManager.closeAll()` is not wired into quit
+  yet (stage 4 with the chat).
+- **Tool names follow upstream.** `ClaudeCodeConfiguration` now lists
+  `osaurus_inspect` / `osaurus_help` (+ `osaurus_config` behind its own
+  opt-in) like #3175. Intel's list still named the older `osaurus_status` /
+  `osaurus_list` tools, which are not what a custom agent's token reaches. The system note
+  mentions "Allow Osaurus read tools" in the agent's Claude Code Options; that
+  UI label arrives with stage 5.
+- **Intel adaptations.** `ClaudeCodeAgentConfig` is `Hashable` (launch
+  fingerprint). `HarnessGrantStore` names the four built-in-loop tools by
+  string, as `SubagentCapabilityRegistry` does, and checks a custom agent's
+  `toolsEnabled` directly because Intel has no `effectiveCapabilities`.
+- **Not ported.** `HarnessLiveTests` (real `claude` / `pi`). The plan listed
+  `Resources/Harness/osaurus-pi-extension.ts`, but it does not exist on
+  `upstream/classic` (`git grep osaurus-pi-extension upstream/classic` is
+  empty); nothing to port. The `control_request` stall question
+  (`UPSTREAM_AUDIT` section 29) is untouched: the harness decoder handles no
+  `control_request` records, same as Classic.
+- **Tests.** `HarnessPlumbingTests`, `HarnessSessionLifecycleTests`,
+  `ClaudeCodeHarnessAdapterTests`, `PiRPCCodecTests` as upstream. The lifecycle
+  and Pi-probe suites run a hermetic `/bin/sh` fake harness script from a
+  temporary folder (never `claude` or `pi`, no network, keychain or
+  `~/.osaurus`); the registry test kills only that script.
