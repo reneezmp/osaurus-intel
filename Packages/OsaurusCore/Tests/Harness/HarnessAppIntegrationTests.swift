@@ -243,7 +243,7 @@ struct HarnessChatIntegrationTests {
             var builtInLoopStarted = false
             session.chatEngineFactory = {
                 builtInLoopStarted = true
-                return ThrowsAfterTextChatEngine(error: CancellationError(), delay: .milliseconds(10))
+                return MockChatEngine()
             }
             session.agentId = agent.id
             #expect(session.isHarnessAgentActive)

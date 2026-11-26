@@ -43,13 +43,16 @@ parts.** Evidence, from reading both sides:
 | Config documents | `AgentClaudeCodeEntry` (`claude_code`) in `ConfigHarnessSections.swift`; the `runtime` / `harness_runtimes` keys were left out | `ConfigHarnessSections`, planner/applier lines | Stage 6 |
 | Bundles | Runtimes left out of `PendingImportProcessor` | `harness_runtimes` in `osaurus-bundle.json` | Stage 6 |
 
-Divergences to keep: Intel's narrow subprocess environment
-(`ClaudeCodeConfiguration.subprocessEnvironment`) applies to the live per-turn
-path until stage 4 swaps it; the harness path uses upstream's environment
-(login-shell PATH, inherited env minus `CLAUDECODE`, the bridge grant and
-`ANTHROPIC_API_KEY`). **Decided 2026-11-26 (Renée): Intel's narrow environment**, plus what each
-tool needs. (Was the owner question: harness chats then inherit whatever the Osaurus app process has, e.g.
-`ANTHROPIC_BASE_URL`).
+Divergences to keep: **Intel's narrow subprocess environment, decided
+2026-11-26 (Renée).** A harness process (chat, Test button, Pi probe) inherits
+only `ClaudeCodeConfiguration.subprocessEnvironment` (PATH, HOME, USER, LOGNAME,
+TMPDIR, LANG, LC_ALL, LC_CTYPE), where upstream inherits the whole app
+environment (so `ANTHROPIC_BASE_URL`, proxies, cloud keys, `NVM_DIR`,
+`CLAUDE_CONFIG_DIR` never reach the child). On top of that, and nothing else:
+the login-shell PATH, the runtime's own `environment` overlay (user-set, per
+runtime), and the `OSAURUS_*` contract. A runtime that needs a variable (a Pi
+wrapper's provider key, a custom `CLAUDE_CONFIG_DIR`) gets it from that overlay
+(Settings > Agent Runtimes arrives with stage 5).
 
 ## x86_64 / macOS 13 findings per runtime
 
@@ -86,12 +89,12 @@ no port.
    upstream's fake adapters; upstream's `HarnessLiveTests` (real process) is not
    ported. The Pi probe becomes the real `get_state` probe. Launch refuses an
    Incompatible binary with a clear error.
-4. **App integration.** `AgentManager+Harness` (effective runtime, unsupported
-   paths, `claude-code/*` migration), `ChatSession+Harness`, replace
-   `IntelClaudeCodeService` routing in `CloudChatEngine` (coordinate with the
-   Insights agent: avoid the usage / finish-reason code), agent token on the
-   loopback MCP and API routes through Intel's HTTP handlers, remove the
-   `claude-code/*` pseudo-models.
+4. **App integration** (4a done in this branch, 4b open, see "Stage 4 notes").
+   `AgentManager+Harness` (effective runtime, unsupported paths,
+   `claude-code/*` migration), `ChatSession+Harness`, `IntelClaudeCodeService`
+   and its `CloudChatEngine` routing removed, the `claude-code/*`
+   pseudo-models removed. 4b: agent token on the loopback MCP and API routes
+   through Intel's HTTP handlers (`Networking/`).
 5. **UI.** Settings > Agent Runtimes (`AgentRuntimesView`), picker columns
    (`ChatHarnessPickerOption`, #3180), composer controls, agent editor Runtime
    section, effort picker (#3293), onboarding step, settings search entries,
@@ -107,8 +110,10 @@ no port.
 |---|---|
 | 1 | Done (see the commit "Port #3175 (stage 1)") |
 | 2 | Done (see the commit "Port #3175 (stage 2)") |
-| 3 | Done, nothing calls it yet (see "Stage 3 notes") |
-| 4-6 | Not started |
+| 3 | Done (see "Stage 3 notes") |
+| 4a | Done: chat runs on the harness, migration, narrow environment (see "Stage 4 notes") |
+| 4b | Open: agent-token gate on `/mcp/*` and the unsupported-path refusal on `/agents/{id}/run` (both in `Networking/`), `SpawnDescriptors` (`Subagent/`) |
+| 5-6 | Not started |
 
 ## Facts learned
 
@@ -133,9 +138,8 @@ no port.
 ## Stage 3 notes (process and session core)
 
 Ported from Classic's final state of `Services/Harness` (so #3210's stderr
-drain and #3293's effort and hidden tools are included). Nothing in the app
-calls `HarnessSession` yet: the only callers are the tests, so no user can
-start a harness process until stage 4 wires `Agent.runtime` into the chat.
+drain and #3293's effort and hidden tools are included). Stage 3 added no
+caller; stage 4 wires `Agent.runtime` into the chat.
 
 - **Files.** `HarnessProcess` (with `HarnessLineFramer`,
   `HarnessProcessRegistry`, `HarnessDrainGate`), `HarnessError`,
@@ -157,14 +161,11 @@ start a harness process until stage 4 wires `Agent.runtime` into the chat.
   written in `harness/.private/<chat id>/` (0700), beside the scratch cwd. No
   secret is on a command line or in a log (the grant store logs agent ids
   only). Revoked when the process exits, the session closes or the app quits.
-- **Subprocess environment is injectable and still Intel's narrow one.**
-  `HarnessProcess.defaultInheritedEnvironment` returns
-  `ClaudeCodeConfiguration.subprocessEnvironment()` (PATH, HOME, USER, LOGNAME,
-  TMPDIR, locale) and is the single place to flip to upstream's
-  `ProcessInfo.processInfo.environment`. `HarnessSession(chatId:inheritedEnvironment:)`
-  and `HarnessProcess.launch(_:inheritedEnvironment:)` take it as an input.
-  Owner decision still open; needed before stage 4 (a narrow environment drops
-  things a Pi wrapper may expect, e.g. provider API keys, `NVM_DIR`).
+- **Subprocess environment is injectable and Intel's narrow one (decided
+  2026-11-26).** `HarnessProcess.defaultInheritedEnvironment` returns
+  `ClaudeCodeConfiguration.subprocessEnvironment()` and is the single place the
+  choice lives. `HarnessSession(chatId:inheritedEnvironment:)` and
+  `HarnessProcess.launch(_:inheritedEnvironment:)` take it as an input.
 - **Registry.** `ClaudeCodeProcessRegistry` (actor) is gone; the one-shot
   Claude Code runs and every harness child register with
   `HarnessProcessRegistry.shared`, and `AppDelegate` quit calls its
@@ -191,3 +192,95 @@ start a harness process until stage 4 wires `Agent.runtime` into the chat.
   and Pi-probe suites run a hermetic `/bin/sh` fake harness script from a
   temporary folder (never `claude` or `pi`, no network, keychain or
   `~/.osaurus`); the registry test kills only that script.
+
+## Stage 4 notes (app integration, 4a)
+
+Ported from #3175's app-side changes on `upstream/classic`. After this stage an
+agent whose runtime the user chose runs its chat turns in its harness process;
+nothing launches for any other agent.
+
+- **Chat.** `ChatSession.send` resolves `harnessSelection` at send time and, for
+  a harness agent, calls `ChatSession.runHarnessTurn` (new file
+  `Views/Chat/ChatSession+Harness.swift`) before the media and built-in paths:
+  `HarnessTurnDriver.launchContext` -> `HarnessSessionManager.session(for: chat id)`
+  -> `send`. Text, thinking, stats, notices and questions (clarify overlay) render
+  as upstream. A missing runtime (deleted) fails the turn with
+  `HarnessError.runtimeMissing`. Built-in-only behaviour is skipped for harness
+  agents: manual compaction (`compactConversation`), title and follow-up model
+  fallback (`auxiliaryChatModel` is nil), the reasoning validation in the
+  composer. The harness process closes when the chat's session id changes, its
+  tab or window closes (`teardownTabSession`, `cleanup`,
+  `prepareForSessionDeletion`) or the chat is deleted
+  (`ChatSessionsManager.delete`).
+- **Intel adaptation: tool steps are a status chip, not cards.** Intel's `ChatTurn`
+  has no remote tool activity (upstream #1636 / #2848). `toolStarted` sets
+  `pendingToolName`, `toolFinished` clears it; a refused tool leaves no card
+  (same as the old per-turn path). Port the card display with that feature.
+- **Runtime selection.** `AgentManager+Harness`: `effectiveRuntime`,
+  `effectiveHarness` (`.resolved` / `.missing`), `harnessUnsupportedError`,
+  `updateRuntime` (closes idle sessions). `DefaultAgentConfiguration` gained
+  `claudeCode` and `runtime` (encoded only when set), and
+  `effectiveClaudeCodeConfig` / `updateClaudeCodeConfig` now cover the Default
+  agent (it had no own Claude Code settings on Intel).
+- **Migration of existing Claude Code agents** (runs at every launch, no flag, in
+  `AgentManager.init`, tested in `HarnessAppIntegrationTests`). An agent whose
+  effective model (own, else the global one, else the Orchestrator's) is
+  `claude-code/<alias>` gets `runtime = .harness(Claude Code runtime id)` and
+  `claudeCode.model = <alias>`; its dead model id is cleared; an agent that
+  already has a runtime keeps it. The Claude Code runtime is seeded only if an
+  agent actually moves. The global `claude-code/*` default is cleared. **Intel
+  difference:** the Default agent also moves when it only inherits the global
+  `claude-code/*` model (upstream moved it only for its own). The migration
+  starts no process; the agent's tool permissions (`claudeCode` options) carry
+  over unchanged.
+- **Removed.** `IntelClaudeCodeService` (per-turn `claude -p`, prompt
+  re-rendering), its `CloudChatEngine` routing, the `claude-code/<alias>` picker
+  rows, and `ClaudeCodeProcessRunner.stream` (only `capture` for the control
+  commands, the pipe pump and the terminator remain). External API callers that
+  asked for model `claude-code/sonnet` now get "no endpoint for model". The
+  service's tests went with it; the config, decoder and argument tests stay.
+- **Narrow environment.** Besides the chat process, the Test button and setup
+  probe (`HarnessControlCommand.resolve` / `searchedPath`) now use the same
+  narrow inherited environment, so a passing Test means a chat can launch. The
+  resume lookup (`ClaudeCodeSessionLocator.configDirectory`) reads
+  `CLAUDE_CONFIG_DIR` only from the runtime's own environment: upstream also
+  read the app's value, which the narrow child never receives.
+- **Onboarding.** The Claude Code step ensures the runtime, sets
+  `claudeCode.model = sonnet` and `updateRuntime(.harness(id))` for the agents
+  (upstream's hunk). `AgentsView` saves `runtime` through unchanged (the editor
+  rebuilt the whole `Agent` and would have dropped it), and its Claude Code
+  options explain themselves when the agent is not on the runtime.
+- **`spawn_agent`** refuses a harness agent (`SpawnAgentTool`, like upstream).
+- **Open (4b), all blocked on another agent's work in `Networking/` and
+  `Subagent/` (2026-11-26):** (1) the HTTP auth gate and `/mcp/*` handlers
+  honour `X-Osaurus-Bridge-Grant` / `Authorization: Bearer osh_...` through
+  `HarnessGrantStore` (upstream `HTTPHandler.harnessGrant`, `resolvedHarnessGrant`,
+  `ChatExecutionContext.harnessTokenAgentId`). Until then the grant is ignored
+  and the harness's Osaurus tools reach `/mcp/call` as an unattributed
+  loopback caller: no agent identity, `.ask` tools refused, nothing widened. (2)
+  `harnessUnsupportedError` on `/agents/{id}/run` (`IntelHTTPAgentRun`), and
+  `runsOnHarness` in `SpawnDescriptors` (`Subagent/`). (3) Computer Use and
+  AppleScript do not refuse harness agents yet.
+- **Not shippable without stage 5.** There is no picker or editor row to choose a
+  runtime yet; today only the onboarding Claude Code step and the migration set
+  one. Do not ship 4a alone to testers without those (the `claude-code/*`
+  models are gone).
+- **Tests.** `HarnessAppIntegrationTests`: migration (custom agents, Default
+  agent own and inherited, idempotence, backup restore, explicit runtime wins),
+  `updateRuntime`, Default-agent persistence (old files decode, nil is not
+  written), a real `ChatSession` turn against a throwaway `/bin/sh` fake harness
+  in a temp folder (no built-in loop, the exact environment names), a deleted
+  runtime failing the turn, and the narrow-environment policy.
+
+**Where stage 4a stopped (2026-11-26, coordinator paused the round).** Code and
+tests are committed. Filtered gate (`Harness|ClaudeCode|ChatSession|IntelChat|
+IntelVenturaControlGuard|AgentRuntime|Spawn`): 382 tests in 61 suites passed;
+`bash scripts/i18n/check.sh` passes. **Not run:** the full suite
+(`gate_pty.sh`) and the broader filter with `Runtime|Agent|ChatEngine` (a first
+run died on a test-compile error in the new test file, fixed). Not built or run
+in the app. Next: run the full suite, then 4b (Networking/Subagent hooks above),
+then stage 5 (UI to choose a runtime; without it 4a must not reach testers).
+A found-by-test note: Intel's automatic chat title falls back to a hard-coded
+cloud model (`deepseek-flash`); a harness chat without a configured core model
+now keeps the first-line title instead of sending the chat there.
+

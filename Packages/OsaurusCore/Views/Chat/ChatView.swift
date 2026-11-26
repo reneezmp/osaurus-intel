@@ -1619,6 +1619,10 @@ final class ChatSession: ObservableObject {
     /// for a short title summarizing the first exchange, then apply it. Runs
     /// off the send path; any failure leaves the first-line fallback title.
     private func generateLLMTitle(userText: String, assistantText: String, sessionId: UUID) {
+        // A harness agent has no built-in model; without a core model the
+        // first-line title stays, and the chat text is not sent to Intel's
+        // hard-coded fallback model (upstream #3175 `fallbackModel`).
+        if isHarnessAgentActive, ChatConfiguration.shared.coreModelName == nil { return }
         let titleModel =
             ChatConfiguration.shared.coreModelName ?? auxiliaryChatModel ?? "deepseek-flash"
         let engine = chatEngineFactory()
