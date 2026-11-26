@@ -252,6 +252,18 @@ mdat and live-folder checks).
   put any file into the prompt).
 - **Computer Use stage 3** (2026-11-26): native driver, not constructed yet.
   The last two XCTest files now run as Swift Testing.
+- **Owner decisions, 2026-11-26 (Renée):**
+  1. Local HTTP routes `/sessions`, `/agents`, `/mcp/*`: refuse browser
+     requests whose `Origin` isn't listed by name in Allowed Origins, whatever
+     the local access-key switch says (local tools without an Origin keep
+     working), and add the missing Settings row for that switch. Deliberate
+     difference from upstream Classic.
+  2. Harness runtimes: Claude Code / Pi get Intel's narrow subprocess
+     environment (login-shell PATH, HOME, the bridge grant and what each tool
+     needs), not upstream's inherited one.
+  3. Stopped background subagent workers report back as upstream does (a new
+     parent reply may start after Stop); revert stage 6's Intel difference.
+  4. Cut Rosy build 70 after Computer Use stage 4 and privacy filter stage 1.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

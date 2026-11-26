@@ -47,8 +47,8 @@ Divergences to keep: Intel's narrow subprocess environment
 (`ClaudeCodeConfiguration.subprocessEnvironment`) applies to the live per-turn
 path until stage 4 swaps it; the harness path uses upstream's environment
 (login-shell PATH, inherited env minus `CLAUDECODE`, the bridge grant and
-`ANTHROPIC_API_KEY`). Decide at stage 4 whether to narrow it further (owner
-question: harness chats then inherit whatever the Osaurus app process has, e.g.
+`ANTHROPIC_API_KEY`). **Decided 2026-11-26 (Renée): Intel's narrow environment**, plus what each
+tool needs. (Was the owner question: harness chats then inherit whatever the Osaurus app process has, e.g.
 `ANTHROPIC_BASE_URL`).
 
 ## x86_64 / macOS 13 findings per runtime
