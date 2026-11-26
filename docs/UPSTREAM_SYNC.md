@@ -221,6 +221,8 @@ mdat and live-folder checks).
   `BackgroundTaskAgentGroupClose` split (plus that suite alone, 3 of 3).
 - **Settings (#2950)** (2026-11-26): already ported in September; 18 search
   entries added and one likely Ventura spacing fix (needs a Rosy screenshot).
+- **Provider slice 10** (5d rows 36–38): real finish reason in Insights,
+  request evidence on failed discovery. **Stage 5d is complete.**
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

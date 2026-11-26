@@ -3692,3 +3692,10 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Settings search finds "pairing", "Browser Use", "Osaurus ID", "Web Search", "Codex" and voice options, and each result lands on its control.
 - [ ] Settings → Chat → Folder Tool Permissions: the gaps between rows are even. **Take a screenshot** of this list for comparison with the old one.
 - [ ] Still uneven anywhere else in Settings (for example the Behavior rows)? Screenshot it too.
+
+## Provider slice 10: Insights detail (2026-11-26)
+
+`W-cov-reaudit` 5d (`COV_REAUDIT_STAGE5D_PROVIDER.md` rows 36–38). Not in candidate 69.
+
+- [ ] Insights for a reply that hit Max Tokens shows finish reason `length`; a reply that called a tool shows `tool_calls`; a normal reply shows `stop`.
+- [ ] Add a provider with a wrong key: Providers shows a "Request evidence" row with the request and response, with the key hidden. Fix the key: the row goes away.
