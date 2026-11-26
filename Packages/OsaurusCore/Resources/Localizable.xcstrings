@@ -376,6 +376,34 @@
         }
       }
     },
+    "%@ couldn't complete the turn: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ konnte die Antwort nicht abschließen: %2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@이(가) 이번 응답을 완료하지 못했어요: %2$@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ не удалось завершить ответ: %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 未能完成本轮对话：%2$@"
+          }
+        }
+      }
+    },
     "%@ didn't allow this. Your account may not have access, or you may need to sign in again." : {
       "localizations" : {
         "de" : {
@@ -444,6 +472,62 @@
         }
       }
     },
+    "%@ exited with code %d." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ wurde mit Code %2$d beendet."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@이(가) 코드 %2$d(으)로 종료되었어요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ завершился с кодом %2$d."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 已退出，退出码 %2$d。"
+          }
+        }
+      }
+    },
+    "%@ exited with code %d: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ wurde mit Code %2$d beendet: %3$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@이(가) 코드 %2$d(으)로 종료되었어요: %3$@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ завершился с кодом %2$d: %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 已退出，退出码 %2$d：%3$@"
+          }
+        }
+      }
+    },
     "%@ has used %lld%% of its database storage (%.1f / %.1f MB)." : {
       "localizations" : {
         "de" : {
@@ -468,6 +552,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ использует %lld%% хранилища базы данных (%.1f / %.1f МБ)."
+          }
+        }
+      }
+    },
+    "%@ hit a rate limit: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ hat ein Nutzungslimit erreicht: %2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@이(가) 사용 한도에 도달했어요: %2$@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ достиг лимита запросов: %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 触发了速率限制：%2$@"
           }
         }
       }
@@ -565,6 +677,62 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ готов к импорту. Откройте «Агенты», чтобы проверить."
+          }
+        }
+      }
+    },
+    "%@ isn't signed in. Sign in to it, then try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bei %@ bist du nicht angemeldet. Melde dich dort an und versuche es dann erneut."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 로그인되어 있지 않아요. 로그인한 뒤 다시 시도해 주세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вы не вошли в %@. Войдите и повторите попытку."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 尚未登录。请先登录，然后重试。"
+          }
+        }
+      }
+    },
+    "%@ isn't signed in: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bei %1$@ bist du nicht angemeldet: %2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에 로그인되어 있지 않아요: %2$@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вы не вошли в %1$@: %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 尚未登录：%2$@"
           }
         }
       }
@@ -749,6 +917,34 @@
         }
       }
     },
+    "%@ rejected the message: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ hat die Nachricht abgelehnt: %2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@이(가) 메시지를 거부했어요: %2$@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ отклонил сообщение: %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 拒绝了这条消息：%2$@"
+          }
+        }
+      }
+    },
     "%@ remaining" : {
       "localizations" : {
         "de" : {
@@ -773,6 +969,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "剩余 %@"
+          }
+        }
+      }
+    },
+    "%@ runs on an external harness, which this feature can't drive. Chat with the agent in Osaurus instead." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ läuft auf einem externen Harness, das diese Funktion nicht steuern kann. Chatte stattdessen in Osaurus mit dem Agenten."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@은(는) 외부 하니스에서 실행되며, 이 기능으로는 제어할 수 없어요. 대신 Osaurus에서 에이전트와 채팅해 주세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ работает во внешней среде запуска, которой эта функция управлять не может. Общайтесь с агентом в Osaurus."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 运行在外部运行环境上，此功能无法驱动它。请改为在 Osaurus 中与该智能体聊天。"
           }
         }
       }
@@ -3869,6 +4093,34 @@
         }
       }
     },
+    "A reply is still in progress." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Antwort wird noch erstellt."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아직 답변을 생성하는 중이에요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ответ ещё формируется."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仍在生成回复。"
+          }
+        }
+      }
+    },
     "A save is already in progress." : {
       "comment" : "Error when an Osaurus ID profile save is already running.",
       "extractionState" : "manual",
@@ -6571,6 +6823,34 @@
       }
     },
     "An agent" : {},
+    "An extension failed." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Erweiterung ist fehlgeschlagen."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확장 프로그램이 실패했어요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сбой расширения."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "某个扩展运行失败。"
+          }
+        }
+      }
+    },
     "Analyzing conversation…" : {
       "comment" : "Label for the \"preparing\" phase of context compaction.",
       "isCommentAutoGenerated" : true,
@@ -11419,6 +11699,34 @@
       }
     },
     "Claude effort" : {},
+    "Claude subscription usage at %d%%" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude-Abo zu %d%% ausgelastet"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude 구독 사용량이 %d%%예요"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Использование подписки Claude: %d%%"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude 订阅用量已达 %d%%"
+          }
+        }
+      }
+    },
     "Clear All Memory?" : {
       "localizations" : {
         "de" : {
@@ -12133,6 +12441,34 @@
         }
       }
     },
+    "Compacting the conversation…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unterhaltung wird komprimiert …"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대화를 압축하는 중…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сжатие переписки…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在压缩对话…"
+          }
+        }
+      }
+    },
     "Compaction Model" : {
       "localizations" : {
         "de" : {
@@ -12170,6 +12506,34 @@
     "Compaction didn't finish" : {
       "comment" : "A title displayed when a context compaction fails.",
       "isCommentAutoGenerated" : true
+    },
+    "Compaction failed: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Komprimierung fehlgeschlagen: %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "압축에 실패했어요: %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось сжать переписку: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "压缩失败：%@"
+          }
+        }
+      }
     },
     "Compaction is already running." : {
       "localizations" : {
@@ -12809,6 +13173,62 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已連線！（1 個工具）"
+          }
+        }
+      }
+    },
+    "Connected, but no model is configured. Run it in Terminal and use /login, or pass --provider and --model in the arguments." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbunden, aber es ist kein Modell konfiguriert. Starte es im Terminal und nutze /login oder gib --provider und --model in den Argumenten an."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결되었지만 모델이 설정되어 있지 않아요. 터미널에서 실행해 /login을 사용하거나 인수에 --provider와 --model을 지정해 주세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключено, но модель не настроена. Запустите её в Терминале и выполните /login либо укажите --provider и --model в аргументах."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已连接，但未配置模型。请在终端中运行它并使用 /login，或在参数中传入 --provider 和 --model。"
+          }
+        }
+      }
+    },
+    "Connected. Model: %@." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbunden. Modell: %@."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결되었어요. 모델: %@."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключено. Модель: %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已连接。模型：%@。"
           }
         }
       }
@@ -13951,6 +14371,34 @@
       }
     },
     "Couldn't find \"%@\"." : {},
+    "Couldn't find `%@`. Install it, or set the runtime's executable to its full path." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`%@` wurde nicht gefunden. Installiere es oder gib in der Laufzeit den vollständigen Pfad zur ausführbaren Datei an."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`%@`을(를) 찾을 수 없어요. 설치하거나 런타임의 실행 파일을 전체 경로로 지정해 주세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось найти `%@`. Установите его или укажите в настройках среды выполнения полный путь к исполняемому файлу."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到 `%@`。请先安装它，或将运行环境的可执行文件设置为其完整路径。"
+          }
+        }
+      }
+    },
     "Couldn't generate a title. Check that a model is available and try again." : {
       "localizations" : {
         "de" : {
@@ -14145,6 +14593,34 @@
         }
       }
     },
+    "Couldn't start %@: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ konnte nicht gestartet werden: %2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@을(를) 시작하지 못했어요: %2$@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось запустить %1$@: %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法启动 %1$@：%2$@"
+          }
+        }
+      }
+    },
     "Couldn't start Claude Code: %@" : {
       "localizations" : {
         "de" : {
@@ -14204,6 +14680,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法寫入 Codex 設定：%@"
+          }
+        }
+      }
+    },
+    "Couldn't write a temporary file." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine temporäre Datei konnte nicht geschrieben werden."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "임시 파일을 쓰지 못했어요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось записать временный файл."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法写入临时文件。"
           }
         }
       }
@@ -23170,6 +23674,34 @@
         }
       }
     },
+    "It started but didn't answer an RPC get_state request. Check that the arguments include --mode rpc." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Es wurde gestartet, hat aber eine RPC-get_state-Anfrage nicht beantwortet. Prüfe, ob die Argumente --mode rpc enthalten."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시작은 되었지만 RPC get_state 요청에 응답하지 않았어요. 인수에 --mode rpc가 포함되어 있는지 확인해 주세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Процесс запустился, но не ответил на RPC-запрос get_state. Проверьте, что в аргументах есть --mode rpc."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它已启动，但没有响应 RPC get_state 请求。请检查参数中是否包含 --mode rpc。"
+          }
+        }
+      }
+    },
     "It's unsigned because signing didn't finish." : {},
     "Its access key stops working immediately. You can pair again with a new code." : {
       "comment" : "A message displayed in an alert when the user revokes",
@@ -31579,6 +32111,34 @@
         }
       }
     },
+    "Osaurus can't open the working folder %@. Choose the folder again, or clear it, then resend." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus kann den Arbeitsordner %@ nicht öffnen. Wähle den Ordner erneut aus oder entferne ihn und sende dann noch einmal."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus가 작업 폴더 %@을(를) 열 수 없어요. 폴더를 다시 선택하거나 해제한 뒤 다시 보내 주세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus не может открыть рабочую папку %@. Выберите папку заново или сбросьте выбор и отправьте сообщение ещё раз."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus 无法打开工作文件夹 %@。请重新选择该文件夹或清除它，然后重新发送。"
+          }
+        }
+      }
+    },
     "Osaurus delegates sign-in and requests to Anthropic's Claude Code CLI. Credentials stay with the CLI; model requests run in the cloud." : {
       "localizations" : {
         "de" : {
@@ -38151,6 +38711,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "稍後重試。"
+          }
+        }
+      }
+    },
+    "Retrying (attempt %d of %d)…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neuer Versuch (Versuch %1$d von %2$d) …"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다시 시도하는 중(%1$d/%2$d번째)…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Повторная попытка (%1$d из %2$d)…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在重试（第 %1$d 次，共 %2$d 次）…"
           }
         }
       }
@@ -46015,6 +46603,62 @@
         }
       }
     },
+    "The get_state request was rejected." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die get_state-Anfrage wurde abgelehnt."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "get_state 요청이 거부되었어요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запрос get_state отклонён."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "get_state 请求被拒绝。"
+          }
+        }
+      }
+    },
+    "The harness" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Harness"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "하니스"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Среда запуска"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行环境"
+          }
+        }
+      }
+    },
     "The id \"%@\" is taken by a bundled provider. Pick another id." : {
       "comment" : "An error message that appears when a user tries to save a custom provider with an id that is already taken by a bundled provider. The argument is the id of the conflicting provider.",
       "isCommentAutoGenerated" : true,
@@ -46149,6 +46793,34 @@
         }
       }
     },
+    "The model returned an error." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Modell hat einen Fehler zurückgegeben."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델이 오류를 반환했어요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Модель вернула ошибку."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型返回了错误。"
+          }
+        }
+      }
+    },
     "The model starts with a small set and loads more of your assigned tools on demand." : {
       "comment" : "A description of the \"Auto-discover relevant tools\" feature, highlighting that the model starts with a small set of tools and expands as more are assigned.",
       "isCommentAutoGenerated" : true,
@@ -46181,6 +46853,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "模型從少量工具開始，按需載入更多你分配的工具。"
+          }
+        }
+      }
+    },
+    "The prompt was rejected." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Eingabe wurde abgelehnt."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프롬프트가 거부되었어요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запрос отклонён."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提示被拒绝。"
           }
         }
       }
@@ -47044,6 +47744,34 @@
       }
     },
     "This agent uses a legacy (non device-scoped) address. It is kept as-is; rotate the key later to move it to the current layout." : {},
+    "This agent's runtime was removed. Choose a runtime for the agent in its settings, then try again." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Laufzeit dieses Agenten wurde entfernt. Wähle in den Einstellungen des Agenten eine Laufzeit aus und versuche es dann erneut."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 에이전트의 런타임이 삭제되었어요. 에이전트 설정에서 런타임을 선택한 뒤 다시 시도해 주세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Среда выполнения этого агента удалена. Выберите среду в настройках агента и повторите попытку."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此智能体的运行环境已被移除。请在智能体设置中重新选择运行环境，然后重试。"
+          }
+        }
+      }
+    },
     "This code isn’t available for this account." : {
       "localizations" : {
         "de" : {
@@ -52144,6 +52872,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "登入後即可使用 Claude Code 模型。更新 Claude Code 後可在此畫面進行狀態檢查和瀏覽器登入。"
+          }
+        }
+      }
+    },
+    "You do NOT have Osaurus's configuration tools (osaurus_inspect, osaurus_help, osaurus_config) on this run, because %@. Do not try to call them and do not speculate about permission errors. If the user asks about Osaurus's configuration, say plainly that you can't read it right now, explain why, and offer what they can check themselves." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du hast in diesem Durchlauf KEINE Konfigurationswerkzeuge von Osaurus (osaurus_inspect, osaurus_help, osaurus_config), weil %@. Versuche nicht, sie aufzurufen, und spekuliere nicht über Berechtigungsfehler. Wenn der Nutzer nach der Konfiguration von Osaurus fragt, sag klar, dass du sie gerade nicht lesen kannst, erkläre warum und nenne, was er selbst prüfen kann."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이번 실행에서는 Osaurus의 구성 도구(osaurus_inspect, osaurus_help, osaurus_config)를 사용할 수 없어요. 이유: %@. 호출을 시도하지 말고 권한 오류를 추측하지 마세요. 사용자가 Osaurus 구성에 대해 물으면 지금은 읽을 수 없다고 분명히 말하고, 이유를 설명하고, 직접 확인할 수 있는 방법을 알려 주세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "В этом запуске у вас НЕТ инструментов настройки Osaurus (osaurus_inspect, osaurus_help, osaurus_config), потому что %@. Не пытайтесь их вызывать и не гадайте об ошибках доступа. Если пользователь спросит о настройках Osaurus, прямо скажите, что сейчас не можете их прочитать, объясните причину и предложите, что он может проверить сам."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本次运行中你没有 Osaurus 的配置工具（osaurus_inspect、osaurus_help、osaurus_config），原因是%@。不要尝试调用它们，也不要猜测权限错误。如果用户询问 Osaurus 的配置，请直接说明你目前无法读取，解释原因，并告诉用户可以自行检查什么。"
           }
         }
       }
@@ -63700,6 +64456,34 @@
     },
     "the Osaurus server is not running — tell the user to start it from the Osaurus app" : {
       "shouldTranslate" : false
+    },
+    "they are switched off for this agent — tell the user to turn on \"Allow Osaurus read tools\" in this agent's Claude Code Options" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "sie sind für diesen Agenten ausgeschaltet — sag dem Nutzer, er soll „Osaurus-Lesewerkzeuge erlauben“ in den Claude-Code-Optionen dieses Agenten einschalten"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 에이전트에서 꺼져 있어요 — 사용자에게 이 에이전트의 Claude Code 옵션에서 \"Osaurus 읽기 도구 허용\"을 켜라고 안내하세요"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "они отключены для этого агента — попросите пользователя включить «Разрешить инструменты чтения Osaurus» в параметрах Claude Code этого агента"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它们已在此智能体上关闭——请告诉用户在该智能体的 Claude Code 选项中开启“允许 Osaurus 读取工具”"
+          }
+        }
+      }
     },
     "thinking.mode.label" : {
       "comment" : "Label for the thinking on/off control (model picker row, picker card section, agent generation override, model pill details). Noun context: the name of the mode, not the in-progress status. The streaming status in the chat transcript keeps the separate \"Thinking\" key.",
