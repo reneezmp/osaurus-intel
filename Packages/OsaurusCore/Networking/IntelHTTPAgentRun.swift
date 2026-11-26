@@ -357,6 +357,13 @@ extension HTTPHandler {
         let voiceCall = includeToolDetail && req.osaurus_voice_call == true
         // Read now: the connection's attribution is reset for its next request.
         let callerKeyNonce = inboundConnectionInfo()?.accessKeyId
+        // Stable identity of an authenticated remote caller, for the debounced
+        // host toast (#1676); nil for loopback callers. Local toast only.
+        let peerCallKey: String? = {
+            guard !isLoopbackConnection(context) else { return nil }
+            let info = inboundConnectionInfo()
+            return info?.accessKeyId ?? info?.audience ?? "peer"
+        }()
 
         let startTime = stateRef.value.requestStartedAt ?? Date()
         let userAgent = head.headers.first(name: "User-Agent")
@@ -437,6 +444,16 @@ extension HTTPHandler {
                 }
                 log(model: nil, response: "", toolCalls: [], error: message)
                 return
+            }
+
+            // Debounced host toast: a connected peer is driving one of this
+            // Mac's agents (#1676). Loopback callers never toast.
+            if let peerCallKey {
+                await MainActor.run {
+                    if let agentName = AgentManager.shared.agent(for: agentId)?.name {
+                        PeerCallNotifier.shared.notifyAgentRun(peerKey: peerCallKey, agentName: agentName)
+                    }
+                }
             }
 
             let executionMode: ExecutionMode = await MainActor.run {

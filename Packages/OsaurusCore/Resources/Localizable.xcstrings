@@ -4019,6 +4019,41 @@
         }
       }
     },
+    "A connected peer is running “%@”." : {
+      "comment" : "In-app toast message shown on the host when a connected remote peer runs one of its agents. %@ is the agent name.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ein verbundener Peer führt „%@“ aus."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "연결된 피어가 “%@”을(를) 실행하고 있습니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключенный узел работает под управлением «%@»."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已连接的对等节点正在运行“%@”。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已連接的對等節點正在運行「%@」。"
+          }
+        }
+      }
+    },
     "A file came back at the wrong size, which usually means the connection was interrupted. Retrying should fix this." : {
       "localizations" : {
         "de" : {
@@ -5718,6 +5753,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Шаблоны агентов"
+          }
+        }
+      }
+    },
+    "Agent in use" : {
+      "comment" : "In-app toast title shown on the host when a connected remote peer is driving one of its agents.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Agent wird verwendet"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "에이전트 사용 중"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Агент используется"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体正在使用中"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理正在使用中"
           }
         }
       }
