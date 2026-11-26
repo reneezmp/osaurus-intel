@@ -234,12 +234,11 @@ enum SeatbeltExecutor {
         }
     }
 
-    static func run(_ request: Request) async throws -> ContainerExecResult {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: SeatbeltSandbox.sandboxExecPath)
-        process.arguments = ["-p", request.profile, "/bin/sh", "-c", request.command]
-
-        var env = request.env
+    /// The environment every confined launch gets (foreground and
+    /// background): PATH default, TMPDIR pinned to the allowed scratch
+    /// folder, DEVELOPER_DIR pinned, HOME pinned to the (mapped) cwd.
+    static func confinedEnvironment(_ requested: [String: String], cwd: String?) -> [String: String] {
+        var env = requested
         if env["PATH"] == nil {
             env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         }
@@ -266,9 +265,150 @@ enum SeatbeltExecutor {
         // boundary: never let a caller redirect the host-side preparation to
         // an arbitrary directory. Seatbelt requests already carry a mapped,
         // path-sanitized cwd; fall back to the writable scratch directory.
-        let confinedHome = request.cwd ?? scratch
-        env["HOME"] = confinedHome
-        process.environment = env
+        env["HOME"] = cwd ?? scratch
+        return env
+    }
+
+    // MARK: - Background launch (W-seatbelt-sandbox stage 4)
+
+    /// A long-lived confined process the app owns. Intel-only (upstream's
+    /// background jobs `setsid` + `kill` inside the Linux guest; macOS has
+    /// no `setsid`, and a `kill` from a second `sandbox-exec` cannot signal
+    /// the first). The app launches the confined shell itself as the leader
+    /// of its own process group, so it can poll, wait on and kill the whole
+    /// tree without going through the sandbox.
+    final class BackgroundProcess: @unchecked Sendable {
+        let pid: Int32
+        private let lock = NSLock()
+        private var status: Int32?
+
+        init(pid: Int32) { self.pid = pid }
+
+        /// Exit code once the leader has exited (reaps it); nil while running.
+        /// A signal death reports `128 + signal`, like a shell.
+        var exitCode: Int32? {
+            lock.lock()
+            defer { lock.unlock() }
+            if let status { return status }
+            var raw: Int32 = 0
+            let result = waitpid(pid, &raw, WNOHANG)
+            guard result == pid else { return nil }
+            let code: Int32
+            if raw & 0x7f == 0 {
+                code = (raw >> 8) & 0xff
+            } else {
+                code = 128 + (raw & 0x7f)
+            }
+            status = code
+            return code
+        }
+
+        var isRunning: Bool { exitCode == nil }
+
+        /// Signal the whole process group (the leader and every confined
+        /// descendant that did not start its own session). Idempotent.
+        func signalGroup(_ signal: Int32) {
+            _ = Darwin.kill(-pid, signal)
+        }
+
+        /// SIGTERM, a short grace, then SIGKILL. Returns once the leader is gone.
+        func terminate(graceSeconds: Double = 2) async {
+            signalGroup(SIGTERM)
+            var waited = 0.0
+            while isRunning, waited < graceSeconds {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                waited += 0.1
+            }
+            // Always follow up on the group: descendants may outlive the leader.
+            signalGroup(SIGKILL)
+            var more = 0.0
+            while isRunning, more < 3 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                more += 0.1
+            }
+        }
+
+        /// Synchronous hard stop for app quit.
+        func killNow() {
+            signalGroup(SIGKILL)
+            _ = exitCode
+        }
+    }
+
+    /// Start `request.command` under `sandbox-exec` without waiting. Output
+    /// goes wherever the command itself redirects it (the caller wraps the
+    /// command in `exec >log 2>&1`, so the redirect is confined by the same
+    /// profile; the app never opens a log path the sandbox could have swapped
+    /// for a symlink). Stdin and, by default, stdout/stderr are /dev/null.
+    /// `POSIX_SPAWN_CLOEXEC_DEFAULT` keeps every app file descriptor out of
+    /// the child.
+    static func launchBackground(_ request: Request) async throws -> BackgroundProcess {
+        let confinedHome = request.cwd ?? SeatbeltSandbox.scratchDir
+        let env = confinedEnvironment(request.env, cwd: request.cwd)
+        let arguments = [SeatbeltSandbox.sandboxExecPath, "-p", request.profile, "/bin/sh", "-c", request.command]
+        // posix_spawn raises no exception, but a NUL would silently truncate.
+        for string in arguments + env.flatMap({ [$0.key, $0.value] }) where string.contains("\0") {
+            throw SandboxError.execFailed("sandbox-exec launch failed: command or environment contains a NUL byte")
+        }
+        if request.command.contains("python3") {
+            await preparePythonShimCache(home: confinedHome)
+        }
+
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        // Own process group (so the app can signal the whole tree), no
+        // inherited descriptors, and a clean signal state: the app's own
+        // signal mask / ignored signals must not leak into the confined job.
+        posix_spawnattr_setflags(
+            &attributes,
+            Int16(
+                POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK
+                    | POSIX_SPAWN_SETSIGDEF))
+        posix_spawnattr_setpgroup(&attributes, 0)
+        var noSignalsBlocked = sigset_t()
+        sigemptyset(&noSignalsBlocked)
+        posix_spawnattr_setsigmask(&attributes, &noSignalsBlocked)
+        var allSignals = sigset_t()
+        sigfillset(&allSignals)
+        posix_spawnattr_setsigdefault(&attributes, &allSignals)
+
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
+        posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
+        if let cwd = request.cwd {
+            posix_spawn_file_actions_addchdir_np(&actions, cwd)
+        }
+
+        var cArguments: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) }
+        cArguments.append(nil)
+        var cEnvironment: [UnsafeMutablePointer<CChar>?] = env.map { strdup("\($0.key)=\($0.value)") }
+        cEnvironment.append(nil)
+        defer {
+            cArguments.forEach { free($0) }
+            cEnvironment.forEach { free($0) }
+        }
+
+        var pid: pid_t = 0
+        let rc = posix_spawn(
+            &pid, SeatbeltSandbox.sandboxExecPath, &actions, &attributes, cArguments, cEnvironment)
+        guard rc == 0 else {
+            throw SandboxError.execFailed(
+                "sandbox-exec launch failed: \(String(cString: strerror(rc)))")
+        }
+        return BackgroundProcess(pid: pid)
+    }
+
+    static func run(_ request: Request) async throws -> ContainerExecResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: SeatbeltSandbox.sandboxExecPath)
+        process.arguments = ["-p", request.profile, "/bin/sh", "-c", request.command]
+
+        let confinedHome = request.cwd ?? SeatbeltSandbox.scratchDir
+        process.environment = confinedEnvironment(request.env, cwd: request.cwd)
 
         // `run()` raises an uncatchable Objective-C exception for a NUL in the
         // model-supplied command or env.

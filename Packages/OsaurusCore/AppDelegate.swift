@@ -604,6 +604,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         SharedConfigurationService.shared.remove()
         // Upstream: close every Browser Use session (`W-browser-use`).
         BrowserSessionManager.shared.shutdownAll()
+        // W-seatbelt-sandbox stage 4: sandbox background processes never
+        // outlive the app.
+        SandboxBackgroundJobs.shared.killAllNow()
         // Upstream: land pending off-main writes before the process exits, so
         // a setting or secret saved right before quit isn't dropped.
         // #3351: drain queued retained Activity tab snapshots (no-op when the

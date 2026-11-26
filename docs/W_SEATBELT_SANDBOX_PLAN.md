@@ -71,7 +71,7 @@ Facts from upstream's profile that matter:
 | 1 | **Seatbelt core, unwired.** `SeatbeltSandbox` (profile, backend enum, path mapper), `SeatbeltExecutor` (pipes, idle timeout, hard deadline, NUL check), Intel stand-ins for `Writer` and `SandboxError`. Tests. No behaviour change. | Done |
 | 2 | **Host sandbox runtime.** A compiled Intel `SandboxManager` slice with upstream's `exec` / Seatbelt branch, workspace folders under `OsaurusPaths.containerWorkspace()`, per-agent homes, `SandboxLogBuffer`, availability cache (#3094, #3105), `SandboxError` merge. Default network denied. A confinement self-test (upstream's diagnostic: a write outside the workspace must fail). | Done (2026-11-26) |
 | 3 | **Tools.** Host-capable slice of `BuiltinSandboxTools` as Intel files: `sandbox_exec` (foreground), `sandbox_read_file`, `sandbox_write_file`, `sandbox_search_files`, `sandbox_secret_check` (#2157 output scrubbing), per-agent `AutonomousExecConfig` (`enabled`, `maxCommandsPerTurn`, `sandboxNetworkEnabled`, `backgroundProcessEnabled`), `ToolRegistry` gating, permission "Ask" for write/exec, composer sections (environment, `sandboxState`, `sandboxUnavailable`, `secretHandling`, `soul`). `sandbox_secret_set` is written but not registered; `selfImprovement` / `pluginCreator` wait for stage 4. | Done (2026-11-26) |
-| 4 | **Background processes and plugins.** `sandbox_exec(background:true)`, `sandbox_process`, sandbox plugins on the host backend. Avoid `BackgroundTaskManager` and the spawn tools while `W-subagents` is open. | Not started |
+| 4 | **Background processes and plugins.** `sandbox_exec(background:true)`, `sandbox_process`, sandbox plugins on the host backend (`sandbox_plugin_register`, plugin tools). Avoids `BackgroundTaskManager` and the spawn tools while `W-subagents` is open. | Done (2026-11-26) |
 | 5 | **UI and declarative config.** Seatbelt variant of the Sandbox page (`isSeatbelt` branches), per-agent switches in the agent editor including an explicit network switch that defaults off, `sandbox.*` keys in declarative config. Ventura rules apply. | Not started |
 
 ## Upstream items this row still owns
@@ -215,3 +215,73 @@ hand; the suite runs on the build Mac): see the stage 3 report steps. Short
 form: an opted-in agent runs `echo hi`; a write outside the workspace fails;
 `ls ~` fails; `curl` fails with the network warning; an agent that did not opt
 in shows no sandbox tool.
+
+## Stage 4 notes (2026-11-26)
+
+Files: `Services/Sandbox/IntelSandboxBackgroundJobs.swift` (job registry),
+`SeatbeltExecutor.launchBackground` / `BackgroundProcess` (in
+`Seatbelt/SeatbeltExecutor.swift`), `SandboxManager.execBackground`,
+`Tools/IntelSandboxProcessTool.swift`, `Managers/Plugin/IntelSandboxPluginManager.swift`,
+`Tools/IntelSandboxPluginRegisterTool.swift`; `Tools/SandboxPluginTool.swift`
+is compiled again (upstream's current file, adapted); edits in
+`IntelSandboxTools.swift` (`background` flag), `IntelStubConformers.swift`
+(registry gates, plugin tool registration), `IntelSandboxPrompt.swift`,
+`ChatView.completeRunCleanup`, `AppDelegate.applicationWillTerminate`.
+Tests: `Tests/Sandbox/IntelSandboxBackgroundTests.swift`.
+
+**Background jobs differ from upstream on purpose.** Upstream starts a job in
+the Linux guest with `nohup setsid ... &` and probes it with `kill -0` and
+`/proc`. macOS has no `setsid`, and a `kill` from a second `sandbox-exec`
+cannot signal the first (Seatbelt's `signal (target same-sandbox)`), so the app
+owns the process instead: `posix_spawn` of `sandbox-exec -p <profile> /bin/sh -c`
+as the leader of its own process group (`POSIX_SPAWN_SETPGROUP`, and
+`POSIX_SPAWN_CLOEXEC_DEFAULT` so no app file descriptor leaks into the child).
+Poll, wait and kill go through the registry; kill signals the whole process
+group. The job's output goes to `bg-<id>.log` in the agent home through a
+redirect INSIDE the confined shell (`exec >log 2>&1`), so the app never opens a
+path the sandbox could have swapped for a symlink; the log tail is read by a
+confined `tail` and scrubbed of stored secrets.
+
+**Owner-policy behaviour.**
+
+- Same profile as a foreground exec: writes only in the workspace, no home
+  read, network only if the agent's own `sandboxNetworkEnabled` AND the shared
+  config allow it (default off).
+- `background:true` and `sandbox_process` exist only for an agent whose own
+  `backgroundProcessEnabled` is on (default off). The registry strips the
+  `background` property from `sandbox_exec`'s schema for every other agent, and
+  the tool refuses the flag anyway. `sandbox_process` only touches jobs this
+  agent started: an arbitrary pid is "unknown", never signalled.
+- Jobs stop when the run that started them ends (`ChatView.completeRunCleanup`,
+  owner = chat session id), when the sandbox is stopped / reset / removed
+  (`stopContainer`), at app quit (`applicationWillTerminate`, SIGKILL of every
+  group), and after a one-hour lifetime ceiling. At most 4 run per agent.
+- Not stopped by a run end: jobs started by a surface that is not the chat
+  window (they have no owner; external surfaces are denied the sandbox tools, so
+  only a schedule-style internal run could do this). They still die at the
+  ceiling, on stop and at quit. A grandchild that starts its own session
+  (`setsid`) escapes the group kill but is still confined by the profile.
+
+**Plugins on the host backend.** An agent with `pluginCreate` writes
+`plugins/<id>/plugin.json` (+ files) in its home and calls
+`sandbox_plugin_register`. The manager validates (safe ids, no `..`, absolute
+or odd file names, at most 64 files / 256 KB / 16 tools, no tool named like a
+built-in), seeds the files and runs `setup` as confined commands (never an
+app-side write into the workspace), under the agent's own network switch.
+Differences from upstream:
+
+- `plugin.json` and the other files are read by a confined `base64`; a symlinked
+  `plugin.json` is refused and symlinked or hidden files are not packaged.
+- System `dependencies` (apk) are refused with upstream's own message; `daemon`
+  and `events` are accepted by the format but not run.
+- Agent-created plugins get upstream's restricted defaults (network `none`, no
+  inference). Plugin tools and `sandbox_plugin_register` default to "Ask".
+- A plugin's tools are visible to, and runnable by, only the agent that
+  installed it (`SandboxToolGate.allows`); the tool runs that agent's own copy
+  of the plugin. A plugin can never shadow another tool
+  (`canRegisterSandboxPluginTool`).
+- No plugin library, no toast, no post-start repair pass, no HTTP bridge
+  endpoint (`/api/plugin/create` stays excluded). The record is
+  `agents/<id>/sandbox-plugins/installed.json` like upstream; an agent delete
+  does not yet call `removeAgentState` (another stage-6 batch owns that path).
+- The Intel default for `AutonomousExecConfig.pluginCreate` is now `false`.

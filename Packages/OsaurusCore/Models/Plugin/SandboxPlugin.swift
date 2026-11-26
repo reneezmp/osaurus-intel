@@ -249,14 +249,9 @@ extension SandboxPlugin {
 
     /// Validates file paths in the `files` dictionary reject traversal attacks.
     public func validateFilePaths() -> [String] {
-        // `SandboxPathSanitizer` is part of the amputated sandbox runtime
-        // on Intel; with no sandbox execution there are no plugin files
-        // to validate, so return "no errors".
-        #if OSAURUS_INTEL
-            return []
-        #else
-            return SandboxPathSanitizer.validatePluginFiles(files)
-        #endif
+        // Intel: `SandboxPathSanitizer` is compiled again (W-seatbelt-sandbox
+        // stage 3), and the host plugin installer relies on this check.
+        SandboxPathSanitizer.validatePluginFiles(files)
     }
 }
 

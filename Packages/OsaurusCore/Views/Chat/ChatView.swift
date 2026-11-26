@@ -2909,6 +2909,14 @@ final class ChatSession: ObservableObject {
         // purpose (they report back later) and stop only from Activity
         // (upstream, W-subagents stage 6).
         backgroundSpawnCallIdsThisRun.removeAll()
+        // Sandbox background processes (W-seatbelt-sandbox stage 4) never
+        // outlive the run that started them. A brand-new chat has no session
+        // id yet while its first tools run, so both owner keys are stopped.
+        let sandboxJobOwners = [sessionId?.uuidString, "chatwindow-\(ObjectIdentifier(self).hashValue)"]
+            .compactMap { $0 }
+        Task {
+            for owner in sandboxJobOwners { await SandboxBackgroundJobs.shared.stopRun(owner: owner) }
+        }
         budgetTracker.clear()
         ServerController.signalGenerationEnd()
         // Finalize ledger outcomes before trimming so the classification sees

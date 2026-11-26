@@ -24,33 +24,59 @@
 
 import Foundation
 
-final class SandboxPluginTool: OsaurusTool, @unchecked Sendable {
+// Intel fork (W-seatbelt-sandbox stage 4): the host-backend variant of
+// upstream's tool. Differences: it asks for approval like `sandbox_exec`
+// (an agent-authored plugin must not become a way around "Ask"); it runs the
+// calling agent's own installed copy of the plugin (two agents can install
+// different plugins under one id), under the agent's own network switch; and
+// it runs through `SandboxToolContext` so the same confinement and secret
+// scrubbing as `sandbox_exec` apply.
+
+final class SandboxPluginTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
     let name: String
     let description: String
     let parameters: JSONValue?
     let plugin: SandboxPlugin
 
+    private let specId: String
     private let runCommand: String
     private let parameterSpecs: [String: SandboxParameterSpec]
 
     let requiresSandbox = true
 
+    var requirements: [String] { [] }
+    /// Plugin commands are arbitrary shell inside the sandbox: ask unless
+    /// the user sets Auto.
+    var defaultPermissionPolicy: ToolPermissionPolicy { .ask }
+
     init(spec: SandboxToolSpec, plugin: SandboxPlugin) {
         self.name = "\(plugin.id)_\(spec.id)"
         self.description = spec.description
         self.plugin = plugin
+        self.specId = spec.id
         self.runCommand = spec.run
         self.parameterSpecs = spec.parameters ?? [:]
         self.parameters = Self.buildParameterSchema(from: spec.parameters)
     }
 
     func execute(argumentsJSON: String) async throws -> String {
-        guard await SandboxManager.shared.status().isRunning else {
+        let context: SandboxToolContext
+        switch await SandboxToolContext.resolve(tool: name) {
+        case .failure(let refusal): return refusal.envelope
+        case .success(let value): context = value
+        }
+        // The calling agent's own installed copy decides what runs.
+        guard
+            let installed = SandboxPluginManager.current.plugin(
+                id: plugin.id, for: context.agentId.uuidString),
+            installed.status == .ready,
+            let spec = installed.plugin.tools?.first(where: { $0.id == specId })
+        else {
             return ToolEnvelope.failure(
                 kind: .unavailable,
-                message: "Sandbox container is not running. Start it before invoking this tool.",
+                message: "Plugin '\(plugin.id)' is not installed for this agent.",
                 tool: name,
-                retryable: true
+                retryable: false
             )
         }
 
@@ -61,36 +87,24 @@ final class SandboxPluginTool: OsaurusTool, @unchecked Sendable {
         // values to the schema's declared types; here we only need to
         // assert presence (or default-fallback) and surface the standard
         // missing-/wrong-type envelope per spec.
-        if let envelope = validateArguments(args) { return envelope }
+        let specs = spec.parameters ?? [:]
+        if let envelope = validateArguments(args, specs: specs) { return envelope }
+        if let notReady = await context.ensureReady(tool: name) { return notReady }
 
-        let (agentId, agentName) = await resolveAgent()
-
-        let ready = await SandboxPluginManager.shared.ensureReady(
-            pluginId: plugin.id,
-            plugin: plugin,
-            for: agentId
-        )
-        guard ready else {
-            return ToolEnvelope.failure(
-                kind: .unavailable,
-                message:
-                    "Failed to provision plugin '\(plugin.id)' for agent. Try again — "
-                    + "the plugin install may still be in flight.",
-                tool: name,
-                retryable: true
-            )
-        }
-
-        let env = buildExecEnvironment(agentId: agentId, from: args)
+        // Captured separately from the full env so post-exec scrubbing
+        // only matches actual secret values, never PARAM_* arguments.
+        let secrets = SandboxExecSecrets.values(for: context.agentId)
+        let env = buildExecEnvironment(secrets: secrets, from: args, specs: specs)
 
         let result: ContainerExecResult
         do {
-            result = try await SandboxManager.shared.execAsAgent(
-                agentName,
-                command: runCommand,
+            result = try await SandboxToolContext.manager.execAsAgent(
+                context.agentName,
+                command: spec.run,
                 pluginName: plugin.id,
                 env: env,
-                timeout: 30,
+                timeout: 60,
+                networkEnabled: context.config.sandboxNetworkEnabled,
                 streamToLogs: true,
                 logSource: plugin.id
             )
@@ -98,9 +112,11 @@ final class SandboxPluginTool: OsaurusTool, @unchecked Sendable {
             return ToolEnvelope.fromError(error, tool: name)
         }
 
+        // Secrets ride into the plugin's env, so any script that prints
+        // its config would exfiltrate them — scrub before enveloping.
         return encodeResult(
-            stdout: result.stdout,
-            stderr: result.stderr,
+            stdout: SecretScrubber.scrub(result.stdout, secrets: secrets),
+            stderr: SecretScrubber.scrub(result.stderr, secrets: secrets),
             exitCode: result.exitCode
         )
     }
@@ -113,7 +129,7 @@ final class SandboxPluginTool: OsaurusTool, @unchecked Sendable {
     /// well-typed. Optional parameters (those with a `default`) are
     /// skipped — they fall through to the env-var defaulting in
     /// `buildParamVars`.
-    private func validateArguments(_ args: [String: Any]) -> String? {
+    private func validateArguments(_ args: [String: Any], specs parameterSpecs: [String: SandboxParameterSpec]) -> String? {
         for (key, spec) in parameterSpecs where spec.default == nil {
             let expected = spec.description ?? "value of type `\(spec.type)`"
             switch spec.type.lowercased() {
@@ -200,34 +216,21 @@ final class SandboxPluginTool: OsaurusTool, @unchecked Sendable {
         )
     }
 
-    // MARK: - Agent Resolution
-
-    private func resolveAgent() async -> (id: String, name: String) {
-        let agentId: String
-        if let ctxAgent = ChatExecutionContext.currentAgentId {
-            agentId = ctxAgent.uuidString
-        } else {
-            agentId = await MainActor.run { AgentManager.shared.activeAgent.id.uuidString }
-        }
-        let agentName = await MainActor.run { SandboxAgentProvisioner.linuxName(for: agentId) }
-        return (agentId, agentName)
-    }
-
     // MARK: - Environment
 
-    private func buildExecEnvironment(agentId: String, from args: [String: Any]) -> [String: String] {
-        var env: [String: String] = [:]
-
-        if let uuid = UUID(uuidString: agentId) {
-            env = AgentSecretsKeychain.mergedSecretsEnvironment(agentId: uuid, pluginId: plugin.id)
-        }
-
+    private func buildExecEnvironment(
+        secrets: [String: String],
+        from args: [String: Any],
+        specs: [String: SandboxParameterSpec]
+    ) -> [String: String] {
+        var env = secrets
         env["OSAURUS_PLUGIN"] = plugin.id
-        env.merge(buildParamVars(from: args)) { _, new in new }
+        env.merge(buildParamVars(from: args, specs: specs)) { _, new in new }
         return env
     }
 
-    private func buildParamVars(from args: [String: Any]) -> [String: String] {
+    func buildParamVars(from args: [String: Any], specs: [String: SandboxParameterSpec]? = nil) -> [String: String] {
+        let parameterSpecs = specs ?? self.parameterSpecs
         var env: [String: String] = [:]
         for (key, value) in args {
             let envKey = "PARAM_\(key.uppercased())"
@@ -237,7 +240,10 @@ final class SandboxPluginTool: OsaurusTool, @unchecked Sendable {
                 env[envKey] = num.stringValue
             } else if let bool = value as? Bool {
                 env[envKey] = bool ? "true" : "false"
-            } else if let data = try? JSONSerialization.data(withJSONObject: value, options: .osaurusCanonical),
+            } else if let data = try? JSONSerialization.data(
+                withJSONObject: value,
+                options: [.osaurusCanonical, .fragmentsAllowed]
+            ),
                 let str = String(data: data, encoding: .utf8)
             {
                 env[envKey] = str
@@ -335,8 +341,8 @@ final class SandboxPluginTool: OsaurusTool, @unchecked Sendable {
         exitCode: Int32
     ) -> String {
         let payload: [String: Any] = [
-            "stdout": truncateForModel(stdout),
-            "stderr": truncateForModel(stderr, maxChars: 10_000),
+            "stdout": sandboxTruncate(stdout),
+            "stderr": sandboxTruncate(stderr, maxChars: ToolOutputCaps.execStderr),
             "exit_code": Int(exitCode),
         ]
         if exitCode == 0 {

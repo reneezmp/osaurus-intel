@@ -42,16 +42,22 @@ public actor SandboxManager {
     public var stoppedExplicitly: Bool { _stoppedExplicitly }
     public var lastBootReadyAt: Date? { _lastBootReadyAt }
 
+    /// Background jobs (stage 4). The shared manager uses the process-wide
+    /// registry that the app-quit hook kills; test managers own a private one.
+    nonisolated let backgroundJobs: SandboxBackgroundJobs
+
     public init() {
         self.workspaceRootOverride = nil
         self.publishesState = true
+        self.backgroundJobs = SandboxBackgroundJobs.shared
     }
 
     /// Test seam: a manager rooted at a temp workspace that does not touch the
     /// shared `State` or the sandbox configuration file.
-    init(workspaceRoot: URL) {
+    init(workspaceRoot: URL, maxJobLifetime: TimeInterval = SandboxBackgroundJobs.defaultMaxLifetime) {
         self.workspaceRootOverride = workspaceRoot
         self.publishesState = false
+        self.backgroundJobs = SandboxBackgroundJobs(maxLifetime: maxJobLifetime)
     }
 
     private var workspaceURL: URL {
@@ -215,8 +221,9 @@ public actor SandboxManager {
 
     public func stopContainer() async throws {
         _stoppedExplicitly = true
-        // Nothing persistent to tear down: confinement is per exec, so
-        // stopping just gates future execs.
+        // Confinement is per exec, so stopping gates future execs; background
+        // jobs are the only long-lived processes and stop here too.
+        await backgroundJobs.stopEverything()
         _status = .stopped
         syncStatus()
     }
@@ -291,6 +298,56 @@ public actor SandboxManager {
                 stderrTee: stderrTee,
                 onProcessStarted: onProcessStarted
             ))
+    }
+
+    /// Start `command` as a background job under the same profile a
+    /// foreground exec would get (stage 4). The command's own output is
+    /// redirected to `logPath` (an in-sandbox path under the agent home)
+    /// by the confined shell itself. Returns the registered job; the caller
+    /// owns the stop policy (`backgroundJobs`).
+    func execBackground(
+        agentName: String,
+        command: String,
+        env: [String: String] = [:],
+        cwd: String? = nil,
+        networkEnabled: Bool = false,
+        logPath: String,
+        owner: String?
+    ) async throws -> SandboxBackgroundJobs.Job {
+        guard _status.isRunning else { throw SandboxError.containerNotRunning }
+        guard backgroundJobs.canStart(agentName: agentName) else {
+            throw SandboxError.execFailed(
+                "Too many background processes are running for this agent "
+                    + "(max \(SandboxBackgroundJobs.maxJobsPerAgent)). Stop one with `sandbox_process` first.")
+        }
+        let root = workspaceURL.path
+        let network = Self.effectiveNetworkPolicy(
+            agentNetworkEnabled: networkEnabled,
+            configNetwork: publishesState ? SandboxConfigurationStore.load().network : "none"
+        )
+        let profile = SeatbeltSandbox.profile(
+            workspaceRoot: root,
+            tempDir: SeatbeltSandbox.scratchDir,
+            network: network
+        )
+        let mappedCwd = cwd.map { SeatbeltPathMapper.mapToHost($0, workspaceRoot: root) }
+        // The redirect is part of the confined command, so it is limited by
+        // the same write rules (the app never opens the log itself).
+        let wrapped = "exec >'\(sandboxShellEscape(logPath))' 2>&1; set -o pipefail; \(command)"
+        log(.debug, "sandbox-exec [background] $ \(String(command.prefix(160)))")
+        let process = try await SeatbeltExecutor.launchBackground(
+            SeatbeltExecutor.Request(
+                command: SeatbeltPathMapper.mapToHost(wrapped, workspaceRoot: root),
+                env: SeatbeltPathMapper.mapEnvToHost(env, workspaceRoot: root),
+                cwd: mappedCwd ?? root,
+                timeout: nil,
+                profile: profile,
+                stdoutTee: nil,
+                stderrTee: nil,
+                onProcessStarted: nil
+            ))
+        return backgroundJobs.register(
+            agentName: agentName, process: process, logFile: logPath, command: command, owner: owner)
     }
 
     /// Both the per-agent switch and the shared config must allow the

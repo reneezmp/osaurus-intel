@@ -32,6 +32,33 @@ enum SandboxToolGate {
         return config
     }
 
+    /// Whether `agentId` may see and run the sandbox tool `toolName`. Beyond
+    /// the opt-in itself (stage 3), three tools have their own switch:
+    /// `sandbox_process` needs `backgroundProcessEnabled`,
+    /// `sandbox_plugin_register` needs `pluginCreate`, and a sandbox
+    /// plugin's tools reach only an agent that installed that plugin.
+    static func allows(_ toolName: String, agentId: UUID?) -> Bool {
+        guard let agentId, let config = config(for: agentId) else { return false }
+        switch toolName {
+        case BuiltinSandboxTools.process: return config.backgroundProcessEnabled
+        case BuiltinSandboxTools.pluginRegister: return config.pluginCreate
+        default:
+            if SandboxPluginManager.shared.isPluginTool(toolName) {
+                return SandboxPluginManager.shared.agentHasTool(toolName, agentId: agentId.uuidString)
+            }
+            return true
+        }
+    }
+
+    /// Called after an agent's settings change (editor, declarative config):
+    /// an agent that no longer has the sandbox, or no longer has Background
+    /// Processes, loses its running background jobs at once.
+    static func enforcePolicy(afterUpdating agentId: UUID) {
+        guard config(for: agentId)?.backgroundProcessEnabled != true else { return }
+        let name = SandboxToolRegistrar.hostAgentName(for: agentId.uuidString)
+        Task { await SandboxBackgroundJobs.shared.stopAll(agentName: name) }
+    }
+
     static func isOptedIn(_ agentId: UUID?) -> Bool {
         guard let agentId else { return false }
         return config(for: agentId) != nil
@@ -86,6 +113,9 @@ final class SandboxToolRegistrar: @unchecked Sendable {
     func registerTools(for agentId: UUID) async {
         guard SandboxToolGate.isOptedIn(agentId) else { return }
         await MainActor.run { BuiltinSandboxTools.register() }
+        // The agent's installed sandbox plugins (stage 4): their tools come
+        // back after a relaunch the first time the agent uses the sandbox.
+        SandboxPluginManager.shared.registerTools(for: agentId.uuidString)
         do {
             try await SandboxManager.shared.startContainer()
             try await SandboxManager.shared.bootstrapAgent(

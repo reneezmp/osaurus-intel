@@ -1288,7 +1288,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         "update_skill",
         // Sandbox tools run commands on this Mac: never from an external surface.
         "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_search_files",
-        "sandbox_secret_check", "sandbox_secret_set",
+        "sandbox_secret_check", "sandbox_secret_set", "sandbox_process", "sandbox_plugin_register",
     ]
 
     /// Tool classes the `/mcp/call` bridge (and later the HTTP agent loop)
@@ -1645,10 +1645,10 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     func openAISpecs(named names: [String]) -> [Tool] {
         // A loaded capability can never be a sandbox tool for an agent that
         // has not opted in (owner policy: the sandbox only ever restricts).
-        let sandboxAllowed = SandboxToolGate.isOptedIn(ChatExecutionContext.currentAgentId)
+        let currentAgent = ChatExecutionContext.currentAgentId
         return names.compactMap { name in
-            if isSandboxTool(name), !sandboxAllowed { return nil }
-            return toolsByName[name]?.asOpenAITool()
+            if isSandboxTool(name), !SandboxToolGate.allows(name, agentId: currentAgent) { return nil }
+            return toolsByName[name].map { sandboxAwareSpec($0, agentId: currentAgent) }
         }
     }
 
@@ -1656,8 +1656,19 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// `registerPluginTool` so the picker buckets them under their plugin.
     func isPluginTool(_ name: String) -> Bool { pluginToolGroups[name] != nil }
 
-    /// The built-in sandbox tool family (`sandbox_exec`, ...).
-    func isSandboxTool(_ name: String) -> Bool { BuiltinSandboxTools.allToolNames.contains(name) }
+    /// The sandbox tool family: the built-in `sandbox_*` tools and the tools of
+    /// sandbox plugins an agent installed (stage 4).
+    func isSandboxTool(_ name: String) -> Bool {
+        BuiltinSandboxTools.allToolNames.contains(name) || SandboxPluginManager.shared.isPluginTool(name)
+    }
+
+    /// The spec a given agent sees. `sandbox_exec` advertises its
+    /// `background` flag only to agents whose own switch is on.
+    func sandboxAwareSpec(_ tool: OsaurusTool, agentId: UUID?) -> Tool {
+        guard tool is SandboxExecTool else { return tool.asOpenAITool() }
+        let background = agentId.flatMap { SandboxToolGate.config(for: $0) }?.backgroundProcessEnabled == true
+        return SandboxExecTool(backgroundEnabled: background).asOpenAITool()
+    }
 
     /// The provider/plugin group a tool belongs to: MCP provider name for
     /// remote tools, the plugin display name for native plugin tools.
@@ -1743,10 +1754,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     func openAISpecs(for agentID: UUID? = nil) -> [Tool] {
         // Sandbox tools reach only the agent that opted in; every other
         // caller (no agent, Default agent, other agents) never sees them.
-        let sandboxAllowed = SandboxToolGate.isOptedIn(agentID)
         return toolsByName.values
             .filter { !Self.onDemandBuiltInToolNames.contains($0.name) }
-            .filter { sandboxAllowed || !isSandboxTool($0.name) }
+            .filter { !isSandboxTool($0.name) || SandboxToolGate.allows($0.name, agentId: agentID) }
             .filter {
                 Self.orchestratorOnlyToolNames.contains($0.name)
                     || !disabledToolNames.contains($0.name)
@@ -1756,7 +1766,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                     || agentID == Agent.defaultId
             }
             .sorted { $0.name < $1.name }
-            .map { $0.asOpenAITool() }
+            .map { sandboxAwareSpec($0, agentId: agentID) }
     }
 
     func execute(name: String, argumentsJSON: String) async throws -> String {
@@ -2094,7 +2104,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         // they never run, whichever surface calls.
         if isSandboxTool(name) {
             guard let agentId = ChatExecutionContext.currentAgentId,
-                SandboxToolGate.isOptedIn(agentId)
+                SandboxToolGate.allows(name, agentId: agentId)
             else {
                 return ToolEnvelope.failure(
                     kind: .unavailable,
@@ -2548,10 +2558,31 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         )
     }
 
-    /// Register/unregister sandbox plugin tools. Sandbox runtime is
-    /// amputated on Intel, so these are no-ops.
-    func registerSandboxPluginTools(plugin: SandboxPlugin) {}
-    func unregisterSandboxPluginTools(pluginId: String) {}
+    /// Register/unregister the tools of a sandbox plugin (W-seatbelt-sandbox
+    /// stage 4). A plugin can never replace a tool that is not a sandbox
+    /// plugin tool, so a plugin named `sandbox` with a tool `exec` cannot
+    /// shadow `sandbox_exec`. Visibility is per agent (`SandboxToolGate`).
+    func registerSandboxPluginTools(plugin: SandboxPlugin) {
+        for spec in plugin.tools ?? [] {
+            let name = "\(plugin.id)_\(spec.id)"
+            guard canRegisterSandboxPluginTool(named: name) else { continue }
+            register(SandboxPluginTool(spec: spec, plugin: plugin))
+        }
+    }
+
+    func unregisterSandboxPluginTools(pluginId: String) {
+        let names = toolsByName.compactMap { entry -> String? in
+            guard let tool = entry.value as? SandboxPluginTool, tool.plugin.id == pluginId else { return nil }
+            return entry.key
+        }
+        if !names.isEmpty { unregister(names: names) }
+    }
+
+    /// True when `name` is free or already a sandbox plugin tool.
+    func canRegisterSandboxPluginTool(named name: String) -> Bool {
+        guard let existing = toolsByName[name] else { return true }
+        return existing is SandboxPluginTool
+    }
 }
 
 // MARK: - MemoryService

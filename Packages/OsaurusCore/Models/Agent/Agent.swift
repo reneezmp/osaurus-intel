@@ -528,6 +528,9 @@ public struct AutonomousExecConfig: Codable, Sendable, Equatable {
     public var enabled: Bool
     public var maxCommandsPerTurn: Int
     public var commandTimeout: Int
+    /// Whether the agent may register its own sandbox plugins. Upstream
+    /// defaults this to `true`; Intel defaults it to `false` (the sandbox
+    /// only ever restricts: plugin creation is an explicit opt-in).
     public var pluginCreate: Bool
     /// Whether sandboxed commands may use the network. Upstream defaults this
     /// to `true`; Intel defaults it to `false` and only the user's explicit
@@ -542,7 +545,7 @@ public struct AutonomousExecConfig: Codable, Sendable, Equatable {
         enabled: false,
         maxCommandsPerTurn: 10,
         commandTimeout: 30,
-        pluginCreate: true,
+        pluginCreate: false,
         sandboxNetworkEnabled: false,
         backgroundProcessEnabled: false
     )
@@ -551,7 +554,7 @@ public struct AutonomousExecConfig: Codable, Sendable, Equatable {
         enabled: Bool = false,
         maxCommandsPerTurn: Int = 10,
         commandTimeout: Int = 30,
-        pluginCreate: Bool = true,
+        pluginCreate: Bool = false,
         sandboxNetworkEnabled: Bool = false,
         backgroundProcessEnabled: Bool = false
     ) {

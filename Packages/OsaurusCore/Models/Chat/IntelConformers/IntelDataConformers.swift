@@ -3259,6 +3259,11 @@ final class SystemPromptComposer: @unchecked Sendable {
                     resolvedNames.contains(BuiltinSandboxTools.secretCheck) ? IntelSandboxPrompt.secretHandling : "",
                     .orange
                 ),
+                (
+                    "pluginCreator", "Plugin Creator",
+                    resolvedNames.contains(BuiltinSandboxTools.pluginRegister) ? IntelSandboxPrompt.pluginCreator : "",
+                    .blue
+                ),
                 ("soul", "SOUL", IntelSandboxPrompt.soul(agentName: homeName), .purple),
             ]
             for (sectionId, label, text, tint) in parts where !text.isEmpty {

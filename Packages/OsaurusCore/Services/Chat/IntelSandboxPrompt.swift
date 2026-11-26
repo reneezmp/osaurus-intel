@@ -42,6 +42,11 @@ enum IntelSandboxPrompt {
                 "- Shell: `sandbox_exec` for a single command line; it asks the user for approval unless they set it to Auto. Multi-line scripts: `sandbox_write_file` the script, then run it (e.g. `python3 script.py`); never embed multi-line code in `python3 -c` / `node -e`."
             )
         }
+        if toolNames.contains(BuiltinSandboxTools.process) {
+            guide.append(
+                "- Background: `sandbox_exec` with `background:true` returns a `pid` and `log_file`; `sandbox_process` polls, waits or kills it. Background processes stay inside the sandbox and are stopped automatically when this run ends, so collect their results before you finish."
+            )
+        }
         return """
 
             \(heading)
@@ -57,6 +62,15 @@ enum IntelSandboxPrompt {
             - Run independent calls in parallel; chain dependent shell steps with `&&`.
             """
     }
+
+    /// Plugin authoring (upstream's `pluginCreator`, trimmed to what the host
+    /// backend supports: no `dependencies`, `daemon` or `events`).
+    static let pluginCreator = """
+
+        ## Sandbox plugins
+
+        You can package a reusable tool as a sandbox plugin. Write `plugins/<plugin_id>/plugin.json` (and any script files next to it) in your home, then call `sandbox_plugin_register` with the plugin id. `plugin.json` fields: `name`, `description`, optional `setup` (one shell command run once in the plugin folder, e.g. `pip install --target libs requests`; it needs network access, which may be off), optional `secrets` (names the user must add first), and `tools`: a list of `{ "id", "description", "parameters": { "<name>": { "type", "description", "default", "enum" } }, "run" }`. A tool's `run` is a shell command in the plugin folder; each parameter arrives as `$PARAM_<NAME>`. Tools are named `<plugin_id>_<tool id>`. Do not use `dependencies` (apk), `daemon` or `events`: they are not supported here. Plugin tools run in the same sandbox as `sandbox_exec`, with the same limits, and ask the user for approval.
+        """
 
     /// Mid-session state: the names of the secrets stored for this agent.
     /// Empty when there are none so the composer drops the section.

@@ -36,13 +36,15 @@ enum BuiltinSandboxTools {
     static let searchFiles = "sandbox_search_files"
     static let writeFile = "sandbox_write_file"
     static let exec = "sandbox_exec"
+    static let process = "sandbox_process"
+    static let pluginRegister = "sandbox_plugin_register"
     static let secretCheck = "sandbox_secret_check"
     static let secretSet = "sandbox_secret_set"
 
     /// Every tool this stage can register. `ToolRegistry.isSandboxTool` and
     /// the opt-in gates key off this fixed set.
     static let allToolNames: Set<String> = [
-        readFile, searchFiles, writeFile, exec, secretCheck, secretSet,
+        readFile, searchFiles, writeFile, exec, process, pluginRegister, secretCheck, secretSet,
     ]
 
     /// Register the process-wide tools (idempotent). Identity and settings
@@ -59,6 +61,8 @@ enum BuiltinSandboxTools {
             SandboxSearchFilesTool(),
             SandboxWriteFileTool(),
             SandboxExecTool(),
+            SandboxProcessTool(),
+            SandboxPluginRegisterTool(),
             SandboxSecretCheckTool(),
             // `sandbox_secret_set` stays unregistered: its prompt marker needs
             // the chat view to intercept it, and Intel's tool loop runs inside
@@ -761,6 +765,26 @@ struct SandboxWriteFileTool: OsaurusTool, PermissionedTool, @unchecked Sendable 
 
 struct SandboxExecTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
     let name = BuiltinSandboxTools.exec
+
+    /// Whether the `background` flag is advertised. The registered instance
+    /// advertises it; `ToolRegistry` swaps in a `backgroundEnabled: false`
+    /// copy for every agent whose own `backgroundProcessEnabled` is off, so
+    /// a background-off agent never sees an affordance it cannot use.
+    var backgroundEnabled: Bool = true
+
+    private var backgroundParagraph: String {
+        guard backgroundEnabled else { return "" }
+        return """
+
+
+            Background (`background:true`): returns a `pid` + `log_file` right away and keeps running inside \
+            the same sandbox; use `sandbox_process` to poll, wait or kill. At most \
+            \(SandboxBackgroundJobs.maxJobsPerAgent) at once. Background processes are stopped automatically \
+            when this run ends, when the sandbox stops, and when Osaurus quits, so use them only for work \
+            you will collect in this run. Do NOT shell-background yourself with `&` / `nohup` / `disown`.
+            """
+    }
+
     var description: String {
         """
         Run a shell command in the agent's sandbox (macOS, `/bin/sh`). Commands run on this Mac but confined: \
@@ -772,7 +796,7 @@ struct SandboxExecTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
         over many round-trips. Takes a single command LINE, passed verbatim. Multi-line scripts: \
         `sandbox_write_file` the script, then run it. Pass `timeout: <seconds>` for an idle ceiling \
         (killed after N silent seconds; default \(Self.defaultIdleTimeout)). Output is truncated at ~50KB \
-        (head + tail kept). The per-turn command count is capped, so chain inside one call.
+        (head + tail kept). The per-turn command count is capped, so chain inside one call.\(backgroundParagraph)
         """
     }
 
@@ -787,29 +811,34 @@ struct SandboxExecTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
     var bypassRegistryTimeout: Bool { true }
 
     var parameters: JSONValue? {
-        .object([
-            "type": .string("object"),
-            "additionalProperties": .bool(false),
-            "properties": .object([
-                "command": .object([
-                    "type": .string("string"),
-                    "description": .string("Shell command to run (single string, e.g. `wc -l src/*.swift`)."),
-                ]),
-                "cwd": .object([
-                    "type": .string("string"),
-                    "description": .string(
-                        "Working directory. Defaults to your home — OMIT unless you need a different "
-                            + "directory. Use a path relative to your home or absolute under it."),
-                ]),
-                "timeout": .object([
-                    "type": .string("integer"),
-                    "description": .string(
-                        "Idle timeout in seconds: the command is killed if it prints nothing for this long "
-                            + "(default \(Self.defaultIdleTimeout), max \(Self.maxIdleTimeout))."),
-                ]),
-            ]),
-            "required": .array([.string("command")]),
+        var timeoutText =
+            "Idle timeout in seconds: the command is killed if it prints nothing for this long "
+            + "(default \(Self.defaultIdleTimeout), max \(Self.maxIdleTimeout))."
+        if backgroundEnabled { timeoutText += " Ignored when `background:true`." }
+        let cwdText =
+            "Working directory. Defaults to your home — OMIT unless you need a different "
+            + "directory. Use a path relative to your home or absolute under it."
+        var properties: [String: JSONValue] = [:]
+        properties["command"] = .object([
+            "type": .string("string"),
+            "description": .string("Shell command to run (single string, e.g. `wc -l src/*.swift`)."),
         ])
+        properties["cwd"] = .object(["type": .string("string"), "description": .string(cwdText)])
+        properties["timeout"] = .object(["type": .string("integer"), "description": .string(timeoutText)])
+        if backgroundEnabled {
+            properties["background"] = .object([
+                "type": .string("boolean"),
+                "description": .string(
+                    "Start the command and return its `pid` and `log_file` immediately "
+                        + "(servers, watchers). Pair with `sandbox_process`."),
+            ])
+        }
+        var schema: [String: JSONValue] = [:]
+        schema["type"] = .string("object")
+        schema["additionalProperties"] = .bool(false)
+        schema["properties"] = .object(properties)
+        schema["required"] = .array([.string("command")])
+        return .object(schema)
     }
 
     func execute(argumentsJSON: String) async throws -> String {
@@ -842,9 +871,26 @@ struct SandboxExecTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
         }
         let idle = TimeInterval(
             min(max(coerceInt(args["timeout"]) ?? Self.defaultIdleTimeout, 1), Self.maxIdleTimeout))
+        let background = coerceBool(args["background"]) ?? false
+        // Defense in depth: the schema strip is advisory, so a model that
+        // passes `background:true` anyway when the agent has not opted in
+        // gets a clear refusal instead of a detached process.
+        if background, !context.config.backgroundProcessEnabled {
+            return ToolEnvelope.failure(
+                kind: .rejected,
+                message:
+                    "Background execution is disabled for this agent. Run the command in the foreground "
+                    + "(omit `background`), or ask the user to turn on Background Processes in the agent's "
+                    + "sandbox settings.",
+                tool: name, retryable: false)
+        }
         if let notReady = await context.ensureReady(tool: name) { return notReady }
 
         let secrets = SandboxExecSecrets.values(for: context.agentId)
+        if background {
+            return await startBackground(
+                command: command, cwd: cwd, context: context, secrets: secrets)
+        }
         let kill = SandboxProcessKill()
         let result: ContainerExecResult
         do {
@@ -886,6 +932,41 @@ struct SandboxExecTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
                 "cwd": cwd,
             ],
             warnings: warnings.isEmpty ? nil : warnings)
+    }
+
+    /// `background:true`: launch under the same profile (network only if the
+    /// agent's own switch is on), return the pid and the log path.
+    private func startBackground(
+        command: String,
+        cwd: String,
+        context: SandboxToolContext,
+        secrets: [String: String]
+    ) async -> String {
+        let logFile = "\(context.home)/bg-\(UUID().uuidString.prefix(8).lowercased()).log"
+        do {
+            let job = try await SandboxToolContext.manager.execBackground(
+                agentName: context.agentName,
+                command: command,
+                env: secrets,
+                cwd: cwd,
+                networkEnabled: context.config.sandboxNetworkEnabled,
+                logPath: logFile,
+                owner: ChatExecutionContext.currentSessionId
+            )
+            var warnings = [
+                "This background process is stopped automatically when this run ends, when the sandbox stops, and when Osaurus quits."
+            ]
+            if !context.config.sandboxNetworkEnabled {
+                warnings.append("Network access is off for this agent, so the process cannot reach the internet.")
+            }
+            return sandboxSuccess(
+                tool: name,
+                result: ["pid": job.pid, "log_file": logFile, "cwd": cwd, "background": true],
+                warnings: warnings)
+        } catch {
+            return sandboxExecutionFailure(
+                tool: name, message: "Background command failed to start: \(error.localizedDescription)")
+        }
     }
 
     static func looksLikeNetworkFailure(_ stderr: String) -> Bool {

@@ -597,6 +597,9 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         reload()
         bumpCapabilityRevision()
         NotificationCenter.default.post(name: .agentUpdated, object: agent.id)
+        // W-seatbelt-sandbox stage 4: switching the sandbox or Background
+        // Processes off stops the agent's running background jobs.
+        SandboxToolGate.enforcePolicy(afterUpdating: agent.id)
         // Opt-in description backfill (no-op unless the Settings switch is on).
         let id = agent.id
         Task { @MainActor in AgentDescriptionBackfill.shared.scheduleIfNeeded(id) }
