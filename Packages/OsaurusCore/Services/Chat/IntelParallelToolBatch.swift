@@ -131,18 +131,34 @@ extension AgentToolLoop {
             groups.append([index])
         }
 
+        // Two or more foreground `spawn_agent` calls in one message are one
+        // fan-out wave (upstream): one approval card and one fan-out limit
+        // check in `SpawnWaveGate`, while each call keeps its own digest.
+        let spawnWave = SpawnWaveContext.make(for: calls)
+        if let spawnWave {
+            await SpawnWaveGate.shared.open(spawnWave)
+        }
+        defer {
+            if let spawnWave {
+                let waveId = spawnWave.waveId
+                Task { await SpawnWaveGate.shared.close(waveId: waveId) }
+            }
+        }
+
         let indexed: [(Int, IntelBatchExecution)] = await ChatExecutionContext.$currentBatchId.withValue(UUID()) {
-            await withTaskGroup(of: [(Int, IntelBatchExecution)].self) { group in
-                for slotGroup in groups {
-                    group.addTask {
-                        var results: [(Int, IntelBatchExecution)] = []
-                        for index in slotGroup { results.append((index, await executeOne(calls[index]))) }
-                        return results
+            await ChatExecutionContext.$spawnWave.withValue(spawnWave) {
+                await withTaskGroup(of: [(Int, IntelBatchExecution)].self) { group in
+                    for slotGroup in groups {
+                        group.addTask {
+                            var results: [(Int, IntelBatchExecution)] = []
+                            for index in slotGroup { results.append((index, await executeOne(calls[index]))) }
+                            return results
+                        }
                     }
+                    var collected: [(Int, IntelBatchExecution)] = []
+                    for await items in group { collected.append(contentsOf: items) }
+                    return collected
                 }
-                var collected: [(Int, IntelBatchExecution)] = []
-                for await items in group { collected.append(contentsOf: items) }
-                return collected
             }
         }
         return indexed.sorted { $0.0 < $1.0 }.map { $0.1 }

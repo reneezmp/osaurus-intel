@@ -2,7 +2,7 @@
 //  SpawnAgentTool.swift
 //  osaurus
 //
-//  `spawn_agent(input, agent, continue?)` — delegate a task to a
+//  `spawn_agent(input, agent, continue?, background?)` — delegate a task to a
 //  user-configured agent (its system prompt, model, tools, folder). The
 //  worker runs as a real chat session of the target agent and returns only a
 //  compact digest plus its `session_id`; `continue` reattaches to that
@@ -10,8 +10,9 @@
 //
 //  Ported from upstream Classic (W-subagents stage 3). Intel differences:
 //   • local agents only (shared workspace agents are deferred);
-//   • no `background` parameter yet (the report-back path is stage 6);
-//   • no first-run setup refusal yet (stage 4);
+//   • `background: true` (stage 6) detaches the run after the same inline
+//     validation and permission; the result comes back as a follow-up turn
+//     (`SubagentReportBack`) unless the user stopped the worker;
 //   • the tool owns its approval (`handlesOwnApproval`): the kind's permission
 //     gate (`SpawnPermissionGate`, Gate 4 Ask / Deny / Always Allow) is the
 //     only consent surface, so the registry never stacks a second card or
@@ -24,8 +25,8 @@ final class SpawnAgentTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
     let name = SubagentCapabilityRegistry.spawnAgentToolName
     let description =
         "Delegate a task to an agent using its tools and working folder (inherits yours if it has none). "
-        + "Returns a summary and `session_id`. Follow up or answer `NEEDS INPUT:` with `continue` set to "
-        + "`session_id`."
+        + "Returns a summary and `session_id`. For independent tasks, emit all the spawn_agent calls in one message. "
+        + "Follow up or answer `NEEDS INPUT:` with `continue` set to `session_id`."
 
     let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -114,6 +115,11 @@ final class SpawnAgentTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
     }
 
     func execute(argumentsJSON: String) async throws -> String {
+        // Sibling spawn calls in one model message rendezvous for a single
+        // approval card (`SpawnWaveGate`). Whatever path this call takes out
+        // (validation failure, denial, completion) it must stop counting as
+        // pending.
+        defer { SpawnWaveGate.settleCurrentCall() }
         // A delegated child is never a spawner (defense in depth: the composer
         // already strips this tool from `.delegation` sessions and the engine
         // refuses unoffered tools).

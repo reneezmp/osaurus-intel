@@ -3,8 +3,9 @@
 //  OsaurusCore
 //
 //  One permission owner for `spawn_agent`. Ported from upstream Classic
-//  (W-subagents stage 3), without the sibling-wave rendezvous (`SpawnWaveGate`,
-//  stage 6): every call raises its own card, which is stricter, never looser.
+//  (W-subagents stages 3 and 6). Sibling `spawn_agent` calls of one model
+//  message (a wave) rendezvous in `SpawnWaveGate` for ONE card and one
+//  fan-out limit check; a call outside a wave raises its own card.
 //
 //  Intel's permission is the MORE RESTRICTIVE of:
 //   • the launcher's own spawn policy (a custom launcher's
@@ -52,6 +53,15 @@ enum SpawnPermissionGate {
         for scope: SubagentScope,
         pairScope: OrchestratorDelegationPermissionScope?
     ) async -> SubagentPermissionPolicy {
+        await effectivePolicy(for: scope, pairScopes: pairScope.map { [$0] } ?? [])
+    }
+
+    /// Same, for a wave card that covers several Gate 4 pairs: the strictest
+    /// of the launcher's own policy and every pair wins.
+    static func effectivePolicy(
+        for scope: SubagentScope,
+        pairScopes: [OrchestratorDelegationPermissionScope]
+    ) async -> SubagentPermissionPolicy {
         let config = SubagentConfigurationStore.snapshot()
         let isDefault = scope.agentId == Agent.defaultId
         let settings = await MainActor.run {
@@ -61,11 +71,12 @@ enum SpawnPermissionGate {
             capabilityId: SubagentCapabilityRegistry.spawn.id,
             isDefault: isDefault, config: config, settings: settings)
         var policies: [SubagentPermissionPolicy] = [isDefault ? .alwaysAllow : stored]
-        if let pairScope {
-            let pair = await MainActor.run {
-                DefaultAgentConfigurationStore.load().delegation.permission(for: pairScope)
+        if !pairScopes.isEmpty {
+            let delegation = await MainActor.run { DefaultAgentConfigurationStore.load().delegation }
+            for pairScope in pairScopes {
+                policies.append(
+                    TextSubagentKind.combine(launcher: .alwaysAllow, pair: delegation.permission(for: pairScope)))
             }
-            policies.append(TextSubagentKind.combine(launcher: .alwaysAllow, pair: pair))
         }
         return combinedPolicy(policies)
     }
@@ -77,8 +88,42 @@ enum SpawnPermissionGate {
         toolName: String,
         description: String,
         argumentsJSON: String,
-        pairScope: OrchestratorDelegationPermissionScope? = nil
+        pairScope: OrchestratorDelegationPermissionScope? = nil,
+        waveMember: SpawnWaveGate.Member? = nil,
+        pairScopes explicitPairScopes: [OrchestratorDelegationPermissionScope]? = nil
     ) async -> SubagentDecision {
+        let pairScopes = explicitPairScopes ?? pairScope.map { [$0] } ?? []
+        if case .deny = policy {
+            return .denied("Spawning is denied by this agent's permission settings.")
+        }
+
+        // Sibling wave (upstream): one approval and one fan-out limit check
+        // for the whole set. Always Allow still joins, so the limit applies
+        // to the wave instead of letting N unprompted calls each pass alone.
+        if let waveMember,
+            let wave = ChatExecutionContext.spawnWave,
+            wave.expectedCallIds.contains(waveMember.callId)
+        {
+            let limits = await MainActor.run {
+                SpawnFanOutPolicy.effectiveFanOutLimits(scope: scope)
+            }
+            let rendezvous = OwnedSubagentOperation<SubagentDecision?> {
+                await SpawnWaveGate.shared.join(waveMember, wave: wave, limits: limits)
+            }
+            do {
+                if let decision = try await rendezvous.value(cancellationRequested: { Task.isCancelled }) {
+                    return decision
+                }
+            } catch {
+                return .userDenied("Spawn permission was cancelled.")
+            }
+            if Task.isCancelled {
+                return .userDenied("Spawn permission was cancelled.")
+            }
+            // Not a member after all (late arrival): fall through to this
+            // call's own card with the policy as it stands now.
+        }
+
         switch policy {
         case .deny:
             return .denied("Spawning is denied by this agent's permission settings.")
@@ -106,7 +151,7 @@ enum SpawnPermissionGate {
         // changed the policy meanwhile, settle silently instead of asking the
         // same question twice.
         let revalidate: @Sendable () async -> ToolPermissionPromptService.PolicyApprovalOutcome? = {
-            Self.silentResolution(for: await effectivePolicy(for: scope, pairScope: pairScope))
+            Self.silentResolution(for: await effectivePolicy(for: scope, pairScopes: pairScopes))
         }
         let operation = OwnedSubagentOperation<PromptChoice> {
             if let promptOverride {
@@ -142,10 +187,10 @@ enum SpawnPermissionGate {
         case .alwaysAllow:
             // A sibling card may already have persisted Always Allow; writing
             // it again would advance the permission twice.
-            if await effectivePolicy(for: scope, pairScope: pairScope) == .alwaysAllow {
+            if await effectivePolicy(for: scope, pairScopes: pairScopes) == .alwaysAllow {
                 return .allow
             }
-            let persisted = await persistAlwaysAllow(launchingAgentId: scope.agentId, pairScope: pairScope)
+            let persisted = await persistAlwaysAllow(launchingAgentId: scope.agentId, pairScopes: pairScopes)
             if !persisted {
                 // The current click still grants this run.
                 print("[Osaurus] Could not persist spawn Always Allow for agent \(scope.agentId.uuidString)")
@@ -184,6 +229,14 @@ enum SpawnPermissionGate {
         launchingAgentId: UUID,
         pairScope: OrchestratorDelegationPermissionScope?
     ) async -> Bool {
+        await persistAlwaysAllow(launchingAgentId: launchingAgentId, pairScopes: pairScope.map { [$0] } ?? [])
+    }
+
+    @discardableResult
+    static func persistAlwaysAllow(
+        launchingAgentId: UUID,
+        pairScopes: [OrchestratorDelegationPermissionScope]
+    ) async -> Bool {
         await MainActor.run {
             var persisted = true
             if launchingAgentId != Agent.defaultId {
@@ -195,9 +248,11 @@ enum SpawnPermissionGate {
                     persisted = false
                 }
             }
-            if let pairScope {
+            if !pairScopes.isEmpty {
                 var configuration = DefaultAgentConfigurationStore.load()
-                configuration.delegation.setPermission(.alwaysAllow, for: pairScope)
+                for pairScope in pairScopes {
+                    configuration.delegation.setPermission(.alwaysAllow, for: pairScope)
+                }
                 AgentManager.shared.updateDefaultAgentConfiguration(configuration)
             }
             return persisted

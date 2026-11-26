@@ -210,13 +210,25 @@ final class TextSubagentKind: SubagentKind, @unchecked Sendable {
     // MARK: Permission
 
     func permission(_ scope: SubagentScope, _ resolved: ResolvedModel) async -> SubagentDecision {
-        await SpawnPermissionGate.authorize(
+        let argumentsJSON = approvalArgumentsJSON(resolvedModel: resolved.name)
+        return await SpawnPermissionGate.authorize(
             scope: scope,
             policy: resolvedPermission,
             toolName: toolName,
             description: permissionDescription(model: resolved.name),
-            argumentsJSON: approvalArgumentsJSON(resolvedModel: resolved.name),
-            pairScope: resolvedScope
+            argumentsJSON: argumentsJSON,
+            pairScope: resolvedScope,
+            // Sibling `spawn_agent` calls of one model message share one
+            // card and one fan-out check (`SpawnWaveGate`); a lone call is
+            // not a member and keeps its own card.
+            waveMember: SpawnWaveGate.Member(
+                callId: scope.toolCallId,
+                toolName: toolName,
+                scope: scope,
+                argumentsJSON: argumentsJSON,
+                isLocal: false,
+                pairScope: resolvedScope
+            )
         )
     }
 
@@ -361,9 +373,11 @@ final class TextSubagentKind: SubagentKind, @unchecked Sendable {
         guard let targetAgentId = resolvedAgentId, let contract = delegatedContract else {
             throw SubagentError.unavailable("Agent target was not resolved before delegation.")
         }
-        // Upstream's fan-out limit is per wave; without the wave gate
-        // (stage 6) the same limit is a hard per-launcher cap on delegated
-        // runs in flight. Never raised: extra calls get a retryable refusal.
+        // Upstream's fan-out limit is per wave (`SpawnWaveGate`). Intel also
+        // keeps it as a hard per-launcher cap on delegated runs in flight, so
+        // background workers launched in different turns cannot pile up past
+        // it on a 2-core Mac. Never raised: extra calls get a retryable
+        // refusal.
         let limit = budgets.normalized.maxRemoteParallelSpawns
         guard let lease = SpawnConcurrencyGuard.shared.acquire(launcher: scope.agentId, limit: limit) else {
             throw SubagentError.executionFailed(
@@ -487,8 +501,8 @@ final class TextSubagentKind: SubagentKind, @unchecked Sendable {
 }
 
 /// Process-wide cap on delegated runs in flight per launching agent
-/// (`maxRemoteParallelSpawns`, upstream's default, never raised). Stands in
-/// for upstream's wave limit until `SpawnWaveGate` lands (stage 6).
+/// (`maxRemoteParallelSpawns`, upstream's default, never raised). Backs up
+/// `SpawnWaveGate`'s per-wave limit across turns and background workers.
 final class SpawnConcurrencyGuard: @unchecked Sendable {
     static let shared = SpawnConcurrencyGuard()
     struct Lease: Sendable, Equatable {
