@@ -3674,3 +3674,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Mistral: replies with images or structured content show normally.
 - [ ] A local model that writes tool calls inline in its text (for example some Qwen or Hermes builds on LM Studio or llama.cpp): the call runs as a tool call instead of appearing as raw text.
 - [ ] Setting reasoning effort to None on a model that supports it gives a fast reply with no thinking block, and no provider error.
+
+## Provider slices 8–9: Gemini, gateways and images (2026-11-26)
+
+`W-cov-reaudit` 5d (`COV_REAUDIT_STAGE5D_PROVIDER.md` rows 27, 29–32). Not in candidate 69.
+
+- [ ] Gemini with a low Max Tokens: a long answer stops with the "output limit" handling, not a silent cut.
+- [ ] A Gemini image model (for example an "image" variant): asking for a picture returns an image in the chat.
+- [ ] Router model with vision: attach a large photo (over 4 MB or wider than 2048 px) and ask about it: it answers. A Router model without vision says it can't see images instead of failing.
+- [ ] Any cloud model: a large screenshot attachment still works (it is resized before sending).
+- [ ] OpenCode (if used): chats keep their context across turns.

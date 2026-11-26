@@ -215,11 +215,10 @@ mdat and live-folder checks).
   reasoning echo, inline tool calls, `none` effort; all need a live check.
 - **Subagents stage 5** (2026-11-25, UI): delegation settings, Delegations
   list, run-log replay; Activity mirrors already covered. Combined suite 6,085.
-- **Paused 2026-11-25 (usage limit):** provider slices 8–9 were still running in
-  worktree `agent-ab20cd64bf11ccd0f` (branch `worktree-agent-ab20cd64bf11ccd0f`,
-  report `port_5d_slice89.md` in the session scratchpad); review, rebase and run
-  the combined suite before merging. Next: 5d slice 10, subagents stage 6, then
-  the big Classic items.
+- **Provider slices 8–9** (5d rows 27, 29–32, merged 2026-11-26): Gemini
+  `MAX_TOKENS` and image models, OpenCode session header, Router media shape,
+  send-time image sizing. Full suite 6,097 with the documented
+  `BackgroundTaskAgentGroupClose` split (plus that suite alone, 3 of 3).
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
