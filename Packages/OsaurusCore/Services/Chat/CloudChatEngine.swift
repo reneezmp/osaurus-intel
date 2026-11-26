@@ -2616,9 +2616,6 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         // a remote dispatch) is refused instead of shown a card nobody
                                         // there can answer. The owner's paired phone can: its run falls
                                         // through to the card, which `GET /approvals` relays to it.
-                                        // Intel (owner policy): an unattended schedule or
-                                        // watcher run is refused too, before the auto-allow
-                                        // switch, so it never approves on its own.
                                         if ChatExecutionContext.approvalCardUnanswerable {
                                             approved = false
                                             break
@@ -2630,6 +2627,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                                 call.name, argumentsJSON: call.arguments))
                                         {
                                             approved = true
+                                            break
+                                        }
+                                        // Owner policy: no auto-allow, so an unattended run has no one to ask.
+                                        if ChatExecutionContext.isUnattendedDispatch {
+                                            approved = false
                                             break
                                         }
                                         let description = activeTools?.first(where: { $0.function.name == call.name })?.function.description ?? ""
@@ -3355,7 +3357,6 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     // a remote dispatch) is refused instead of shown a card nobody
                                     // there can answer. The owner's paired phone can: its run falls
                                     // through to the card, which `GET /approvals` relays to it.
-                                    // Intel (owner policy): unattended runs are refused too.
                                     if ChatExecutionContext.approvalCardUnanswerable {
                                         approved = false
                                         break
@@ -3367,6 +3368,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                             call.name, argumentsJSON: call.arguments))
                                     {
                                         approved = true
+                                        break
+                                    }
+                                    // Owner policy: no auto-allow, so an unattended run has no one to ask.
+                                    if ChatExecutionContext.isUnattendedDispatch {
+                                        approved = false
                                         break
                                     }
                                     // Real upstream permission card (ToolPermissionView via

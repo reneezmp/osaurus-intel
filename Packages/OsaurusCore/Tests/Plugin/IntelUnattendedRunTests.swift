@@ -44,25 +44,36 @@ struct IntelUnattendedRunTests {
         #expect(!BackgroundTaskManager.resolvedUnattendedDispatch(for: request(.delegation)))
     }
 
-    @Test func unattendedRunCannotAnswerAnApprovalCard() {
+    /// Upstream order: no-UI callers are refused first, then the user's global
+    /// auto-allow, then the card. An unattended run is NOT in the first group
+    /// (so auto-allow still applies, as upstream); the engine refuses it only
+    /// after auto-allow, where a card would have been shown.
+    @Test func unattendedRunStillHonoursAutoAllowButNeverReachesACard() {
         #expect(!ChatExecutionContext.approvalCardUnanswerable)
         let unattended = ChatExecutionContext.$isUnattendedDispatch.withValue(true) {
             ChatExecutionContext.approvalCardUnanswerable
         }
-        #expect(unattended)
-        // The owner's phone answers external runs; it never makes a schedule attended.
-        let phoneSchedule = ChatExecutionContext.$isUnattendedDispatch.withValue(true) {
-            ChatExecutionContext.$hasRemoteReviewer.withValue(true) {
-                ChatExecutionContext.approvalCardUnanswerable
-            }
+        #expect(!unattended)
+        let external = ChatExecutionContext.$isExternalSurface.withValue(true) {
+            ChatExecutionContext.approvalCardUnanswerable
         }
-        #expect(phoneSchedule)
+        #expect(external)
         let phoneExternal = ChatExecutionContext.$isExternalSurface.withValue(true) {
             ChatExecutionContext.$hasRemoteReviewer.withValue(true) {
                 ChatExecutionContext.approvalCardUnanswerable
             }
         }
         #expect(!phoneExternal)
+    }
+
+    /// The service backstop refuses a card for an unattended run: the test
+    /// process is headless (already denied), so check the source wiring.
+    @Test func promptServiceRefusesUnattendedRunsBeforeQueueing() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Services/ToolPermissionPromptService.swift")
+        let source = try String(contentsOf: url, encoding: .utf8)
+        #expect(source.components(separatedBy: "if ChatExecutionContext.isUnattendedDispatch { return .denied }").count == 3)
     }
 
     @Test func refusalTextNamesTheUnattendedRun() {
