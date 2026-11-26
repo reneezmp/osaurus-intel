@@ -239,6 +239,8 @@ mdat and live-folder checks).
   episodes and vectors on disk, #2355), 13 need other W-items.
 - **Seatbelt sandbox stage 3** (2026-11-26): sandbox tools for opted-in
   agents only, network off by default (stricter than upstream).
+- **Stage 6 batches C–D** (2026-11-26): plugin Update all, peer-call toast,
+  cached tokens in API usage, picker hover.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

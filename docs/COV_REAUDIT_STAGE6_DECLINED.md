@@ -201,6 +201,8 @@ A few rows in the MLX group were checked individually because they looked portab
 1. **Batch A, agent data (M):** `85d531362` (#2355): wipe an agent's chats, pinned facts, episodes and vector index on delete, plus the Delete all data card. Needs Rosy (data deletion).
 2. **Batch B, agent and tool correctness (S x4):** `605f862a3` (#2647 duplicate-agent capability copy), `9d7d0712d` (#2625 fetch-name steering and `search_and_extract` exposure, fix Skill.swift text), `1b8ae239d` (#2632 wire `dynamicToolClassifier` on four surfaces), `64f54a670` (#2505 delete persisted `disableTools`).
 3. **Batch C, plugins and peers (S x4):** `063ac5fd6` (#1949 update all), `389a816e0` (#1880 search), `d5aea7fdf` (#1838 plugin load after server bind), `661eaeaca` (#1676 PeerCallNotifier).
+**Batches C and D merged 2026-11-26:** #3212 (cached tokens through Intel's usage hint to streamed and non-streamed chat and the Anthropic response), #2837 (picker hover and re-measure; Intel's picker has no heart), #1775 (`AgentsView` sizes), #1949 (Update all banner through the signed installer, one click by the user), #1676 (`PeerCallNotifier`, local toast only); #1880 and #1838 Covered (substring-only plugin search; plugins already load after `server.start`).
+
 4. **Batch D, small UI and API (S x3):** `dc6a9013c` (#2837 picker hover), `7ff316c3f` (#3212 streaming `cached_tokens`), `94921b451` (#1775 cosmetic).
 
 Open W-items these rows feed, none new: `W-seatbelt-sandbox` stages 3-5 (6 commits), `W-computer-use` (3), `W-media-generation` image/video subagent kinds (2), `W-privacy-filter` (2).

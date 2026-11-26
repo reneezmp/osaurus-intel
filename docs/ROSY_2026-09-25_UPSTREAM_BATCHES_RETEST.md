@@ -3726,3 +3726,12 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Opt one agent in: ask it to run `ls` in its sandbox: an approval card appears, then the result. Ask it to write a file there: a card again.
 - [ ] Ask the opted-in agent to read a file outside its sandbox (for example your Documents folder): it's refused.
 - [ ] Ask it to `curl` a website: it fails (network off). Nothing else in the app changes.
+
+## Stage 6 batches C–D: plugins, peers, small fixes (2026-11-26)
+
+`COV_REAUDIT_STAGE6_DECLINED.md`. Not in candidate 69.
+
+- [ ] With two or more plugins outdated, Plugins shows an "Update all" banner; clicking it updates them one after another through the signed installer, and nothing updates without the click.
+- [ ] When the paired iPhone calls an agent, the Mac shows a small toast.
+- [ ] Model picker: hovering rows highlights them, including the bottom rows.
+- [ ] Local API `/v1/chat/completions` with `stream_options.include_usage` reports `cached_tokens` for a provider that caches (for example a repeated long prompt on OpenAI or Anthropic).
