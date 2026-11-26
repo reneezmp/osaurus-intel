@@ -232,6 +232,8 @@ mdat and live-folder checks).
 - **Seatbelt sandbox stage 1** (2026-11-26): core only, not wired in
   (`W_SEATBELT_SANDBOX_PLAN.md`).
 - **Seatbelt sandbox stage 2** (2026-11-26): runtime manager, still unwired.
+- **Background runs stage 3** (2026-11-26): unattended runs refuse Ask
+  prompts without a card, honouring the global auto-allow as upstream.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

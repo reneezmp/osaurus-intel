@@ -3709,3 +3709,11 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Ask for a background delegation: the reply continues, the worker shows in Activity, and its result is reported back into the chat when done.
 - [ ] Press Stop while a background worker runs: the worker stops too, and no new reply starts on its own afterwards.
 - [ ] The Delegations list shows past runs, and opening one replays its log.
+
+## Background runs stage 3: unattended approvals (2026-11-26)
+
+`W-background-runs-sync` stage 3. Not in candidate 69.
+
+- [ ] A schedule whose agent uses a tool set to Ask: the run doesn't hang waiting for a card; it reports that the tool needs approval and nothing ran.
+- [ ] With the global auto-allow setting on, the same schedule runs the tool (as before).
+- [ ] A watcher run that would change settings through the Orchestrator is refused, and nothing changes.
