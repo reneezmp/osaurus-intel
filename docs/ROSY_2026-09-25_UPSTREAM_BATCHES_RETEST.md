@@ -3764,3 +3764,14 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] Ask it to type a password into a password field, or to click Allow on a system dialog: it refuses (hard stop), with no card.
 - [ ] Press Stop mid-run: it stops after the current step.
 - [ ] A scheduled task that asks for Computer Use is refused.
+
+## Local server: browser requests refused (2026-11-26)
+
+Owner decision 1 (`UPSTREAM_SYNC.md`). Not in candidate 69. The local server must be running; use the port shown in Settings.
+
+- [ ] `curl -s localhost:<port>/sessions` lists chats (a local tool without an Origin still works).
+- [ ] `curl -s -H 'Origin: https://example.com' localhost:<port>/sessions` answers 403, and so do `/agents` and `/mcp/tools`.
+- [ ] `curl -s -H 'Host: evil.example' localhost:<port>/sessions` answers 403.
+- [ ] Settings shows "Require an access key for local apps", off. Turn it on: `curl localhost:<port>/sessions` without a key is refused; turn it off again.
+- [ ] The paired iPhone still lists and opens chats.
+- [ ] Press Stop on a background delegation: its result still arrives in the chat afterwards (as upstream).

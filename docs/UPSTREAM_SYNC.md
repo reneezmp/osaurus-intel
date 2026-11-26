@@ -269,6 +269,17 @@ mdat and live-folder checks).
 - **Computer Use stage 4** (2026-11-26): first stage that can act on the
   screen, behind the per-agent switch (default off, no UI yet), attended chats
   only, hard stops and per-action confirm. Combined suite 6,841.
+- **Owner decisions 1 and 3 done** (2026-11-26): unlisted browser Origins,
+  cross-site fetches and non-loopback `Host` refused on `/sessions`,
+  `/agents`, `/mcp/*`, `/runs/*`, `/tasks/*`, approvals and prompts,
+  `/memory/ingest`, whatever the local-key switch says; CORS never `*` there;
+  Settings row "Require an access key for local apps" (default off). Stopped
+  background subagent workers report back like upstream. Combined suite 6,848.
+- **Harness stage 4a is NOT merged** (branch `worktree-agent-a80f9307657960243`,
+  commits `f41da36cc`, `77073cf0f`, `18136aae1`, only a filtered run): it
+  removes the `claude-code/*` models, so it must ship together with stage 5
+  (runtime picker). 4b (the `/mcp/*` agent-token gate, `/agents/{id}/run` and
+  `SpawnDescriptors` refusals) is left too.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
