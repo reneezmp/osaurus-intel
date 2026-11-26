@@ -427,6 +427,32 @@ final class ChatSession: ObservableObject {
 
     private var currentTask: Task<Void, Never>?
     private var activeRunId: UUID?
+    /// Tool-call ids of the `background: true` spawn workers the CURRENT run
+    /// launched (upstream). They run in unstructured tasks, so cancelling
+    /// `currentTask` cannot reach them; `stop()` trips their interrupt tokens
+    /// (the same path as the Activity row's Stop) so a user Stop on the
+    /// launching turn does not leave orphaned workers. Cleared when the run
+    /// ends normally: workers then outlive the turn by design and report back
+    /// later.
+    private var backgroundSpawnCallIdsThisRun: [String] = []
+
+    /// True when a host-authored follow-up (a background helper's report) can
+    /// be sent now: no run, no stream, no pending clarify. `send` silently
+    /// drops a message while a run is still winding down.
+    var isIdleForHostSend: Bool {
+        activeRunId == nil && !isStreaming && awaitingClarify == nil
+    }
+
+    /// Trip the interrupt token of every `background: true` worker the current
+    /// run launched (`SubagentSession.dispatchInBackground` registers one per
+    /// tool call id). Idempotent; the list is cleared either way.
+    private func interruptBackgroundSpawnsOfCurrentRun() {
+        let callIds = backgroundSpawnCallIdsThisRun
+        backgroundSpawnCallIdsThisRun.removeAll()
+        for callId in callIds {
+            _ = SubagentInterruptCenter.shared.interrupt(callId)
+        }
+    }
     private var activeRunContext: RunContext?
     /// Set to true at the start of `stop()` so `completeRunCleanup` knows the
     /// run was cancelled by the user (or by `sendNowInterrupting`) and must
@@ -1761,6 +1787,9 @@ final class ChatSession: ObservableObject {
         let hadActiveSend = isStreaming || activeRunId != nil || currentTask != nil
         stopRequested = true
         pendingWorkingFolderContinuation = false
+        // Background workers this run launched sit outside the task tree:
+        // stop them explicitly before the run's own cancellation.
+        interruptBackgroundSpawnsOfCurrentRun()
         let task = currentTask
         task?.cancel()
         if let runId = activeRunId {
@@ -2726,6 +2755,10 @@ final class ChatSession: ObservableObject {
         /// the orchestrating agent's instructions never write the user's
         /// identity into the target agent's memory.
         let memorySource: SessionSource
+        /// True for a helper report the host sent as the user turn
+        /// (`SubagentReportBack`): host text, not the user's words, so it is
+        /// not buffered into memory.
+        var userContentIsHostAuthored = false
     }
 
     private func isRunActive(_ runId: UUID) -> Bool {
@@ -2871,6 +2904,10 @@ final class ChatSession: ObservableObject {
     private func completeRunCleanup() {
         currentTask = nil
         isStreaming = false
+        // The run ended; background workers it launched now outlive it on
+        // purpose (they report back later) and stop only from Activity
+        // (upstream, W-subagents stage 6).
+        backgroundSpawnCallIdsThisRun.removeAll()
         budgetTracker.clear()
         ServerController.signalGenerationEnd()
         // Finalize ledger outcomes before trimming so the classification sees
@@ -3129,7 +3166,7 @@ final class ChatSession: ObservableObject {
             }
         }
 
-        if (!memoryOff || context.projectId != nil), context.hasContent {
+        if (!memoryOff || context.projectId != nil), context.hasContent, !context.userContentIsHostAuthored {
             let formatter = Self.sessionDateFormatter
             formatter.timeZone = .current
             let today = formatter.string(from: Date())
@@ -3252,6 +3289,14 @@ final class ChatSession: ObservableObject {
                     // Duration spans detect → result (upstream #1259).
                     currentTurn.markToolCallStarted(done.callId)
                     currentTurn.setToolResult(done.result, for: done.callId)
+                    // A background worker outlives this tool call in an
+                    // unstructured task; remember it so a Stop on THIS run
+                    // can reach it (`stop()`).
+                    if done.name == SubagentCapabilityRegistry.spawnAgentToolName,
+                        SubagentSession.isBackgroundAck(done.result)
+                    {
+                        backgroundSpawnCallIdsThisRun.append(done.callId)
+                    }
                     let toolTurn = ChatTurn(role: .tool, content: done.result)
                     toolTurn.toolCallId = done.callId
                     let newAssistantTurn = ChatTurn(role: .assistant, content: "")
@@ -3289,6 +3334,12 @@ final class ChatSession: ObservableObject {
                 }
                 // Upstream `emitToolRejectionText`: a refused tool call ended the
                 // run; close the turn visibly instead of leaving a blank bubble.
+                // Upstream `recordTerminalToolRejection`: keep the typed refusal
+                // for a delegated parent (`DelegatedToolFailureState`).
+                if let envelope = StreamingRunEndHint.decodeToolRejectionEnvelope(delta) {
+                    delegatedToolFailure.record(envelope, runID: runId)
+                    continue
+                }
                 if let rejectionText = StreamingRunEndHint.decodeToolRejected(delta) {
                     await processor.finalize()
                     currentTurn.pendingToolName = nil
@@ -3444,7 +3495,7 @@ final class ChatSession: ObservableObject {
         return (capturedInvocations, currentTurn)
     }
 
-    func send(_ text: String, attachments: [Attachment] = []) {
+    func send(_ text: String, attachments: [Attachment] = [], hostAuthored: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasContent = !trimmed.isEmpty || !attachments.isEmpty
         let isRegeneration = !hasContent && !turns.isEmpty
@@ -3543,7 +3594,8 @@ final class ChatSession: ObservableObject {
                 memoryAgentId: memoryAgentId,
                 memoryConversationId: memoryConversationId,
                 projectId: projectId,
-                memorySource: source
+                memorySource: source,
+                userContentIsHostAuthored: hasContent && hostAuthored
             )
         )
 
@@ -3672,7 +3724,12 @@ final class ChatSession: ObservableObject {
                 // Upstream #2918: an attended, folder-less chat offers
                 // `prompt_working_folder` and hands the tool this session.
                 let offersFolderPrompt = canPromptForWorkingFolder
-                let folderPromptBox: WeakChatSessionBox? = offersFolderPrompt ? WeakChatSessionBox(self) : nil
+                // Always bound (upstream binds it for the whole turn): a
+                // `background: true` spawn delivers its report to this exact
+                // conversation, and an apply that grows the spawn pool stages
+                // the spawn tool into it. `prompt_working_folder` is still
+                // only OFFERED to an attended, folder-less chat.
+                let folderPromptBox: WeakChatSessionBox? = WeakChatSessionBox(self)
                 // One todo scope per run (upstream): `todo` tells progress
                 // from assertion, `complete` checks only this run's list.
                 let todoRunScope = AgentTodoRunScope()

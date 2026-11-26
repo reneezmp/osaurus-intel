@@ -49,6 +49,10 @@ final class SpawnAgentTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
                         + "that same worker."
                 ),
             ]),
+            "background": .object([
+                "type": .string("boolean"),
+                "description": .string(SpawnInputContract.backgroundParameterDescription),
+            ]),
         ]),
         "required": .array([.string("input")]),
     ])
@@ -248,6 +252,9 @@ final class SpawnAgentTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
             input: input,
             continueSessionId: continueSessionId
         )
+        if ArgumentCoercion.bool(args["background"]) == true {
+            return await SubagentSession.dispatchInBackground(kind, tool: name)
+        }
         return await SubagentSession.runWithVisiblePreparation(kind, tool: name)
     }
 

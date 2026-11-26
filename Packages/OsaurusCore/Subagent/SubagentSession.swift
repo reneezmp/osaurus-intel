@@ -211,9 +211,10 @@ public enum SubagentSession {
         }
     }
 
-    // Intel (docs/SUBAGENTS_INTEL.md): background spawn dispatch and its
-    // report-back (`SubagentReportBack`) come with the spawn kind.
-    #if !OSAURUS_INTEL
+    // Intel (W-subagents stage 6): upstream's background dispatch, with two
+    // owner-policy differences: a run the user stopped is not reported back
+    // (a Stop must never start a new paid parent turn), and every Intel
+    // worker is remote, so the local-model start gate never applies.
     /// `background: true` spawn dispatch. Validation, model resolution, and
     /// the permission verdict all run INLINE — a bad target or a denial
     /// fails this tool call immediately, exactly like the synchronous path.
@@ -304,6 +305,10 @@ public enum SubagentSession {
                 success = false
                 summary = "Helper run ended without a result."
             }
+            // Stopped by the user (the card's Stop, the Activity row's Stop,
+            // or a Stop on the launching turn): the Activity row keeps the
+            // record; no follow-up turn is started.
+            guard !interrupt.isInterrupted else { return }
             await SubagentReportBack.deliver(
                 title: title,
                 success: success,
@@ -315,7 +320,6 @@ public enum SubagentSession {
 
         return backgroundAck(tool: tool, helper: title, sessionId: kind.plannedSessionId)
     }
-    #endif
 
     /// The acknowledgment a `background: true` spawn returns. Carries the
     /// worker's `session_id` when the kind knows it ahead of the run (a

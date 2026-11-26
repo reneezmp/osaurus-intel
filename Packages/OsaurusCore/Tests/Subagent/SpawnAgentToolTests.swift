@@ -18,13 +18,13 @@ struct SpawnAgentToolTests {
 
     // MARK: Schema
 
-    @Test func schemaMatchesUpstreamsMinusBackground() throws {
+    @Test func schemaMatchesUpstreams() throws {
         let tool = SpawnAgentTool()
         #expect(tool.name == "spawn_agent")
         guard case .object(let root)? = tool.parameters,
             case .object(let properties)? = root["properties"]
         else { Issue.record("no schema"); return }
-        #expect(Set(properties.keys) == ["input", "agent", "continue"])
+        #expect(Set(properties.keys) == ["input", "agent", "continue", "background"])
         #expect(root["additionalProperties"] == .bool(false))
         #expect(root["required"] == .array([.string("input")]))
         #expect(tool.handlesOwnApproval)
@@ -242,8 +242,8 @@ struct SpawnAgentToolTests {
         #expect(text.contains("`continue` set to the `session_id`"))
         #expect(text.contains("NEEDS INPUT:"))
         #expect(text.contains("untrusted routing metadata"))
-        // No background mechanics until stage 6.
-        #expect(!text.contains("background: true"))
+        // Background mechanics arrived with stage 6.
+        #expect(text.contains("`background: true` returns immediately"))
     }
 
     @Test func orchestratorGuidanceIsRosterAndLimitsOnly() {

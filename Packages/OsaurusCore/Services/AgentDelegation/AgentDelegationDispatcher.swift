@@ -622,7 +622,10 @@ enum AgentDelegationDispatcher {
                 )
             case .none:
                 // Cancelled from outside this dispatcher (Activity Stop on the
-                // child task itself, app shutdown).
+                // child task itself, app shutdown). Intel: mark the run as
+                // stopped by the user so a background spawn does not start a
+                // new, paid parent turn to report it (`dispatchInBackground`).
+                interrupt.interrupt()
                 throw SubagentError.userDenied(
                     "Delegated run for '\(targetAgentName)' was stopped."
                 )
