@@ -266,6 +266,9 @@ mdat and live-folder checks).
   4. Cut Rosy build 70 after Computer Use stage 4 and privacy filter stage 1.
 - **Privacy filter stages 1–2** (2026-11-26): rules only (ML detectors need
   Apple Silicon), not wired in yet (`W_PRIVACY_FILTER_PLAN.md`).
+- **Computer Use stage 4** (2026-11-26): first stage that can act on the
+  screen, behind the per-agent switch (default off, no UI yet), attended chats
+  only, hard stops and per-action confirm. Combined suite 6,841.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

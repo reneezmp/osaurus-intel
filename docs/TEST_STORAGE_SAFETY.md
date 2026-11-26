@@ -605,6 +605,6 @@ as Swift Testing (`import Testing`).
 fail with `TextRecognition.CRImageReaderError` code 1 on plain `intel-fork`,
 though they passed earlier the same day: the build Mac's text recognition
 refuses the x86_64 test process at times. Not a code regression; rerun later
-or on Rosy. Follow-up: gate these tests on Vision being usable rather than
+or on Rosy. (Later the same day the full suite passed again, Vision included.) Follow-up: gate these tests on Vision being usable rather than
 failing.
 

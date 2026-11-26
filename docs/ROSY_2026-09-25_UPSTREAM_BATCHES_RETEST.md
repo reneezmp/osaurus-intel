@@ -3754,3 +3754,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] With it on, ask the agent to start a long-running command in the background, then press Stop: the command ends too. Quit the app: no leftover process (Activity Monitor).
 - [ ] Turning on sandbox network or plugin creation through the Orchestrator shows as high risk in the review window.
 - [ ] Delete that agent: its sandbox plugins and background jobs are gone.
+
+## Computer Use stage 4 (2026-11-26)
+
+`W-computer-use` stage 4. Not in candidate 69. **Optional and careful:** it can act on the real screen. No UI switch yet; enabling needs the Orchestrator (declarative config) and approval. Use a throwaway agent and close sensitive apps first.
+
+- [ ] Without enabling it, no agent offers `computer_use`.
+- [ ] Enable it for one throwaway agent (Accessibility must already be granted in System Settings): ask it to open TextEdit and type "hello". Each action shows a confirm card; declining stops it.
+- [ ] Ask it to type a password into a password field, or to click Allow on a system dialog: it refuses (hard stop), with no card.
+- [ ] Press Stop mid-run: it stops after the current step.
+- [ ] A scheduled task that asks for Computer Use is refused.
