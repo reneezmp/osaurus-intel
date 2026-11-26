@@ -244,6 +244,8 @@ mdat and live-folder checks).
 - **Stage 6 batches A–B** (2026-11-26): deleting an agent now deletes its
   chats and memory (as upstream, the alert says so), Delete all data card,
   duplicate copies tool settings, global Disable Tools switch retired.
+- **Computer Use stages 1–2** (2026-11-26): model, gate, hard stops,
+  perception types; nothing acts on the screen yet (`W_COMPUTER_USE_PLAN.md`).
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

@@ -590,3 +590,9 @@ Merge rule: gate on the summary line `Test run with … passed`, never on any
 "passed after" line (individual tests print that too; a failed run was merged
 once because of it, harmlessly).
 
+**XCTest suites don't run under the gate (2026-11-26).** The gate passes
+`--disable-xctest`, so a test file using `import XCTest` compiles but never
+runs. Two remain: `Tests/Chat/InsightsImageRedactionTests.swift` and
+`Tests/ComputerUse/Feed/ComputerUsePromptQueueTests.swift` (11 tests). Port new
+tests as Swift Testing (`import Testing`), and convert those two.
+
