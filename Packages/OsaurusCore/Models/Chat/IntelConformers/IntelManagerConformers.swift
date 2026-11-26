@@ -625,6 +625,49 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         update(agent)
     }
 
+    /// The copy "Duplicate" saves (upstream #2647 `duplicateRecord`; on Intel the
+    /// UI called an inline `Agent(...)` that dropped capability configuration, so
+    /// a MANUAL agent's copy came back AUTO with every tool and default grants).
+    /// Capability configuration is part of what duplicate means. Intel's names for
+    /// the tool/memory switches are `disableTools` / `disableMemory`. Not copied:
+    /// identity (id, address, index), order, working folder bookmark, custom
+    /// avatar file, Bonjour flag.
+    static func duplicateRecord(from agent: Agent, name: String, now: Date = Date()) -> Agent {
+        Agent(
+            id: UUID(),
+            name: name,
+            description: agent.description,
+            systemPrompt: agent.systemPrompt,
+            themeId: agent.themeId,
+            defaultModel: agent.defaultModel,
+            temperature: agent.temperature,
+            maxTokens: agent.maxTokens,
+            generationSettings: agent.generationSettings,
+            chatQuickActions: agent.chatQuickActions,
+            chatGreeting: agent.chatGreeting,
+            chatSubtitle: agent.chatSubtitle,
+            isBuiltIn: false,
+            createdAt: now,
+            updatedAt: now,
+            autonomousExec: agent.autonomousExec,
+            claudeCode: agent.claudeCode,
+            runtime: agent.runtime,
+            pluginInstructions: agent.pluginInstructions,
+            toolSelectionMode: agent.toolSelectionMode,
+            manualToolNames: agent.manualToolNames,
+            disableTools: agent.disableTools,
+            disableMemory: agent.disableMemory,
+            avatar: agent.avatar,
+            autoSpeak: agent.autoSpeak,
+            ttsVoice: agent.ttsVoice,
+            settings: agent.settings,
+            sourceTemplateName: agent.sourceTemplateName,
+            sourceTemplateID: agent.sourceTemplateID,
+            generatedDescription: agent.generatedDescription,
+            generatedDescriptionPromptHash: agent.generatedDescriptionPromptHash
+        )
+    }
+
     func delete(id: UUID) async -> AgentDeleteResult {
         // The Default agent is mandatory and cannot be deleted (matches
         // upstream). Return `deleted: false` so the UI keeps the card.

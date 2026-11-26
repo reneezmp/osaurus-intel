@@ -425,25 +425,7 @@ struct AgentsView: View {
             newName = "\(agent.name) Copy \(counter)"
         }
 
-        let duplicated = Agent(
-            id: UUID(),
-            name: newName,
-            description: agent.description,
-            systemPrompt: agent.systemPrompt,
-            themeId: agent.themeId,
-            defaultModel: agent.defaultModel,
-            temperature: agent.temperature,
-            maxTokens: agent.maxTokens,
-            generationSettings: agent.generationSettings,
-            chatQuickActions: agent.chatQuickActions,
-            chatGreeting: agent.chatGreeting,
-            chatSubtitle: agent.chatSubtitle,
-            isBuiltIn: false,
-            createdAt: Date(),
-            updatedAt: Date(),
-            sourceTemplateName: agent.sourceTemplateName,
-            sourceTemplateID: agent.sourceTemplateID
-        )
+        let duplicated = AgentManager.duplicateRecord(from: agent, name: newName)
 
         // Intel: `AgentStore` is a no-op stub here, so saving through it made
         // Duplicate report success while nothing was written. Persist
