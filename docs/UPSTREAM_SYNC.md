@@ -237,6 +237,8 @@ mdat and live-folder checks).
 - **Stage 6 audit** (`COV_REAUDIT_STAGE6_DECLINED.md`): 12 old declined
   commits now port (top: deleting an agent leaves its chats, pinned facts,
   episodes and vectors on disk, #2355), 13 need other W-items.
+- **Seatbelt sandbox stage 3** (2026-11-26): sandbox tools for opted-in
+  agents only, network off by default (stricter than upstream).
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

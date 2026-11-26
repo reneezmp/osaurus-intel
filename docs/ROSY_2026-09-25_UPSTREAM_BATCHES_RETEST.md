@@ -3717,3 +3717,12 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] A schedule whose agent uses a tool set to Ask: the run doesn't hang waiting for a card; it reports that the tool needs approval and nothing ran.
 - [ ] With the global auto-allow setting on, the same schedule runs the tool (as before).
 - [ ] A watcher run that would change settings through the Orchestrator is refused, and nothing changes.
+
+## Seatbelt sandbox tools (2026-11-26)
+
+`W-seatbelt-sandbox` stage 3. Not in candidate 69. No UI switch yet: opting an agent in needs declarative config (`autonomous_exec`) through the Orchestrator, approved in the review window.
+
+- [ ] An agent that has NOT opted in has no `sandbox_*` tools (ask it to list its tools).
+- [ ] Opt one agent in: ask it to run `ls` in its sandbox: an approval card appears, then the result. Ask it to write a file there: a card again.
+- [ ] Ask the opted-in agent to read a file outside its sandbox (for example your Documents folder): it's refused.
+- [ ] Ask it to `curl` a website: it fails (network off). Nothing else in the app changes.
