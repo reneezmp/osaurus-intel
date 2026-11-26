@@ -126,4 +126,37 @@ struct SettingsSearchIndexTests {
         let temp = try #require(SettingsSearchIndex.entries.first { $0.id == "settings.chat.temperature" })
         #expect(temp.breadcrumbPath == "Conversation › Advanced › Temperature")
     }
+
+    /// Views carry landing anchors from upstream; an anchor without an index
+    /// entry is a control that search cannot find (W-settings-ux-2950, stage 1:
+    /// Mobile, Browser Use, Identity, Web Search and Voice had several).
+    @Test("Every landing anchor in the views has a search entry")
+    func everyAnchorHasEntry() throws {
+        // Page-level anchors that the tab-level entries already cover.
+        let coveredByTab: Set<String> = ["themes.appearance", "voice.models"]
+        let regex = try NSRegularExpression(
+            pattern: #"(?:settingsLandingAnchor\(|anchorId: )"([^"]+)""#)
+        let ids = Set(SettingsSearchIndex.entries.map(\.id))
+        let enumerator = FileManager.default.enumerator(at: Self.viewsRoot, includingPropertiesForKeys: nil)
+        var missing: [String] = []
+        while let url = enumerator?.nextObject() as? URL {
+            guard url.pathExtension == "swift", let text = try? String(contentsOf: url, encoding: .utf8)
+            else { continue }
+            for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                guard let r = Range(match.range(at: 1), in: text) else { continue }
+                let id = String(text[r])
+                if !ids.contains(id), !coveredByTab.contains(id) { missing.append(id) }
+            }
+        }
+        #expect(missing.isEmpty, "anchors without a search entry: \(Set(missing).sorted())")
+    }
+
+    @Test("Mobile, Browser Use and Web Search controls are findable")
+    func previouslyMissingTabsAreSearchable() {
+        #expect(SettingsSearchIndex.search("pairing code").first?.tab == .connect)
+        #expect(SettingsSearchIndex.search("reach from anywhere").first?.id == "settings.connect.reachAnywhere")
+        #expect(SettingsSearchIndex.search("browser sessions").contains { $0.id == "browser.sessions" })
+        #expect(SettingsSearchIndex.search("codex").contains { $0.id == "server.codexCLI" })
+        #expect(SettingsSearchIndex.search("speaking rate").contains { $0.id == "voice.tts.rate" })
+    }
 }

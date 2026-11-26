@@ -375,6 +375,81 @@ public enum SettingsSearchIndex {
             keywords: ["accessibility", "screen recording", "calendar", "contacts", "microphone", "tcc"],
             disambiguation: "macOS system permissions for Osaurus."),
 
+        // Controls whose views already carry upstream's landing anchors
+        // (`settingsLandingAnchor`) but had no entry, so search could not find
+        // them (W-settings-ux-2950 stage 1). Ids and keywords follow upstream
+        // #2950-era entries; titles are the strings Intel's views show.
+        // MARK: Mobile (Osaurus Connect)
+        .init(
+            id: "settings.connect.pairing", tab: .connect, section: "Pair an iPhone",
+            title: "Generate Pairing Code",
+            keywords: [
+                "iphone", "ios", "ipad", "mobile", "phone", "pair", "pairing code", "6 digit",
+                "iosaurus", "remote", "osaurus connect",
+            ]),
+        .init(
+            id: "settings.connect.pairedDevice", tab: .connect, section: "Paired iPhone",
+            title: "Paired iPhone",
+            keywords: ["unpair", "revoke phone", "paired device", "remove iphone", "mobile access"]),
+        .init(
+            id: "settings.connect.reachAnywhere", tab: .connect, section: "Availability",
+            title: "Reach From Anywhere",
+            keywords: ["relay", "remote access", "away from home", "cellular", "tunnel", "outside network"]),
+        .init(
+            id: "settings.connect.keepAwake", tab: .connect, section: "Availability",
+            title: "Keep Mac Awake for Paired iPhone",
+            keywords: ["sleep", "awake", "reachable", "phone", "remote", "idle sleep"]),
+        .init(
+            id: "settings.connect.continuePhoneChats", tab: .connect, section: "On This Mac",
+            title: "Continue Phone Chats on This Mac",
+            keywords: [
+                "handoff", "continue", "resume", "iphone", "phone", "bring to front", "focus", "come back",
+                "return", "unlock",
+            ]),
+        // MARK: Browser Use
+        .init(
+            id: "browser.enable", tab: .browser, title: "Turn it on",
+            keywords: [
+                "browser", "web", "browse", "browser use", "per agent", "enable browser", "session", "sign in",
+                "login", "cookies", "webkit",
+            ]),
+        .init(
+            id: "browser.sessions", tab: .browser, title: "Sessions",
+            keywords: ["browser sessions", "profiles", "signed in", "reset browser", "browsing data"]),
+        // MARK: Identity, Web Search, Server, Voice extras
+        .init(
+            id: "identity.osaurusId", tab: .identity, title: "Osaurus ID",
+            keywords: ["osaurus id", "handle", "username", "profile", "display name", "bio", "claim", "public name"]),
+        .init(
+            id: "search.providers", tab: .search, section: "Web Search", title: "Built-in Sources",
+            keywords: [
+                "search providers", "web search", "search engine", "tavily", "exa", "brave", "serper", "kagi",
+                "duckduckgo", "bing", "api key", "internet",
+            ]),
+        .init(
+            id: "search.tryIt", tab: .search, section: "Web Search", title: "Try it",
+            keywords: ["test search", "test query", "search playground", "try search"]),
+        .init(
+            id: "search.routing", tab: .search, section: "Advanced", title: "Category preferences",
+            keywords: ["fallback", "ranking", "routing", "news", "images", "priority", "provider order"]),
+        .init(
+            id: "server.codexCLI", tab: .server, title: "Use with Codex CLI",
+            keywords: ["codex", "openai codex", "config.toml", "codex home", "cli", "add to codex"]),
+        .init(
+            id: "voice.stt.model", tab: .voice, section: "Setup", title: "Speech Recognition",
+            keywords: ["transcription model", "speech model", "apple speech", "dictation", "requirement"],
+            subTab: "Setup"),
+        .init(
+            id: "voice.stt.confirmation", tab: .voice, section: "Transcription", title: "Confirmation Delay",
+            keywords: ["confirmation", "cancel window", "delay before send"], subTab: "Transcription"),
+        .init(
+            id: "voice.stt.silence", tab: .voice, section: "Transcription", title: "Silence Timeout",
+            keywords: ["silence", "timeout", "close voice input", "inactivity"], subTab: "Transcription"),
+        .init(
+            id: "voice.tts.rate", tab: .voice, section: "Text to Speech", title: "Speed",
+            keywords: ["speaking rate", "speech rate", "faster", "slower", "tts speed", "read aloud"],
+            subTab: "Text To Speech"),
+
         // MARK: Models and agents
         .init(
             id: "providers.overview", tab: .providers, title: "Cloud Models",
