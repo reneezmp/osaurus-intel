@@ -3735,3 +3735,13 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 - [ ] When the paired iPhone calls an agent, the Mac shows a small toast.
 - [ ] Model picker: hovering rows highlights them, including the bottom rows.
 - [ ] Local API `/v1/chat/completions` with `stream_options.include_usage` reports `cached_tokens` for a provider that caches (for example a repeated long prompt on OpenAI or Anthropic).
+
+## Stage 6 batches A–B: agent data and tool fixes (2026-11-26)
+
+`COV_REAUDIT_STAGE6_DECLINED.md`. Not in candidate 69. **Use a throwaway agent:** these delete data.
+
+- [ ] Make a test agent, chat with it, pin a fact. Its General tab has a "Delete all data" card: run it; its chats and pinned facts are gone, and other agents' chats and facts are untouched.
+- [ ] Delete another throwaway agent: the confirmation says its chats and memory will be deleted too, and afterwards they're gone. Other agents are untouched.
+- [ ] Duplicate an agent with manual tools chosen: the copy has the same tool selection.
+- [ ] Settings no longer has a global "Disable Tools" switch; if it was on before, tools work again.
+- [ ] Ask a model to "web_fetch" a page: it uses `search_and_extract` instead of failing on an unknown tool.

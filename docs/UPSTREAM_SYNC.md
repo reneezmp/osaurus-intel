@@ -241,6 +241,9 @@ mdat and live-folder checks).
   agents only, network off by default (stricter than upstream).
 - **Stage 6 batches C–D** (2026-11-26): plugin Update all, peer-call toast,
   cached tokens in API usage, picker hover.
+- **Stage 6 batches A–B** (2026-11-26): deleting an agent now deletes its
+  chats and memory (as upstream, the alert says so), Delete all data card,
+  duplicate copies tool settings, global Disable Tools switch retired.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
