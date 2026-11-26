@@ -4891,6 +4891,36 @@ Sparkle key `bYYJJqFx…`. Not launched on the build Mac (macOS 27.2 beta
 26B5086k). The public release needs build 67 or higher. Rosy steps: "Release
 candidate 1.0.62 (build 66)" in the Rosy retest checklist.
 
+### Rosy candidate 1.0.62 (build 70) — 2026-11-26
+
+Built from `d87400b4a` with `scripts/build/build_rosy.sh` (Debug, thin x86_64,
+macOS 13.0 minimum). Everything since build 69 (`2710e77fc`): stage 5d
+complete (provider slices 5–10), subagents stages 3–6 (`spawn_agent`, UI,
+waves, background spawn), stage 6 declined-verdict ports (batches A–D, incl.
+agent delete-all-data), settings search entries, harness runtimes stages 1–3
+(not wired), Seatbelt sandbox stages 1–5, background runs stage 3
+(unattended approvals), Computer Use stages 1–4 (off by default, no UI),
+privacy filter stages 1–2 (rules only, not wired), owner decisions 1 and 3
+(browser origins refused on local routes, Settings row; stopped workers report
+back). Combined suite 6,848 passed on the final code tree. Archive
+`build/rosy-deploy/Osaurus-Intel-RC-1.0.62-70-2026-11-26.zip` in the main
+checkout (100,777,071 bytes, SHA-256 `78865dfe…b4a9e8e8`); strict codesign
+before and after unpacking, 6 framework symlinks kept, canonical `~/.osaurus`,
+Sparkle key matches `App/osaurus/Info.plist`. Not launched on Ventura. Build 69
+was never tested; this replaces it. Rosy steps: every checklist section marked
+"Not in candidate 69" plus the build 69 ones (2026-11-18, 2026-11-19), most
+important first: Provider slice 3 (Codex GPT-5.6 Lite), Provider slice 1
+(Router billing), Local server browser refusal, Stage 6 batches A–B (agent
+data deletion, throwaway agents only).
+
+**Stopped 2026-11-26 (break).** Held back, not in this build: harness runtimes
+stage 4a (branch `worktree-agent-a80f9307657960243`, worktree kept; filtered
+run only; must ship with stage 5's runtime picker because it removes the
+`claude-code/*` models). Next: harness 4b–6, Computer Use stages 5–6, privacy
+filter stages 3–6, the small leftovers (#2647 items 3/5/6,
+`sandbox_secret_set`, Apple app groups, Document Builder, CLI in Rosy builds,
+media subagent kinds), then goal 2 (1.x by pick). Next build number > 70.
+
 ### Rosy candidate 1.0.62 (build 69) — 2026-11-19
 
 Built from `2710e77fc` with `scripts/build/build_rosy.sh` (Debug, thin x86_64,

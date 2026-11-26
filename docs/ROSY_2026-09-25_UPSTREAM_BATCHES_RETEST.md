@@ -13,7 +13,16 @@ nothing here is accepted until checked on Rosy.
 
 ## Candidate
 
-- **Current: `1.0.62` build `69`** (Debug, thin x86_64), built from
+- **Current: `1.0.62` build `70`** (Debug, thin x86_64), built from
+  `d87400b4a` on 2026-11-26: archive
+  `build/rosy-deploy/Osaurus-Intel-RC-1.0.62-70-2026-11-26.zip`, SHA-256
+  `78865dfe953d0f1f5afe848f87143b46797e9a807df768f023f8df5bb4a9e8e8`. It
+  contains every section marked "Not in candidate 69" and the build 69 ones
+  (never tested). Start with "Provider slice 3" (Codex GPT-5.6 Lite),
+  "Provider slice 1" (Router billing), "Local server: browser requests
+  refused", then the rest. Details: `UPSTREAM_SYNC.md`, "Rosy candidate 1.0.62
+  (build 70)".
+- Previous, never tested: `1.0.62` build `69` (Debug, thin x86_64), built from
   `2710e77fc` on 2026-11-19: archive
   `build/rosy-deploy/Osaurus-Intel-RC-1.0.62-69-2026-11-19.zip`, SHA-256
   `b9af67f15f6406ac0302444e4fe415da0042c284c24a45d4a4ac2d3b270fb2e8`. It
