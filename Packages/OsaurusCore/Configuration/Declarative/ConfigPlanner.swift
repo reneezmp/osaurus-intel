@@ -308,6 +308,11 @@ enum ConfigPlanner {
                     issues.append(
                         "agents[\(entry.name)].sandbox.max_commands_per_turn: must be in 1...500.")
                 }
+                if let domains = entry.sandbox?.allowedDomains, !domains.isEmpty {
+                    issues.append(
+                        "agents[\(entry.name)].sandbox.allowed_domains: not supported on this Mac. "
+                            + "The macOS sandbox cannot filter by domain; use `network_enabled` (all or nothing).")
+                }
                 if let apps = entry.capabilities?.appleApps {
                     for raw in apps where AppleApp.parse(raw) == nil {
                         issues.append(
@@ -1093,8 +1098,14 @@ enum ConfigPlanner {
             let effectiveOn = AgentManager.shared.effectiveAutonomousExec(for: agent.id)?.enabled ?? false
             diff("sandbox.enabled", desired: sandbox.enabled, current: effectiveOn, into: &changes)
             diff(
+                "sandbox.network_enabled", desired: sandbox.networkEnabled,
+                current: exec.sandboxNetworkEnabled, into: &changes)
+            diff(
                 "sandbox.max_commands_per_turn", desired: sandbox.maxCommandsPerTurn,
                 current: exec.maxCommandsPerTurn, into: &changes)
+            diff(
+                "sandbox.background_process_enabled", desired: sandbox.backgroundProcessEnabled,
+                current: exec.backgroundProcessEnabled, into: &changes)
             diff("sandbox.plugin_create", desired: sandbox.pluginCreate, current: exec.pluginCreate, into: &changes)
         }
         if let subagents = entry.subagents {
@@ -1138,6 +1149,27 @@ enum ConfigPlanner {
         if !turnOff.isEmpty { changes.append("\(key).disabled: -\(turnOff.joined(separator: ", "))") }
     }
 
+    /// High-risk flags for the sandbox switches a document turns ON (not
+    /// already on). `current` is the agent's effective config, or the Intel
+    /// default (everything off) for a new agent.
+    static func sandboxRisks(
+        _ agent: String, _ section: AgentSandboxEntry?, current: AutonomousExecConfig, currentlyEnabled: Bool
+    ) -> [String] {
+        guard let section else { return [] }
+        var risks: [String] = []
+        if section.enabled == true, !currentlyEnabled { risks.append(ConfigRisk.sandboxEnabled(agent)) }
+        if section.networkEnabled == true, !current.sandboxNetworkEnabled {
+            risks.append(ConfigRisk.sandboxNetwork(agent))
+        }
+        if section.backgroundProcessEnabled == true, !current.backgroundProcessEnabled {
+            risks.append(ConfigRisk.sandboxBackground(agent))
+        }
+        if section.pluginCreate == true, !current.pluginCreate {
+            risks.append(ConfigRisk.sandboxPluginCreate(agent))
+        }
+        return risks
+    }
+
     /// Create-time summary of the portable keys, so the approval card shows
     /// what the new agent will be able to reach.
     private static func summarizePortableSettings(_ entry: AgentEntry, into changes: inout [String]) {
@@ -1156,6 +1188,11 @@ enum ConfigPlanner {
         }
         if let sandbox = entry.sandbox, let on = sandbox.enabled {
             changes.append("sandbox: \(on ? "on" : "off")")
+        }
+        if let sandbox = entry.sandbox {
+            if sandbox.networkEnabled == true { changes.append("sandbox.network_enabled: true") }
+            if sandbox.backgroundProcessEnabled == true { changes.append("sandbox.background_process_enabled: true") }
+            if sandbox.pluginCreate == true { changes.append("sandbox.plugin_create: true") }
         }
         if let subagents = entry.subagents, subagents.enabled == true {
             let targets = subagents.agents ?? []
@@ -1212,6 +1249,14 @@ enum ConfigPlanner {
                     diffCapabilities(caps, agent: agent, into: &changes, risks: &risks)
                 }
                 diffPortableSettings(entry, agent: agent, into: &changes)
+                risks.append(
+                    contentsOf: Self.sandboxRisks(
+                        entry.name, entry.sandbox,
+                        current: agent.autonomousExec
+                            ?? AgentManager.shared.effectiveAutonomousExec(for: agent.id)
+                            ?? AutonomousExecConfig.default,
+                        currentlyEnabled: AgentManager.shared.effectiveAutonomousExec(for: agent.id)?.enabled
+                            ?? false))
                 diffClaudeCode(
                     entry.claudeCode, current: agent.claudeCode ?? .default,
                     agent: entry.name, into: &changes, risks: &risks)
@@ -1241,6 +1286,9 @@ enum ConfigPlanner {
                     }
                 }
                 summarizePortableSettings(entry, into: &changes)
+                risks.append(
+                    contentsOf: Self.sandboxRisks(
+                        entry.name, entry.sandbox, current: .default, currentlyEnabled: false))
                 diffClaudeCode(
                     entry.claudeCode, current: .default,
                     agent: entry.name, into: &changes, risks: &risks)

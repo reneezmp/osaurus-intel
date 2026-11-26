@@ -2362,8 +2362,10 @@ extension FloatingInputCard {
         agentId ?? Agent.defaultId
     }
 
+    /// Intel (W-seatbelt-sandbox stage 5): the Default agent never gets the
+    /// sandbox, so its chip would be a switch that does nothing.
     private var isSandboxAvailable: Bool {
-        sandboxState.availability.isAvailable
+        sandboxState.availability.isAvailable && effectiveAgentId != Agent.defaultId
     }
 
     private var isSandboxEnabled: Bool {

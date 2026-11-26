@@ -193,7 +193,9 @@ enum ConfigExporter {
         }
         var section = AgentSandboxEntry()
         section.enabled = exec.enabled
+        section.networkEnabled = exec.sandboxNetworkEnabled
         section.maxCommandsPerTurn = exec.maxCommandsPerTurn
+        section.backgroundProcessEnabled = exec.backgroundProcessEnabled
         section.pluginCreate = exec.pluginCreate
         return section
     }

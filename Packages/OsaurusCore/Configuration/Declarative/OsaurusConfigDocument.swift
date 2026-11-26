@@ -384,14 +384,23 @@ public struct AgentToolGroupsEntry: Codable, Equatable, Sendable {
 /// Sandbox (autonomous code execution) knobs for one agent.
 public struct AgentSandboxEntry: Codable, Equatable, Sendable {
     public var enabled: Bool?
+    /// Outbound network from sandboxed commands. Off by default on Intel.
+    public var networkEnabled: Bool?
+    /// Accepted for upstream documents but not supported here: the macOS
+    /// sandbox cannot filter by domain, so a non-empty list is rejected.
+    public var allowedDomains: [String]?
     public var maxCommandsPerTurn: Int?
+    public var backgroundProcessEnabled: Bool?
     public var pluginCreate: Bool?
 
     public init() {}
 
     enum CodingKeys: String, CodingKey {
         case enabled
+        case networkEnabled = "network_enabled"
+        case allowedDomains = "allowed_domains"
         case maxCommandsPerTurn = "max_commands_per_turn"
+        case backgroundProcessEnabled = "background_process_enabled"
         case pluginCreate = "plugin_create"
     }
 }

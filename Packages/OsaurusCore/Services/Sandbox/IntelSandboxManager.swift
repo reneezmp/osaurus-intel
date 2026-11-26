@@ -25,9 +25,11 @@ public actor SandboxManager {
 
     /// Intel gate (stage 2 of W-seatbelt-sandbox): while false, nothing is
     /// published into `State.availability`, so Onboarding, the agent editor
-    /// and the chat chip keep treating the sandbox as unavailable. Stage 3/5
-    /// flips it once the tools and UI exist.
-    nonisolated static let publishesAvailabilityToUI = false
+    /// and the chat chip keep treating the sandbox as unavailable. Stage 5
+    /// flipped it: the tools and the UI exist, and every switch they offer
+    /// starts off. The Default agent never gets the sandbox (the chip hides
+    /// for it), and an agent still needs its own opt-in.
+    nonisolated static let publishesAvailabilityToUI = true
 
     private var _status: ContainerStatus = .notProvisioned
     private var _availability: SandboxAvailability?

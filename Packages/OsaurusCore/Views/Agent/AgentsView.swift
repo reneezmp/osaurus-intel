@@ -870,7 +870,7 @@ private enum DetailTab: String, CaseIterable {
         case .network: return "Bonjour discovery and relay tunnel."
         case .connections: return "Peers granted access to this agent — usage and revocation."
         case .channels: return "Where this agent replies on connected channels — and where it may start messages of its own."
-        case .sandbox: return "Container-based code execution."
+        case .sandbox: return "Run commands in a macOS sandbox, confined to this agent's workspace."
         case .automation: return "Schedules and file watchers for autonomous behavior."
         case .memory: return "Conversation history, pinned facts, and episode summaries."
         case .database: return "Everything this agent stores — browse tables, saved views, and history."
@@ -2028,7 +2028,7 @@ struct AgentDetailView: View {
         case .builtIn(.channels):
             channelsTabContent
         case .builtIn(.sandbox):
-            intelSandboxUnavailableContent
+            intelSandboxTabContent
         case .builtIn(.automation):
             automationTabContent
         case .builtIn(.memory):
@@ -2470,10 +2470,38 @@ struct AgentDetailView: View {
         }
 
         AgentDetailSection(title: L("Code Execution"), icon: "terminal") {
+            intelCodeExecutionRow
+        }
+    }
+
+    /// W-seatbelt-sandbox stage 5: the Overview switch for the host sandbox.
+    /// Off by default; the Sandbox tab has the network, background-process
+    /// and plugin switches.
+    @ViewBuilder
+    private var intelCodeExecutionRow: some View {
+        if agent.isBuiltIn || !SeatbeltSandbox.isSupported {
             abilityUnavailableRow(
                 title: "Autonomous Execution",
-                description: "The upstream sandbox requires a newer supported runtime. Claude Code can use a selected chat folder instead.",
+                description: agent.isBuiltIn
+                    ? "The Default agent does not use the sandbox. Create a custom agent to run commands in a sandbox."
+                    : "This Mac cannot run the sandbox (sandbox-exec was not found). Claude Code can use a selected chat folder instead.",
                 icon: "shippingbox"
+            )
+        } else {
+            abilityToggleRow(
+                title: "Autonomous Execution",
+                description:
+                    "Run commands in a sandbox on this Mac, limited to this agent's workspace folder. Off by default; more options are in the Sandbox tab.",
+                icon: "shippingbox",
+                isOn: Binding(
+                    get: { agentManager.effectiveAutonomousExec(for: agent.id)?.enabled ?? false },
+                    set: { enabled in
+                        updateAutonomousExec(from: agentManager.effectiveAutonomousExec(for: agent.id)) {
+                            $0.enabled = enabled
+                        }
+                    }
+                ),
+                destination: .sandbox
             )
         }
     }
@@ -2499,15 +2527,106 @@ struct AgentDetailView: View {
         }
     }
 
+    /// W-seatbelt-sandbox stage 5: the agent's sandbox switches on the host
+    /// backend. Every switch defaults to off; the sandbox only ever restricts.
     @ViewBuilder
-    private var intelSandboxUnavailableContent: some View {
+    private var intelSandboxTabContent: some View {
         tabHelperText(DetailTab.sandbox.helperText)
         AgentDetailSection(title: L("Sandbox"), icon: "shippingbox") {
-            abilityUnavailableRow(
-                title: "Sandboxed execution",
-                description: "The upstream container runtime is unavailable on this Intel build. Claude Code can work in a selected chat folder with the permissions configured under General.",
-                icon: "terminal"
-            )
+            if agent.isBuiltIn {
+                abilityUnavailableRow(
+                    title: "Sandboxed execution",
+                    description: "The Default agent does not use the sandbox. Create a custom agent to turn it on.",
+                    icon: "terminal"
+                )
+            } else if !SeatbeltSandbox.isSupported {
+                abilityUnavailableRow(
+                    title: "Sandboxed execution",
+                    description: "This Mac cannot run the sandbox (sandbox-exec was not found). Claude Code can work in a selected chat folder with the permissions configured under General.",
+                    icon: "terminal"
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    intelSandboxWorkspaceRow
+                    intelSandboxToggles(execConfig: agentManager.effectiveAutonomousExec(for: agent.id))
+                    secretsSubsection
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func intelSandboxToggles(execConfig: AutonomousExecConfig?) -> some View {
+        let config = execConfig ?? .default
+        VStack(alignment: .leading, spacing: 12) {
+            sandboxToggleRow(
+                title: "Autonomous Execution",
+                subtitle:
+                    "Let this agent run commands on this Mac, confined to its own workspace folder. Each command asks for approval unless you set it to Auto.",
+                isOn: config.enabled
+            ) { enabled in
+                updateAutonomousExec(from: execConfig) { $0.enabled = enabled }
+            }
+            if config.enabled {
+                sandboxToggleRow(
+                    title: "Network Access",
+                    subtitle:
+                        "Let this agent's commands connect to the internet. The macOS sandbox cannot limit which sites, so keep this off unless a task needs it.",
+                    isOn: config.sandboxNetworkEnabled
+                ) { allowed in
+                    updateAutonomousExec(from: execConfig) { $0.sandboxNetworkEnabled = allowed }
+                }
+                sandboxToggleRow(
+                    title: "Background Processes",
+                    subtitle:
+                        "Let commands keep running in the background (for example a local server). They stop when the run ends, when the sandbox stops, or when Osaurus quits.",
+                    isOn: config.backgroundProcessEnabled
+                ) { allowed in
+                    updateAutonomousExec(from: execConfig) { $0.backgroundProcessEnabled = allowed }
+                }
+                sandboxToggleRow(
+                    title: "Plugin Creation",
+                    subtitle:
+                        "Let this agent package its own tools as plugins. Plugin tools run in the same sandbox and ask for approval.",
+                    isOn: config.pluginCreate
+                ) { allowed in
+                    updateAutonomousExec(from: execConfig) { $0.pluginCreate = allowed }
+                }
+            }
+        }
+    }
+
+    /// Reveals the agent's sandbox home in Finder (the folder the sandbox
+    /// tools use: `SandboxToolRegistrar.hostAgentName`).
+    private var intelSandboxWorkspaceRow: some View {
+        let name = SandboxToolRegistrar.hostAgentName(for: agent.id.uuidString)
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Workspace Folder", bundle: .module)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                Text("Browse and edit this agent's sandbox home folder.", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+            }
+            Spacer()
+            Button {
+                OsaurusPaths.revealInFinder(OsaurusPaths.containerAgentDir(name))
+            } label: {
+                Text("Open in Finder", bundle: .module)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(theme.accentColor)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(theme.accentColor.opacity(0.08))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(theme.accentColor.opacity(0.2), lineWidth: 1))
+                    )
+            }
+            .buttonStyle(.plain)
         }
     }
 

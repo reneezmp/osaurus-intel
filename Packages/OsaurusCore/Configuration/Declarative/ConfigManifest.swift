@@ -266,11 +266,24 @@ public enum ConfigManifest {
                     ConfigKeySpec(
                         "sandbox",
                         .mapping([
-                            ConfigKeySpec("enabled", .scalar(.boolean, example: "true")),
+                            ConfigKeySpec(
+                                "enabled", .scalar(.boolean, example: "false"),
+                                comment: "HIGH RISK: commands run on this Mac, confined to the workspace"),
+                            ConfigKeySpec(
+                                "network_enabled", .scalar(.boolean, example: "false"),
+                                comment: "HIGH RISK: outbound network from sandboxed commands (default off)"),
+                            ConfigKeySpec(
+                                "allowed_domains", .scalarList(.string, example: []),
+                                comment: "not supported on this Mac (the sandbox cannot filter by domain); must be empty"),
                             ConfigKeySpec("max_commands_per_turn", .scalar(.integer, example: "10")),
-                            ConfigKeySpec("plugin_create", .scalar(.boolean, example: "true")),
+                            ConfigKeySpec(
+                                "background_process_enabled", .scalar(.boolean, example: "false"),
+                                comment: "HIGH RISK: commands may keep running until the run ends"),
+                            ConfigKeySpec(
+                                "plugin_create", .scalar(.boolean, example: "false"),
+                                comment: "HIGH RISK: the agent may register its own sandbox tools"),
                         ]),
-                        comment: "autonomous code execution sandbox"),
+                        comment: "autonomous code execution sandbox (off by default)"),
                     ConfigKeySpec(
                         "subagents",
                         .mapping([

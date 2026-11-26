@@ -573,7 +573,11 @@ enum ConfigApplier {
             ?? AgentManager.shared.effectiveAutonomousExec(for: agent.id)
             ?? AutonomousExecConfig.default
         if let v = section.enabled { exec.enabled = v }
+        if let v = section.networkEnabled { exec.sandboxNetworkEnabled = v }
+        // `allowed_domains` is refused by the planner (no domain filtering
+        // under Seatbelt), so nothing reaches here to apply.
         if let v = section.maxCommandsPerTurn { exec.maxCommandsPerTurn = max(1, v) }
+        if let v = section.backgroundProcessEnabled { exec.backgroundProcessEnabled = v }
         if let v = section.pluginCreate { exec.pluginCreate = v }
         agent.autonomousExec = exec
     }

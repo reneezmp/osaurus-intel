@@ -72,7 +72,7 @@ Facts from upstream's profile that matter:
 | 2 | **Host sandbox runtime.** A compiled Intel `SandboxManager` slice with upstream's `exec` / Seatbelt branch, workspace folders under `OsaurusPaths.containerWorkspace()`, per-agent homes, `SandboxLogBuffer`, availability cache (#3094, #3105), `SandboxError` merge. Default network denied. A confinement self-test (upstream's diagnostic: a write outside the workspace must fail). | Done (2026-11-26) |
 | 3 | **Tools.** Host-capable slice of `BuiltinSandboxTools` as Intel files: `sandbox_exec` (foreground), `sandbox_read_file`, `sandbox_write_file`, `sandbox_search_files`, `sandbox_secret_check` (#2157 output scrubbing), per-agent `AutonomousExecConfig` (`enabled`, `maxCommandsPerTurn`, `sandboxNetworkEnabled`, `backgroundProcessEnabled`), `ToolRegistry` gating, permission "Ask" for write/exec, composer sections (environment, `sandboxState`, `sandboxUnavailable`, `secretHandling`, `soul`). `sandbox_secret_set` is written but not registered; `selfImprovement` / `pluginCreator` wait for stage 4. | Done (2026-11-26) |
 | 4 | **Background processes and plugins.** `sandbox_exec(background:true)`, `sandbox_process`, sandbox plugins on the host backend (`sandbox_plugin_register`, plugin tools). Avoids `BackgroundTaskManager` and the spawn tools while `W-subagents` is open. | Done (2026-11-26) |
-| 5 | **UI and declarative config.** Seatbelt variant of the Sandbox page (`isSeatbelt` branches), per-agent switches in the agent editor including an explicit network switch that defaults off, `sandbox.*` keys in declarative config. Ventura rules apply. | Not started |
+| 5 | **UI and declarative config.** Intel Sandbox page (`IntelSandboxView`, instead of upstream's VM `SandboxView` with `isSeatbelt` branches), per-agent switches in the agent editor (network and background processes default off), `sandbox.*` keys in declarative config with high-risk flags. Ventura rules apply. | Done (2026-11-26), except `sandbox_secret_set` (see notes) |
 
 ## Upstream items this row still owns
 
@@ -285,3 +285,61 @@ Differences from upstream:
   `agents/<id>/sandbox-plugins/installed.json` like upstream; an agent delete
   does not yet call `removeAgentState` (another stage-6 batch owns that path).
 - The Intel default for `AutonomousExecConfig.pluginCreate` is now `false`.
+
+## Stage 5 notes (2026-11-26)
+
+Files: `Views/Sandbox/IntelSandboxView.swift` (the Sandbox page; the old
+"Apple Silicon only" placeholder in `SandboxView.swift`'s Intel branch now
+shows it), `Views/Agent/AgentsView.swift` (Sandbox tab and the Overview row),
+`Views/Chat/FloatingInputCard.swift` (chip), `Models/Configuration/ManagementTab.swift`
+(`.sandbox` is available on Intel), `SandboxManager.publishesAvailabilityToUI`
+(now `true`); declarative config in `Configuration/Declarative/*`
+(`OsaurusConfigDocument`, `ConfigManifest`, `ConfigPlanner`, `ConfigApplier`,
+`ConfigExporter`, `ConfigRisk`). Tests: `Tests/Configuration/IntelSandboxConfigTests.swift`.
+New strings are in the catalog (de, zh-Hans, ko, ru).
+
+**Settings and defaults (all off).** Per agent, in the agent editor's Sandbox
+tab (custom agents only; the Overview tab has the first switch too):
+Autonomous Execution (`enabled`, off), then once it is on: Network Access
+(`sandboxNetworkEnabled`, off), Background Processes
+(`backgroundProcessEnabled`, off), Plugin Creation (`pluginCreate`, off; Intel
+changed this default, upstream's is on). The page's own switch is the shared
+master switch for the network (`sandbox.json` `network`, "outbound" = allowed,
+"none" = never): a command reaches the network only if this master switch AND
+the agent's own switch are on.
+
+**Sandbox page** (Management > Sandbox): status with Start / Stop, the master
+network switch, the running background processes with Stop / Stop All, the
+confinement self-test (loopback only, never leaves the Mac), and a button for the
+workspace folder. There is no provisioning journey, CPU / memory, image or
+per-agent environment list: none of that exists under Seatbelt.
+
+**Availability.** With `publishesAvailabilityToUI` on, the chat's sandbox chip
+and the Sandbox tab appear for custom agents on a Mac that has `sandbox-exec`.
+The chip is hidden for the Default agent (the gate never gives it the sandbox,
+so its switch would do nothing). Onboarding saves the default `sandbox.json`
+once (that is all it does with availability). A phone's
+`autonomous_exec_enabled` patch (PhoneAgentEditing) is accepted now; it goes
+through the same stored setting and the same gate.
+
+**Declarative config (through `osaurus_config`, so through the planner and the
+user's approval).** `agents[].sandbox` accepts `enabled`, `network_enabled`,
+`allowed_domains`, `max_commands_per_turn`, `background_process_enabled`,
+`plugin_create`. Differences from upstream: `allowed_domains` is rejected unless
+empty (the macOS sandbox cannot filter by domain); upstream flags none of these
+as risky, Intel flags each switch that turns something ON as a high-risk line
+(`ConfigRisk.sandboxEnabled`, `sandboxNetwork`, `sandboxBackground`,
+`sandboxPluginCreate`), which forces an explicit approval even under
+always-allow. Turning something off, or leaving it out, is not a risk. The
+exporter writes `network_enabled` and `background_process_enabled` (not
+`allowed_domains`). Applying a change that switches the sandbox or Background
+Processes off stops the agent's running background jobs
+(`SandboxToolGate.enforcePolicy`, called from `AgentManager.update`).
+
+**`sandbox_secret_set` stays unregistered.** Registering it needs the chat to
+show a secure secret prompt when the tool returns its marker: upstream does it in
+`ChatView` with `SecretPromptOverlay` and `PromptQueue`, which Intel does not
+have; stage 5 did not add them. The user adds secrets in the agent's Sandbox tab
+(the existing secrets list) and the prompt says so. When the overlay lands, add
+`SandboxSecretSetTool` to `BuiltinSandboxTools.register()` and
+`sandbox_secret_set` to the prompt's tool list.

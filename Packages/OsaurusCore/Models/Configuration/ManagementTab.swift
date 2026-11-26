@@ -204,7 +204,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     /// all — there, every tab is simply available.
     public var isAvailableOnIntel: Bool {
         switch self {
-        case .models, .sandbox:
+        case .models:
             return false
         case .insights, .schedules:
             return true

@@ -119,6 +119,20 @@ enum ConfigRisk {
     static func deleteSearchProvider(_ id: String) -> String {
         "Removes search provider `\(id)` and its stored key (prune)."
     }
+    /// W-seatbelt-sandbox stage 5. Upstream flags none of these; on Intel each
+    /// switch that widens what an agent can do must be approved as high risk.
+    static func sandboxEnabled(_ agent: String) -> String {
+        "Turns on the sandbox for agent `\(agent)`: it can run commands on this Mac, confined to its workspace folder (each command still asks unless set to Auto)."
+    }
+    static func sandboxNetwork(_ agent: String) -> String {
+        "Lets agent `\(agent)`'s sandboxed commands reach the network (any host; the macOS sandbox cannot filter by domain)."
+    }
+    static func sandboxBackground(_ agent: String) -> String {
+        "Lets agent `\(agent)` start background processes in its sandbox (stopped when the run ends)."
+    }
+    static func sandboxPluginCreate(_ agent: String) -> String {
+        "Lets agent `\(agent)` register its own sandbox plugins (their tools run in the sandbox and ask for approval)."
+    }
     static func claudeCodeShell(_ agent: String) -> String {
         "Lets Claude Code run shell commands for agent `\(agent)`, unconfined on this Mac."
     }

@@ -298,7 +298,7 @@ private extension ManagementView {
             badgeHighlight: badgeHighlight(for: tab)
         )
         // On Intel, tabs whose entire backing subsystem is amputated
-        // (Models / Sandbox) stay listed — clustered together under
+        // (Models) stay listed — clustered together under
         // the "Not Available on This Mac" section — but render disabled so
         // users get a discoverable explainer instead of a working button
         // that opens an empty placeholder. `SidebarItemView` applies

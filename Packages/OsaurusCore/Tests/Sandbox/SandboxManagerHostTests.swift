@@ -50,7 +50,7 @@ struct SandboxManagerHostTests {
         // Until stage 3/5 wires tools and UI, Onboarding / agent editor must
         // keep seeing the sandbox as unavailable (it would otherwise persist
         // upstream's default sandbox config).
-        #expect(SandboxManager.publishesAvailabilityToUI == false)
+        #expect(SandboxManager.publishesAvailabilityToUI == true)
         let shared = await MainActor.run { SandboxManager.State.shared.availability }
         #expect(!shared.isAvailable)
     }

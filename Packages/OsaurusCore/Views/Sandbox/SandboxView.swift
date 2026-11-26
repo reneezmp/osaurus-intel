@@ -1246,7 +1246,9 @@ private struct SandboxProvisionSheet: View {
 import SwiftUI
 struct SandboxView: View {
     var body: some View {
-        AppleSiliconOnlyTab(tabName: "Sandbox VM", symbol: "shippingbox")
+        // W-seatbelt-sandbox stage 5: the host (Seatbelt) page replaces the
+        // old "Apple Silicon only" placeholder.
+        IntelSandboxView()
     }
 }
 #endif
