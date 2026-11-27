@@ -35,13 +35,13 @@ struct IntelSettingsRedesignTests {
         #expect(SettingsSearchIndex.search("sandbox").contains { $0.id == "sandbox.overview" })
     }
 
-    /// The Claude Code setup sheet paints the theme's surface behind its
+    /// The Claude Code sign-in sheet (Agents > Runtimes since stage 5) paints the theme's surface behind its
     /// theme-coloured title.
     @Test func claudeCodeSheetHasAThemedBackground() throws {
         let source = try String(
-            contentsOf: Self.viewsRoot.appendingPathComponent("Settings/RemoteProvidersView.swift"),
+            contentsOf: Self.viewsRoot.appendingPathComponent("Settings/AgentRuntimesView.swift"),
             encoding: .utf8)
-        let start = try #require(source.range(of: ".sheet(isPresented: $showingClaudeCodeSetup)"))
+        let start = try #require(source.range(of: ".sheet(item: $signInRuntime)"))
         let sheet = source[start.lowerBound...].prefix(700)
         #expect(sheet.contains(".background(themeManager.currentTheme.primaryBackground)"))
     }

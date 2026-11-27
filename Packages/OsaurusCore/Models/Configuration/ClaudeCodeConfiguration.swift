@@ -111,6 +111,32 @@ public enum ClaudeCodeEffort: String, CaseIterable, Sendable {
     }
 }
 
+extension ClaudeCodeEffort {
+    /// The chat picker's Reasoning Effort row for a Claude Code agent: a
+    /// Default segment (no `--effort`, the CLI's per-model default) plus every
+    /// level. Reads and writes the agent's `ClaudeCodeAgentConfig.effort`
+    /// (upstream #3293).
+    static let pickerOptionID = "reasoningEffort"
+
+    static var pickerOption: ModelOptionDefinition {
+        ModelOptionDefinition(
+            id: pickerOptionID,
+            label: L("Reasoning Effort"),
+            kind: .segmented(
+                [ModelOptionSegment(id: ModelOptionSegment.defaultID, label: L("Default"))]
+                    + allCases.map { ModelOptionSegment(id: $0.rawValue, label: $0.displayName) }
+            ),
+            help: L("Default leaves Claude Code on its own per-model default. Applies from the next message.")
+        )
+    }
+
+    /// The stored `effort` for a picker segment; nil for Default.
+    static func storedValue(forSegment id: String?) -> String? {
+        guard let id, let effort = ClaudeCodeEffort(rawValue: id) else { return nil }
+        return effort.rawValue
+    }
+}
+
 /// Decoded `claude auth status --json`.
 ///
 /// Only the fields Osaurus actually shows are modeled; the CLI adds keys over
@@ -694,21 +720,60 @@ public enum ClaudeCodeConfiguration {
     ///
     /// `claude auth login` opens the system browser and blocks until the round
     /// trip finishes, so this returns only once the user has completed (or
-    /// abandoned) the flow. Osaurus never sees the credential — the CLI writes
-    /// it to its own store, exactly as it would from a terminal.
+    /// abandoned) the flow, or the calling task is cancelled. Osaurus never
+    /// sees the credential: the CLI writes it to its own store, exactly as it
+    /// would from a terminal. Only called from the sign-in button.
     ///
     /// Returns the post-login status so the caller can update in place.
     public static func login(
-        env: [String: String] = ProcessInfo.processInfo.environment,
+        command: String = executableName,
+        overlay: [String: String] = [:],
         timeout: TimeInterval = 300
     ) async -> ClaudeCodeAuthStatus? {
-        guard let executable = resolveExecutable(env: env) else { return nil }
+        guard let resolved = await controlCommand(command, overlay: overlay) else { return nil }
         _ = await ClaudeCodeProcessRunner.capture(
-            executable: executable,
+            executable: resolved.executable,
             arguments: ["auth", "login"],
-            environment: subprocessEnvironment(source: env),
+            environment: resolved.environment,
             timeout: timeout
         )
-        return await authStatus(env: env)
+        guard !Task.isCancelled else { return nil }
+        return await authStatus(command: command, overlay: overlay)
+    }
+
+    /// The one-line zsh script "Sign In from Terminal Instead" opens (#3175).
+    /// Split from `openTerminalLogin` so tests can check it without opening
+    /// Terminal or starting `claude`.
+    static func terminalLoginScript(executable: String, path: String?) -> String {
+        var script = "#!/bin/zsh -l\n"
+        if let path { script += "export PATH=\(shellQuoted(path))\n" }
+        script += "\(shellQuoted(executable)) auth login\n"
+        return script
+    }
+
+    /// Sign in from Terminal instead, for logins the headless flow can't
+    /// finish (a CLI that asks a question, SSO that needs a TTY). Writes a
+    /// one-line `.command` script and opens it, which needs no Automation
+    /// permission. Only called from the "Sign In from Terminal Instead" button.
+    @MainActor
+    public static func openTerminalLogin(command: String = executableName, overlay: [String: String] = [:]) async {
+        let resolved = await controlCommand(command, overlay: overlay)
+        let script = terminalLoginScript(
+            executable: resolved?.executable ?? command,
+            path: resolved?.environment["PATH"]
+        )
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("osaurus-claude-login-\(UUID().uuidString).command")
+        do {
+            try script.write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+        } catch {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    static func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }

@@ -35,7 +35,6 @@ struct RemoteProvidersView: View {
     /// Intel: the Claude Code CLI is set up (detected, signed in) from a card at
     /// the top of Cloud Models. It runs as a harness runtime per agent, not as
     /// a model (upstream #3175).
-    @State private var showingClaudeCodeSetup = false
 
     private struct AddSheetConfig: Identifiable {
         let id = UUID()
@@ -110,24 +109,14 @@ struct RemoteProvidersView: View {
             RemoteProviderReorderSheet()
                 .environment(\.theme, themeManager.currentTheme)
         }
-        .sheet(isPresented: $showingClaudeCodeSetup) {
-            ClaudeCodeSetupStep(
-                onBack: { showingClaudeCodeSetup = false },
-                onDone: { showingClaudeCodeSetup = false }
-            )
-            .frame(minWidth: 520, minHeight: 520)
-            // The step draws theme text colours but no surface of its own
-            // (onboarding supplies one). Without this a dark theme's light
-            // title sat on the sheet's light window background.
-            .background(themeManager.currentTheme.primaryBackground)
-            .environment(\.theme, themeManager.currentTheme)
-        }
     }
 
     // MARK: - Claude Code (Intel)
 
+    /// Claude Code is an agent runtime now (upstream #3175), not a model: its
+    /// setup and sign-in live in Agents > Runtimes. This card only points there.
     private var claudeCodeCard: some View {
-        Button { showingClaudeCodeSetup = true } label: {
+        Button { ManagementStateManager.shared.selectedTab = .agentRuntimes } label: {
             HStack(spacing: 14) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10)
@@ -148,12 +137,12 @@ struct RemoteProvidersView: View {
                     Text("Claude Code", bundle: .module)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(theme.primaryText)
-                    Text("Use your local Claude Code sign-in — no API key required", bundle: .module)
+                    Text("Runs as an agent runtime on your own Claude Code sign-in. Set it up under Agents.", bundle: .module)
                         .font(.system(size: 12))
                         .foregroundColor(theme.secondaryText)
                 }
                 Spacer()
-                Text(ClaudeCodeConfiguration.isAvailable() ? "Configure" : "Set Up", bundle: .module)
+                Text("Open Runtimes", bundle: .module)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(theme.accentColor)
                 Image(systemName: "chevron.right")

@@ -72,7 +72,7 @@ Settings → General → Advanced → Data & Storage → **File History** contro
 
 ## Choosing a model in chat
 
-Open the model pill to browse Provider and Model columns: Osaurus Cloud, connected providers, and Claude Code. An inactive Osaurus Cloud entry stays available with an Explore action that opens the Cloud model browser. (Local models need Apple Silicon.)
+Open the model pill to browse Provider and Model columns: Osaurus Cloud, connected providers, and one column for each agent runtime (Claude Code, Pi, or one you added). Picking a runtime row moves the agent onto that runtime; picking a model row moves it back to Osaurus's own loop. A runtime is never picked for you: with no choice made the pill reads Select Model. While a reply is streaming, rows that would change runtime are disabled. With Claude Code selected, the third column sets its Reasoning Effort. An inactive Osaurus Cloud entry stays available with an Explore action that opens the Cloud model browser. (Local models need Apple Silicon.)
 
 The Cloud shortlist contains favorites plus the current Cloud model. Use the star to add or remove a favorite in either the shortlist or the full browser. More models opens the Cloud model browser.
 

@@ -12,7 +12,7 @@ Ask the assistant to change declarative settings in chat (`osaurus_config`); eve
 
 ## Management sidebar
 
-General (General, Conversation, Voice, Themes, Credits, Identity, Permissions), Models (Cloud Models), Agents (Orchestrator, Agents), Capabilities (Web Search, Knowledge, Memory, Tools & MCP, Skills, Commands, Plugins), Automation (Schedules, Watchers), Developer Tools (Server, Insights). Local Models and Sandbox are listed under "Not Available on This Mac".
+General (General, Conversation, Voice, Themes, Credits, Identity, Permissions), Models (Cloud Models), Agents (Orchestrator, Agents, Runtimes), Capabilities (Web Search, Knowledge, Memory, Tools & MCP, Skills, Commands, Plugins), Automation (Schedules, Watchers), Developer Tools (Server, Insights). Local Models and Sandbox are listed under "Not Available on This Mac".
 
 ## What the assistant can change in chat
 
@@ -32,6 +32,7 @@ General (General, Conversation, Voice, Themes, Credits, Identity, Permissions), 
 - **Themes**: the gallery, the editor and import/export. **Small body** under Text & Fonts sets the font size of compact controls.
 - **Permissions**: macOS permission grants (Accessibility, Automation, …). Tool Auto / Ask / Deny policies and **Auto-Allow All Tool Calls** live under Tools & MCP → All Tools.
 - **Tools & MCP**: **Services** (connected MCP services, **Add Service**, the **Directory**), **All Tools**, and **Plugins**.
+- **Runtimes** (Agents → Runtimes): the external harnesses an agent can run on. Each row has Test (starts the runtime once to check a chat can launch it), Sign In (Claude Code), Edit and Delete. Add Runtime takes a protocol (Claude Code or Pi RPC), the command, one argument per line, and an environment overlay (KEY=value lines, saved unencrypted, no `OSAURUS_*`). The overlay is the only way to give a runtime a variable: Osaurus starts runtimes with a narrow environment (PATH, HOME, USER, LOGNAME, TMPDIR, locale), not the app's. Nothing here starts a runtime except Test and Sign In.
 - **Browser Use**: saved browser sessions (open, close, reset); the per-agent switch is under Agents → Abilities (see the Browser Use and Mac Automation topic).
 - Identity (master address, recovery phrase), Credits, and Insights are their own tabs.
 - Secrets of any kind (API keys, tokens) are always entered in native secure fields, never in chat.

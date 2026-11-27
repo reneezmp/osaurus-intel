@@ -21,7 +21,7 @@ Osaurus Cloud is the managed Osaurus Router: hosted models billed from your Cred
 
 ## Claude Code
 
-If the Claude Code CLI is installed and signed in, Osaurus can use it as a model: Settings → Cloud Models → Claude Code. Its models appear in the picker as Claude Code (Sonnet / Opus / Haiku). Credentials stay with the CLI.
+Claude Code is an agent runtime, not a model. If the Claude Code CLI is installed and signed in, you can run an agent's chats on it: Settings → Agents → Runtimes lists it (Sign In and Test are there), and you choose it for an agent under Configure → Runtime or in the chat's model picker (the Claude Code column: Sonnet / Opus / Haiku). Nothing starts until you choose it, and an agent you never switched keeps using its own model. Credentials stay with the CLI. See the Agents topic.
 
 ## Local servers as providers
 

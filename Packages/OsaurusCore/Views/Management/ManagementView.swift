@@ -227,6 +227,8 @@ private extension ManagementView {
             OsaurusConnectView()
         case .agents:
             AgentsView(deeplinkAgentId: deeplinkAgentId)
+        case .agentRuntimes:
+            AgentRuntimesView()
         case .orchestrator:
             OrchestratorSettingsView()
         case .plugins:

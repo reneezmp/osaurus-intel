@@ -407,7 +407,9 @@ struct ChatContentView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
-                        if session.hasAnyModel || session.isDiscoveringModels || session.isHarnessAgentActive {
+                        if session.hasAnyModel || session.isDiscoveringModels || session.isHarnessAgentActive
+                            || !HarnessRuntimeStore.shared.all().isEmpty
+                        {
                             let _ = observedSession.turns.count
                             if observedSession.turns.isEmpty {
                                 emptyStateView
@@ -513,6 +515,7 @@ struct ChatContentView: View {
                             autoSpeakAssistant: $observedSession.autoSpeakAssistant,
                             queuedSend: $observedSession.queuedSend,
                             folderState: observedSession.folderState,
+                            isEmptyChat: !observedSession.hasVisibleThreadMessages,
                             onDraftChange: { [weak observedSession] in
                                 observedSession?.noteComposerDraft($0)
                             },

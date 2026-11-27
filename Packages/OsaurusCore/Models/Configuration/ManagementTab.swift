@@ -50,7 +50,7 @@ public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
         // (`W-identity-mobile`, 2026-11-02).
         case .general: [.settings, .chat, .voice, .themes, .credits, .connect, .identity, .permissions]
         case .models: [.providers]
-        case .agents: [.orchestrator, .agents]
+        case .agents: [.orchestrator, .agents, .agentRuntimes]
         case .capabilities: [.search, .knowledge, .memory, .tools, .skills, .commands, .plugins]
         case .automation: [.schedules, .watchers, .computerUse, .browser]
         case .unavailable: [.models]
@@ -68,6 +68,8 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     /// (`W-identity-mobile`).
     case connect
     case agents
+    /// Upstream #3175: Settings > Agent Runtimes (`W-harness-runtimes` stage 5).
+    case agentRuntimes
     case orchestrator
     case plugins
     case sandbox
@@ -101,6 +103,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     public static func resolved(from rawValue: String) -> ManagementTab? {
         switch rawValue {
         case "dashboard": .credits
+        case "runtimes", "agent-runtimes", "harnesses": .agentRuntimes
         default: ManagementTab(rawValue: rawValue)
         }
     }
@@ -112,6 +115,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .credits: "creditcard.fill"
         case .connect: "iphone.radiowaves.left.and.right"
         case .agents: "person.2.fill"
+        case .agentRuntimes: "terminal.fill"
         case .orchestrator: "point.3.connected.trianglepath.dotted"
         case .plugins: "puzzlepiece.extension.fill"
         case .sandbox: "shippingbox.fill"
@@ -144,6 +148,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .credits: L("Credits")
         case .connect: L("Mobile")
         case .agents: L("Agents")
+        case .agentRuntimes: L("Runtimes")
         case .orchestrator: L("Orchestrator")
         case .plugins: L("Plugins")
         case .sandbox: L("Sandbox")

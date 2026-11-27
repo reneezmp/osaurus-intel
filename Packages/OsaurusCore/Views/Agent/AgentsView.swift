@@ -1104,6 +1104,8 @@ struct AgentDetailView: View {
     @State private var showModelPicker = false
     @State private var selectedModel: String?
     @State private var claudeCodeConfig: ClaudeCodeAgentConfig = .default
+    @State private var agentRuntime: AgentRuntime = .builtIn
+    @ObservedObject private var harnessRuntimeStore = HarnessRuntimeStore.shared
     @State private var showCreateSchedule = false
     @State private var showCreateWatcher = false
     @State private var editingSchedule: Schedule?
@@ -1980,8 +1982,17 @@ struct AgentDetailView: View {
     private var configureTabContent: some View {
         tabHelperText(DetailTab.configure.helperText)
         identitySection
-        defaultModelSection
-        claudeCodeSection
+        runtimeSection
+        // Upstream #3175: a harness agent has no Osaurus model; Claude Code's
+        // own options replace the model section, a Pi runtime has none.
+        switch selectedHarness {
+        case nil:
+            defaultModelSection
+        case .resolved(let runtime) where runtime.kind == .claudeCode:
+            claudeCodeSection
+        case .resolved, .missing:
+            EmptyView()
+        }
         systemPromptSection
         if agent.id != Agent.defaultId {
             workingFolderSection
@@ -3166,29 +3177,30 @@ struct AgentDetailView: View {
         }
     }
 
-    /// Claude Code is a harness runtime now (upstream #3175), not a model: the
-    /// options below apply when this agent's runtime is a Claude Code harness.
-    private var isClaudeCodeRuntimeSelected: Bool {
-        if case .resolved(let runtime)? = AgentManager.shared.effectiveHarness(for: agent.id) {
-            return runtime.kind == .claudeCode
-        }
-        return false
-    }
-
     /// Claude Code owns its own tool loop, so host-file permissions live beside
     /// the model picker. Every enabled control is consumed on the next turn.
     private var claudeCodeSection: some View {
-        AgentDetailSection(title: "Claude Code", icon: "terminal") {
+        AgentDetailSection(title: L("Claude Code Options"), icon: "terminal") {
             VStack(alignment: .leading, spacing: 14) {
-                if !isClaudeCodeRuntimeSelected {
-                    Text(
-                        "These controls apply whenever this agent runs on the Claude Code runtime.",
-                        bundle: .module
+                Picker(
+                    L("Claude model"),
+                    selection: Binding(
+                        get: { claudeCodeConfig.resolvedModel },
+                        set: { model in
+                            claudeCodeConfig.model = model
+                            debouncedSave()
+                        }
                     )
-                    .font(.system(size: 11))
-                    .foregroundColor(theme.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+                ) {
+                    ForEach(ClaudeCodeModel.allCases, id: \.rawValue) { model in
+                        Text(verbatim: model.rawValue.capitalized).tag(model.rawValue)
+                    }
+                    if ClaudeCodeModel(rawValue: claudeCodeConfig.resolvedModel) == nil {
+                        Text(verbatim: claudeCodeConfig.resolvedModel).tag(claudeCodeConfig.resolvedModel)
+                    }
                 }
+                .settingsLandingAnchor("agents.claudeCode.model")
+
                 HStack(spacing: 0) {
                     claudeCodeModeButton(.agent, label: "Agent")
                     claudeCodeModeButton(.textOnly, label: "Text only")
@@ -3222,11 +3234,12 @@ struct AgentDetailView: View {
                         Text(verbatim: effort.displayName).tag(effort.rawValue)
                     }
                 }
+                .settingsLandingAnchor("agents.claudeCode.effort")
 
                 if claudeCodeConfig.mode == .agent {
                     claudePermissionToggle(
                         title: "Allow file changes",
-                        description: "Allow Edit, Write, and NotebookEdit in the selected chat folder.",
+                        description: "Auto-approve Edit, Write, and NotebookEdit inside the chat folder, or the chat's private scratch folder when none is set.",
                         isOn: Binding(
                             get: { claudeCodeConfig.allowWrites },
                             set: { claudeCodeConfig.allowWrites = $0; debouncedSave() }
@@ -3234,19 +3247,135 @@ struct AgentDetailView: View {
                     )
                     claudePermissionToggle(
                         title: "Allow shell commands",
-                        description: "Allow Bash under your macOS account, starting in the selected chat folder.",
+                        description: "Auto-approve Bash and Monitor under your macOS account. Osaurus can't confine shell commands to the chat folder, and this is not the Osaurus sandbox. When off, Claude isn't offered any tool that runs commands.",
                         isOn: Binding(
                             get: { claudeCodeConfig.allowShell },
                             set: { claudeCodeConfig.allowShell = $0; debouncedSave() }
                         )
                     )
-                    claudePermissionUnavailable(
-                        title: "Osaurus tools",
-                        description: "The local MCP bridge is not attached to Claude Code turns in this Intel build yet."
+                    claudePermissionToggle(
+                        title: "Allow Osaurus read tools",
+                        description: "Attach osaurus_inspect and osaurus_help over an MCP bridge scoped to this agent. Needs the Osaurus server running.",
+                        isOn: Binding(
+                            get: { claudeCodeConfig.allowOsaurusTools },
+                            set: { claudeCodeConfig.allowOsaurusTools = $0; debouncedSave() }
+                        )
                     )
+                    claudePermissionToggle(
+                        title: "Allow Osaurus configuration changes",
+                        description: agent.id == Agent.defaultId
+                            ? "Also attach osaurus_config, which changes agents, providers, models, plugins, and MCP servers."
+                            : "Only the Default agent can change Osaurus configuration.",
+                        isOn: Binding(
+                            get: { claudeCodeConfig.allowOsaurusConfigWrites && agent.id == Agent.defaultId },
+                            set: { claudeCodeConfig.allowOsaurusConfigWrites = $0; debouncedSave() }
+                        )
+                    )
+                    .disabled(!claudeCodeConfig.allowOsaurusTools || agent.id != Agent.defaultId)
+                }
+            }
+            .settingsLandingAnchor("agents.claudeCode")
+        }
+    }
+
+    // MARK: - Runtime (upstream #3175)
+
+    private var selectedHarness: HarnessSelection? {
+        guard let id = agentRuntime.harnessId else { return nil }
+        if let runtime = harnessRuntimeStore.runtimes.first(where: { $0.id == id }) {
+            return .resolved(runtime)
+        }
+        return .missing(id)
+    }
+
+    /// Where the agent runs: Osaurus's own loop, or a harness the user
+    /// registered. Choosing is always explicit: a new agent starts on the
+    /// built-in loop and nothing here picks a runtime for it.
+    private var runtimeSection: some View {
+        AgentDetailSection(title: L("Runtime"), icon: "terminal") {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker(
+                    L("Runs on"),
+                    selection: Binding(
+                        get: { agentRuntime },
+                        set: { runtime in
+                            agentRuntime = runtime
+                            agentManager.updateRuntime(runtime, for: agent.id)
+                            showSaveIndicator()
+                        }
+                    )
+                ) {
+                    Text("Osaurus (built-in)", bundle: .module).tag(AgentRuntime.builtIn)
+                    ForEach(harnessRuntimeStore.runtimes) { runtime in
+                        Text(verbatim: runtime.displayName).tag(AgentRuntime.harness(runtime.id))
+                    }
+                    if case .missing(let id) = selectedHarness {
+                        Text("Missing runtime", bundle: .module).tag(AgentRuntime.harness(id))
+                    }
+                }
+                .pickerStyle(.menu)
+                .settingsLandingAnchor("agents.runtime")
+
+                runtimeExplanation
+
+                Button {
+                    ManagementStateManager.shared.selectedTab = .agentRuntimes
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Manage Runtimes", bundle: .module)
+                            .font(.system(size: 11, weight: .medium))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundColor(theme.accentColor)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .onAppear { harnessRuntimeStore.loadIfNeeded() }
+    }
+
+    @ViewBuilder
+    private var runtimeExplanation: some View {
+        switch selectedHarness {
+        case nil:
+            runtimeNote(
+                L("Osaurus runs this agent itself, on its model, with its tools, memory, and sandbox.")
+            )
+        case .missing:
+            runtimeNote(
+                L("The runtime this agent used was deleted, so its chats can't start. Pick another runtime or switch back to built-in."),
+                isWarning: true
+            )
+        case .resolved(let runtime):
+            VStack(alignment: .leading, spacing: 6) {
+                runtimeNote(
+                    String(
+                        format: L(
+                            "%@ runs this agent's chats as a process on this Mac, with its own model, tools, and conversation history. Osaurus sends each message and shows the reply; Osaurus abilities, memory, and the sandbox don't apply."
+                        ),
+                        runtime.displayName
+                    )
+                )
+                if runtime.kind == .piRPC {
+                    runtimeNote(
+                        L("Osaurus can't confine this runtime's tools. Narrow them with --tools in the runtime's arguments.")
+                    )
+                    if !runtime.wantsSystemPromptFile {
+                        runtimeNote(
+                            L("The system prompt below reaches it only when the runtime's arguments include {system_prompt_file}.")
+                        )
+                    }
                 }
             }
         }
+    }
+
+    private func runtimeNote(_ text: String, isWarning: Bool = false) -> some View {
+        Text(verbatim: text)
+            .font(.system(size: 11))
+            .foregroundColor(isWarning ? theme.warningColor : theme.tertiaryText)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func claudeCodeModeButton(_ mode: ClaudeCodeMode, label: LocalizedStringKey) -> some View {
@@ -3284,30 +3413,6 @@ struct AgentDetailView: View {
             Toggle("", isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
-        }
-    }
-
-    private func claudePermissionUnavailable(
-        title: LocalizedStringKey,
-        description: LocalizedStringKey
-    ) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title, bundle: .module)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(theme.secondaryText)
-                Text(description, bundle: .module)
-                    .font(.system(size: 10))
-                    .foregroundColor(theme.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 12)
-            Text("Unavailable", bundle: .module)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(theme.tertiaryText)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Capsule().fill(theme.secondaryBackground))
         }
     }
 
@@ -5623,7 +5728,8 @@ struct AgentDetailView: View {
         disableMemory = agent.disableMemory ?? false
         dbEnabled = agent.settings.dbEnabled
         webSearchEnabled = agent.settings.webSearchEnabled
-        claudeCodeConfig = agent.claudeCode ?? .default
+        claudeCodeConfig = agentManager.effectiveClaudeCodeConfig(for: agent.id)
+        agentRuntime = agentManager.effectiveRuntime(for: agent.id)
         autoSpeak = agent.autoSpeak ?? false
         ttsVoice = agent.ttsVoice ?? ""
         avatar = agent.avatar

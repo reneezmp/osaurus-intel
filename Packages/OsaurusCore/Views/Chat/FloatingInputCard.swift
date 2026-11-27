@@ -82,6 +82,16 @@ struct FloatingInputCard: View {
     /// Discard the queued send without sending it. Called by the chip's ×.
     var onCancelQueued: (() -> Void)?
     @ObservedObject var folderState: ChatFolderState
+    /// True when the chat has no visible messages yet. A harness restarts
+    /// without context only when there is context to lose (upstream #3175).
+    var isEmptyChat: Bool = false
+    @ObservedObject private var harnessRuntimeStore = HarnessRuntimeStore.shared
+    @State private var showHarnessFolderWarning = false
+    @State private var pendingHarnessFolderChange: (() -> Void)?
+    /// The Default agent's runtime and Claude Code options live in a config
+    /// file, not published state, so a change there would not redraw the
+    /// chip. Bumped on `.agentUpdated`; the harness lookups read it.
+    @State private var harnessConfigRevision = 0
     @ObservedObject private var recentFolders = RecentFoldersStore.shared
     @AppStorage(ComposerSpellCheckSetting.defaultsKey)
     private var spellCheckEnabled: Bool = ComposerSpellCheckSetting.defaultValue
@@ -139,6 +149,7 @@ struct FloatingInputCard: View {
         onSendNow: (() -> Void)? = nil,
         onCancelQueued: (() -> Void)? = nil,
         folderState: ChatFolderState? = nil,
+        isEmptyChat: Bool = false,
         onDraftChange: ((String) -> Void)? = nil,
         onWillRehydrate: (() -> Void)? = nil,
         inputHistoryProvider: (() -> [String])? = nil,
@@ -190,6 +201,7 @@ struct FloatingInputCard: View {
         self.onSendNow = onSendNow
         self.onCancelQueued = onCancelQueued
         self._folderState = ObservedObject(wrappedValue: folderState ?? ChatFolderState())
+        self.isEmptyChat = isEmptyChat
     }
 
     // Observe managers for reactive updates
@@ -765,6 +777,27 @@ struct FloatingInputCard: View {
                 }
             }
             .modifier(VoiceDebugObservers())
+            .onReceive(NotificationCenter.default.publisher(for: .agentUpdated)) { _ in
+                harnessConfigRevision &+= 1
+            }
+            .themedAlert(
+                L("Change the working folder?"),
+                isPresented: $showHarnessFolderWarning,
+                message: String(
+                    format: L(
+                        "%@ restarts in the new folder without its earlier context, because this runtime's arguments don't resume sessions (add --session-id {chat_id}). The Osaurus transcript is kept."
+                    ),
+                    harnessRuntime?.displayName ?? L("The harness")
+                ),
+                buttons: [
+                    .cancel(L("Cancel")) { pendingHarnessFolderChange = nil },
+                    .primary(L("Change Folder")) {
+                        let change = pendingHarnessFolderChange
+                        pendingHarnessFolderChange = nil
+                        change?()
+                    },
+                ]
+            )
             .themedAlert(
                 "Microphone access is off",
                 isPresented: $showMicPermissionAlert,
@@ -1923,13 +1956,16 @@ extension FloatingInputCard {
 
     private var selectorRow: some View {
         HStack(spacing: 6) {
-            if !pickerItems.isEmpty {
+            // A registered harness runtime is a picker column even with no
+            // model available, so the chip shows then too. It reads "Select
+            // Model" until the user picks something: nothing is chosen here.
+            if !pickerItems.isEmpty || isHarnessAgent || !pickerHarnessRuntimes.isEmpty {
                 modelSelectorChip
             }
 
             // Upstream: an image/video model has no thinking, folder or
             // sandbox semantics, so its options replace the row's chips.
-            if let media = selectedPickerItem?.mediaModel {
+            if !isHarnessAgent, let media = selectedPickerItem?.mediaModel {
                 MediaComposerChips(
                     media: media,
                     settings: $imageComposerSettings,
@@ -2027,7 +2063,7 @@ extension FloatingInputCard {
     @ViewBuilder
     private var contextBudgetRing: some View {
         let budget = contextBudget
-        if budget.displayTokens > 0 {
+        if budget.displayTokens > 0 && !isHarnessAgent {
             FloatingContextChip(
                 displayTokens: budget.displayTokens,
                 usableTokens: budget.usableTokens,
@@ -2077,7 +2113,9 @@ extension FloatingInputCard {
         modelPickerCardSize = ChatModelPickerCard.initialSize(
             providers: chatPickerProviders,
             selectedModel: selectedModel,
-            optionsControl: modelPickerOptionsControl
+            optionsControl: modelPickerOptionsControl,
+            selectedHarnessID: selectedHarnessPickerID,
+            harnessOptionsControl: harnessPickerOptionsControl
         )
         showModelPicker = true
     }
@@ -2085,6 +2123,7 @@ extension FloatingInputCard {
     /// The pill stays visually simple (upstream removed its trailing icons);
     /// thinking and vision details move to the tooltip and VoiceOver value.
     private var modelSelectorDetails: String {
+        guard !isHarnessAgent else { return "" }
         var details: [String] = []
         if let model = selectedModel, inlineReasoningSuffix == nil,
             ModelProfileRegistry.profile(for: model)?.thinkingOption != nil
@@ -2139,54 +2178,14 @@ extension FloatingInputCard {
         SelectorChip(isActive: showModelPicker) {
             if showModelPicker { dismissModelPicker() } else { openModelPicker() }
         } content: {
-            HStack(spacing: 6) {
-                if isSelectedModelDeprecated {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(theme.font(size: CGFloat(theme.captionSize) - 2))
-                        .foregroundColor(.orange)
-                        .localizedHelp("This model is outdated. Click to switch to a newer version.")
-                } else {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 6, height: 6)
-                }
-
-                // Model name and reasoning text, without suffix icons.
-                if let option = selectedPickerItem {
-                    HStack(spacing: 4) {
-                        Text(option.displayName)
-                            .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
-                            .foregroundColor(isSelectedModelDeprecated ? .orange : theme.secondaryText)
-                            .lineLimit(1)
-
-                        if let suffix = inlineReasoningSuffix {
-                            Text(verbatim: "· \(suffix)")
-                                .font(theme.font(size: CGFloat(theme.captionSize) - 1, weight: .regular))
-                                .foregroundColor(theme.tertiaryText)
-                                .lineLimit(1)
-                        }
-
-                        if !isCompact, let params = option.parameterCount {
-                            Text(params)
-                                .font(theme.font(size: CGFloat(theme.captionSize) - 3, weight: .medium))
-                                .foregroundColor(.blue.opacity(0.8))
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                        .fill(Color.blue.opacity(0.12))
-                                )
-                        }
-                    }
-                } else {
-                    Text("Select Model", bundle: .module)
-                        .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
-                        .foregroundColor(theme.secondaryText)
-                }
+            if isHarnessAgent {
+                harnessChipLabel
+            } else {
+                builtInModelChipLabel
             }
         }
         .accessibilityValue(Text(verbatim: modelSelectorDetails))
-        .help(modelSelectorDetails.isEmpty ? L("Model ready") : modelSelectorDetails)
+        .help(harnessChipHelp ?? (modelSelectorDetails.isEmpty ? L("Model ready") : modelSelectorDetails))
         .anchoredCard(isPresented: $showModelPicker, size: modelPickerCardSize, accessibilityLabel: L("Model picker")) {
             ChatModelPickerCard(
                 // `anchoredCard` builds this content on every body pass, open
@@ -2195,6 +2194,10 @@ extension FloatingInputCard {
                 providers: showModelPicker ? chatPickerProviders : [],
                 selectedModel: $selectedModel,
                 optionsControl: modelPickerOptionsControl,
+                selectedHarnessID: selectedHarnessPickerID,
+                harnessOptionsControl: harnessPickerOptionsControl,
+                runtimeSwitchLocked: isStreaming,
+                onSelectHarness: { selectHarness($0) },
                 onExploreLocal: {
                     dismissModelPicker()
                     AppDelegate.shared?.showManagementWindow(initialTab: .models)
@@ -2238,6 +2241,190 @@ extension FloatingInputCard {
         }
     }
 
+    private var builtInModelChipLabel: some View {
+        HStack(spacing: 6) {
+            if isSelectedModelDeprecated {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(theme.font(size: CGFloat(theme.captionSize) - 2))
+                    .foregroundColor(.orange)
+                    .localizedHelp("This model is outdated. Click to switch to a newer version.")
+            } else {
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 6, height: 6)
+            }
+
+            // Model name and reasoning text, without suffix icons.
+            if let option = selectedPickerItem {
+                HStack(spacing: 4) {
+                    Text(option.displayName)
+                        .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
+                        .foregroundColor(isSelectedModelDeprecated ? .orange : theme.secondaryText)
+                        .lineLimit(1)
+
+                    if let suffix = inlineReasoningSuffix {
+                        Text(verbatim: "· \(suffix)")
+                            .font(theme.font(size: CGFloat(theme.captionSize) - 1, weight: .regular))
+                            .foregroundColor(theme.tertiaryText)
+                            .lineLimit(1)
+                    }
+
+                    if !isCompact, let params = option.parameterCount {
+                        Text(params)
+                            .font(theme.font(size: CGFloat(theme.captionSize) - 3, weight: .medium))
+                            .foregroundColor(.blue.opacity(0.8))
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(
+                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    .fill(Color.blue.opacity(0.12))
+                            )
+                    }
+                }
+            } else {
+                Text("Select Model", bundle: .module)
+                    .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+            }
+        }
+    }
+
+    /// Chip label when the agent runs on an external harness: the runtime,
+    /// plus the Claude Code model and effort it launches with (upstream
+    /// #3180 / #3293).
+    private var harnessChipLabel: some View {
+        let missing = harnessRuntime == nil
+        return HStack(spacing: 6) {
+            Image(systemName: missing ? "exclamationmark.triangle.fill" : "terminal.fill")
+                .font(theme.font(size: CGFloat(theme.captionSize) - 2))
+                .foregroundColor(missing ? theme.warningColor : theme.tertiaryText)
+            Text(harnessRuntime?.displayName ?? L("Runtime missing"))
+                .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
+                .foregroundColor(missing ? theme.warningColor : theme.secondaryText)
+                .lineLimit(1)
+            if let model = harnessClaudeModelLabel {
+                Text(verbatim: "· \(model)")
+                    .font(theme.font(size: CGFloat(theme.captionSize) - 1, weight: .regular))
+                    .foregroundColor(theme.tertiaryText)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var harnessClaudeModelLabel: String? {
+        guard let runtime = harnessRuntime, runtime.kind == .claudeCode else { return nil }
+        let config = agentManager.effectiveClaudeCodeConfig(for: effectiveAgentId)
+        let model = config.resolvedModel
+        let label = ClaudeCodeModel(rawValue: model) != nil ? model.capitalized : model
+        guard let effort = config.resolvedEffort else { return label }
+        return "\(label) · \(effort.displayName)"
+    }
+
+    /// Claude Code's Reasoning Effort for the picker's options column. The
+    /// same `effort` the agent's Claude Code Options edit, so both stay in
+    /// step; the chat's process relaunches with it on the next message.
+    private var harnessPickerOptionsControl: ModelPickerOptionsControl? {
+        guard let runtime = harnessRuntime, runtime.kind == .claudeCode else { return nil }
+        let agentId = effectiveAgentId
+        let config = agentManager.effectiveClaudeCodeConfig(for: agentId)
+        let optionID = ClaudeCodeEffort.pickerOptionID
+        return ModelPickerOptionsControl(
+            capabilities: nil,
+            options: [ClaudeCodeEffort.pickerOption],
+            values: config.resolvedEffort.map { [optionID: .string($0.rawValue)] } ?? [:],
+            defaults: [optionID: .string(ModelOptionSegment.defaultID)],
+            onChange: { _, newValue in
+                // Deferred: the chip anchoring the popover renders the effort,
+                // and resizing it during the popover's own update crashes
+                // NSPopover.
+                DispatchQueue.main.async {
+                    var updated = agentManager.effectiveClaudeCodeConfig(for: agentId)
+                    let effort = ClaudeCodeEffort.storedValue(forSegment: newValue?.stringValue)
+                    guard updated.resolvedEffort?.rawValue != effort else { return }
+                    updated.effort = effort
+                    agentManager.updateClaudeCodeConfig(updated, for: agentId)
+                    harnessConfigRevision &+= 1
+                }
+            }
+        )
+    }
+
+    private var harnessChipHelp: String? {
+        guard isHarnessAgent else { return nil }
+        guard let runtime = harnessRuntime else {
+            return L("This agent's runtime was deleted. Pick another runtime or a model.")
+        }
+        return String(
+            format: L("This agent runs on %@, which uses its own tools. Click to switch runtimes or models."),
+            runtime.displayName
+        )
+    }
+
+    /// Runtimes offered as picker columns. Offering one starts nothing: a
+    /// runtime runs only after the user picks one of its rows.
+    private var pickerHarnessRuntimes: [HarnessRuntime] {
+        harnessRuntimeStore.all()
+    }
+
+    private var selectedHarnessPickerID: String? {
+        ChatHarnessPickerOption.selectedID(
+            runtime: harnessRuntime,
+            claudeConfig: agentManager.effectiveClaudeCodeConfig(for: effectiveAgentId)
+        )
+    }
+
+    /// Per-agent, like a model pick: the agent's runtime changes for this
+    /// chat and later ones. Nil moves it back to the built-in loop.
+    private func selectHarness(_ option: ChatHarnessPickerOption?) {
+        let agentId = effectiveAgentId
+        guard let option else {
+            agentManager.updateRuntime(.builtIn, for: agentId)
+            harnessConfigRevision &+= 1
+            return
+        }
+        if let claudeModel = option.claudeModel {
+            var config = agentManager.effectiveClaudeCodeConfig(for: agentId)
+            if config.resolvedModel != claudeModel {
+                config.model = claudeModel
+                agentManager.updateClaudeCodeConfig(config, for: agentId)
+            }
+        }
+        agentManager.updateRuntime(.harness(option.runtimeId), for: agentId)
+        harnessConfigRevision &+= 1
+    }
+
+    // MARK: - Harness Folder Rules (upstream #3175)
+
+    /// The harness this composer's agent runs on, when it resolves.
+    private var harnessRuntime: HarnessRuntime? {
+        _ = harnessConfigRevision
+        guard case .resolved(let runtime)? = agentManager.effectiveHarness(for: effectiveAgentId) else { return nil }
+        return runtime
+    }
+
+    private var isHarnessAgent: Bool {
+        _ = harnessConfigRevision
+        return agentManager.effectiveHarness(for: effectiveAgentId) != nil
+    }
+
+    /// A harness's working directory is fixed when its process starts, and a
+    /// running turn is never interrupted to move it.
+    private var folderLockedByHarnessTurn: Bool {
+        isHarnessAgent && isStreaming
+    }
+
+    /// Run a folder change, first confirming it when the harness would
+    /// restart without its earlier context.
+    private func confirmingHarnessFolderChange(_ change: @escaping () -> Void) {
+        guard !folderLockedByHarnessTurn else { return }
+        if let runtime = harnessRuntime, !runtime.resumesSessions, !isEmptyChat {
+            pendingHarnessFolderChange = change
+            showHarnessFolderWarning = true
+        } else {
+            change()
+        }
+    }
+
     private var cloudPickerItems: [ModelPickerItem] {
         pickerItems.filter {
             if case .remote(_, let providerID) = $0.source {
@@ -2253,7 +2440,14 @@ extension FloatingInputCard {
         let shortlist = Set(cachedPickerItems.filter {
             chatModelFavorites.isFavorite($0.favoriteKey) || $0.id == selectedModel
         }.map(\.id))
-        return ChatModelPickerProvider.groups(from: cachedPickerItems, cloudModelIDs: shortlist)
+        let current = harnessRuntime.map {
+            (runtimeId: $0.id, claudeModel: agentManager.effectiveClaudeCodeConfig(for: effectiveAgentId).resolvedModel)
+        }
+        return ChatModelPickerProvider.groups(
+            from: cachedPickerItems,
+            cloudModelIDs: shortlist,
+            harnesses: ChatModelPickerProvider.harnessProviders(runtimes: pickerHarnessRuntimes, current: current)
+        )
     }
 
     /// The picker's third column: the semantic Thinking row plus every other
@@ -2470,8 +2664,14 @@ extension FloatingInputCard {
     /// Drives both the chip's main tap and the context-menu "Change Folder"
     /// item so they share one mutual-exclusion path.
     private func selectFolderWithSandboxOff() {
+        confirmingHarnessFolderChange { performSelectFolder() }
+    }
+
+    private func performSelectFolder() {
+        // A harness agent has no Osaurus sandbox to switch off (upstream #3175).
+        let usesSandbox = !isHarnessAgent
         Task {
-            await disableSandboxIfEnabled()
+            if usesSandbox { await disableSandboxIfEnabled() }
             _ = await folderState.selectFolder(from: NSApp.keyWindow)
         }
     }
@@ -2926,7 +3126,12 @@ extension FloatingInputCard {
                 folderChipContent(hasFolder: hasFolder, canEdit: true, compact: compact)
             }
             .buttonStyle(.plain)
-            .help(hasFolder ? Text(localized: "Change working folder") : Text(localized: "Select a working folder"))
+            .disabled(folderLockedByHarnessTurn)
+            .help(
+                folderLockedByHarnessTurn
+                    ? Text(localized: "The folder can change after this reply finishes.")
+                    : hasFolder ? Text(localized: "Change working folder") : Text(localized: "Select a working folder")
+            )
             // The selected-folder name is decorative in the chip, so expose a
             // stable name, value, and identifier to VoiceOver and UI tests.
             .accessibilityLabel(Text("Folder", bundle: .module))
@@ -2955,7 +3160,7 @@ extension FloatingInputCard {
                     }
                     Divider()
                     Button(role: .destructive) {
-                        folderState.clearFolder()
+                        confirmingHarnessFolderChange { folderState.clearFolder() }
                     } label: {
                         Label {
                             Text("Clear Folder", bundle: .module)
@@ -2970,7 +3175,7 @@ extension FloatingInputCard {
 
             if hasFolder {
                 Button {
-                    folderState.clearFolder()
+                    confirmingHarnessFolderChange { folderState.clearFolder() }
                 } label: {
                     Image(systemName: "xmark")
                         .font(theme.font(size: CGFloat(theme.captionSize) - 4, weight: .bold))
@@ -3053,6 +3258,11 @@ extension FloatingInputCard {
     }
 
     private func useRecentFolder(_ entry: RecentFoldersStore.Entry) {
+        confirmingHarnessFolderChange { performUseRecentFolder(entry) }
+    }
+
+    private func performUseRecentFolder(_ entry: RecentFoldersStore.Entry) {
+        let usesSandbox = !isHarnessAgent
         Task {
             guard let url = await RecentFoldersStore.resolveURL(for: entry) else {
                 RecentFoldersStore.shared.remove(path: entry.path)
@@ -3062,7 +3272,7 @@ extension FloatingInputCard {
                 )
                 return
             }
-            await disableSandboxIfEnabled()
+            if usesSandbox { await disableSandboxIfEnabled() }
             if await folderState.setFolder(url) != nil {
                 RecentFoldersStore.shared.record(path: url.standardizedFileURL.path)
             }

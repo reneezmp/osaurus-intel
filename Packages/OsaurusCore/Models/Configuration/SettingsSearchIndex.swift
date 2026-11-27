@@ -133,7 +133,7 @@ public enum SettingsSearchIndex {
         "themes.overview", "providers.overview", "agents.overview", "search.overview",
         "knowledge.overview", "tools.overview", "skills.overview", "commands.overview",
         "plugins.overview", "schedules.overview", "watchers.overview", "insights.overview",
-        "permissions.overview", "sandbox.overview",
+        "permissions.overview", "sandbox.overview", "agentRuntimes.overview",
     ]
 
     public static let entries: [SettingsSearchEntry] = [
@@ -460,9 +460,6 @@ public enum SettingsSearchIndex {
             id: "providers.overview", tab: .providers, title: "Cloud Models",
             keywords: ["providers", "api key", "openai", "deepseek", "anthropic", "router", "remote models"]),
         .init(
-            id: "providers.claudeCode", tab: .providers, title: "Claude Code",
-            keywords: ["claude", "cli", "sign in"]),
-        .init(
             id: "orchestrator.prompt", tab: .orchestrator, title: "System Prompt",
             keywords: ["orchestrator", "default agent", "instructions"]),
         .init(
@@ -482,6 +479,64 @@ public enum SettingsSearchIndex {
         .init(
             id: "agents.overview", tab: .agents, title: "Agents",
             keywords: ["create agent", "new agent", "agent settings", "abilities", "database", "bundles"]),
+
+        // MARK: Agent runtimes (upstream #3175 / #3180 / #3293, W-harness-runtimes stage 5)
+        .init(
+            id: "agents.runtime", tab: .agents, section: "Runtime", title: "Runs on",
+            keywords: [
+                "runtime", "agent runtime", "harness", "external harness", "claude code", "pi", "pi rpc",
+                "built-in loop", "osaurus built-in", "run agent on claude code", "manage runtimes",
+                "switch runtime", "switch to claude code", "model picker runtime",
+            ],
+            disambiguation:
+                "Per-agent choice between Osaurus's own loop and a registered harness (Configure tab → Runtime). The chat model picker lists the same runtimes as columns; picking one there changes this setting. Register or test harnesses under Agents → Runtimes. A runtime only runs when you choose it here or in the picker."
+        ),
+        .init(
+            id: "agents.claudeCode.model", tab: .agents, section: "Claude Code Options", title: "Claude model",
+            keywords: ["claude code model", "sonnet", "opus", "haiku", "model alias"],
+            disambiguation:
+                "Shown only when the agent's runtime is Claude Code. The Claude Code column of the chat model picker sets the same value."
+        ),
+        .init(
+            id: "agents.claudeCode.effort", tab: .agents, section: "Claude Code Options", title: "Claude effort",
+            keywords: [
+                "claude code effort", "effort", "thinking effort", "reasoning effort", "thinking level",
+                "extra high", "xhigh", "max effort", "--effort",
+            ],
+            disambiguation:
+                "Shown only when the agent's runtime is Claude Code. Passed to the CLI as `--effort`; Default leaves Claude Code on its own per-model default. Not the chat composer's reasoning control for built-in-loop models."
+        ),
+        .init(
+            id: "agents.claudeCode", tab: .agents, section: "Claude Code Options", title: "Allow file changes",
+            keywords: [
+                "execution mode", "text only", "allow shell commands", "bash", "allow osaurus read tools",
+                "allow osaurus configuration changes", "claude code permissions", "claude code tools", "mcp bridge",
+            ],
+            disambiguation:
+                "Claude Code permission switches on an agent whose runtime is Claude Code. File changes are scoped to the chat folder; shell commands can't be confined."
+        ),
+        .init(
+            id: "agentRuntimes.overview", tab: .agentRuntimes, title: "Agent Runtimes",
+            keywords: [
+                "runtimes", "harness", "harnesses", "external agent", "claude code", "pi", "pi rpc", "rpc mode",
+                "agent backend", "pluggable",
+            ]),
+        .init(
+            id: "agentRuntimes.add", tab: .agentRuntimes, title: "Add Runtime",
+            keywords: [
+                "new runtime", "register harness", "executable", "arguments", "environment", "protocol",
+                "session id", "chat id placeholder", "system prompt file",
+            ]),
+        .init(
+            id: "agentRuntimes.list", tab: .agentRuntimes, title: "Test",
+            keywords: [
+                "test runtime", "check harness", "get_state", "sign in", "claude code sign in", "claude login",
+                "edit runtime", "delete runtime",
+            ],
+            disambiguation: "Per-runtime Test, Sign In (Claude Code), Edit, and Delete buttons in Agents → Runtimes."),
+        .init(
+            id: "agentRuntimes.safety", tab: .agentRuntimes, title: "How runtimes work",
+            keywords: ["harness permissions", "confine", "harness sandbox", "harness folder", "osaurus_agent_token"]),
 
         // MARK: Capabilities
         .init(

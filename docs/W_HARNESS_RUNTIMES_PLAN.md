@@ -113,7 +113,8 @@ no port.
 | 3 | Done (see "Stage 3 notes") |
 | 4a | Done: chat runs on the harness, migration, narrow environment (see "Stage 4 notes") |
 | 4b | Done (2026-11-27, see "Stage 4b notes"): agent-token gate and `/mcp/*`, `/agents/{id}/run` refusal, spawn targets, built-in-loop tool refusal |
-| 5-6 | Not started |
+| 5 | Code done (2026-11-27, see "Stage 5 notes"); filtered and full gate results in the stage 5 report; not run on screen |
+| 6 | Not started |
 
 ## Facts learned
 
@@ -358,3 +359,54 @@ A found-by-test note: Intel's automatic chat title falls back to a hard-coded
 cloud model (`deepseek-flash`); a harness chat without a configured core model
 now keeps the first-line title instead of sending the chat there.
 
+
+## Stage 5 notes (UI, 2026-11-27)
+
+Ported from `upstream/classic` #3175 / #3180 / #3293. Hard rule kept: a runtime
+runs only when the user chose it (agent editor Runs on, a picker row, the
+onboarding Claude Code step) or presses Test / Sign In; never a default,
+fallback or "first available". `HarnessUITests` checks it, including a source
+guard that only `ChatSession+Harness`, `HarnessRuntimeForm` (Test) and the
+sign-in sheet reach the launch/probe APIs.
+
+- **Settings > Agents > Runtimes** (`ManagementTab.agentRuntimes`,
+  `AgentRuntimesView`): list, Add/Edit sheet with protocol, executable,
+  arguments, environment overlay (`OSAURUS_*` refused), Test, Sign In (Claude
+  Code), Delete. Ventura: `ThemedSegmentedPicker`, single-value `onChange`.
+  Parsing and the Test button state moved to `HarnessRuntimeForm.swift`
+  (`HarnessRuntimeTester` takes an injectable probe; tests use fakes).
+- **Picker columns:** `ChatHarnessPickerOption`, harness providers in
+  `ChatModelPickerProvider`, rows and locking in `ChatModelPickerCard`,
+  Claude Code effort row (`ClaudeCodeEffort.pickerOption`, `ModelOptionSegment.defaultID`).
+  The seeded Claude Code runtime therefore shows as a picker column for every
+  user; it starts nothing. With no models and no choice the chip reads "Select
+  Model" (ChatContentView no longer shows the discovery spinner when a runtime
+  is registered).
+- **Composer:** chip shows "Claude Code · Opus · High"; context ring and media
+  chips hidden for a harness agent; folder change is locked while a reply
+  streams, warns when the runtime does not resume sessions, and does not switch
+  the Osaurus sandbox off for harness agents.
+- **Agent editor:** Runtime section (Runs on menu, Manage Runtimes); Model
+  section only on the built-in loop; "Claude Code Options" only on Claude Code
+  (model, effort, file/shell, Osaurus read tools, config writes Default only).
+- **Providers page:** the Claude Code card now points to Agents > Runtimes.
+  Sign-in sheet gained Cancel and "Sign In from Terminal Instead".
+- Search entries/anchors, guide topics (agents, chat, settings, providers, Intel
+  topic) updated; `ClaudeCodeConfiguration.login(command:overlay:)` replaced
+  the env form.
+- Not ported: Spawn editor changes (no `.claudeCode` source on Intel).
+
+### On-screen checklist for Rosy (Ventura), nothing run yet
+
+1. Existing Claude Code chat after updating: the agent that used a
+   `claude-code/*` model opens on Claude Code (chip "Claude Code · Sonnet").
+   Send a message: it replies via the CLI; no other agent changes.
+2. Settings > Agents > Runtimes: Claude Code row; Test shows ready/needs setup;
+   Sign In sheet; Add Runtime (Pi) with `KEY=value` overlay; delete.
+3. Model picker: Claude Code column (one row per alias) and effort column;
+   picking a model row returns to the built-in loop. Rows disabled while streaming.
+4. Fresh agent: Runs on = Osaurus (built-in); model section shown. No harness
+   starts until you pick one.
+5. Only-harness case (no cloud key): chip says Select Model; nothing selected.
+6. Folder chip: locked mid-reply; sandbox stays on for the agent.
+7. Search "runs on", "claude effort", "add runtime" land on the controls.
