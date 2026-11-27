@@ -1030,9 +1030,6 @@ struct AgentDetailView: View {
     /// away its only copy (the encrypted `db.sqlite`) of the data it
     /// has accumulated — no Trash, no undo.
     @State private var showDeleteDBConfirmation: Bool = false
-    /// Delete Data is a General → Configure action, separate from toggling
-    /// the optional structured database in Abilities.
-    @State private var showDeleteAgentDataConfirmation: Bool = false
 
     // MARK: - Bundle export/import state (spec §11.1)
 
@@ -1522,13 +1519,6 @@ struct AgentDetailView: View {
                 secondaryButton: .cancel(L("Cancel"))
             )
             .themedAlert(
-                L("Delete this agent's data?"),
-                isPresented: $showDeleteAgentDataConfirmation,
-                message: L("This permanently removes this agent's chats, pinned facts, and episode summaries. The agent and its settings stay. This cannot be undone."),
-                primaryButton: .destructive(L("Delete Data")) { deleteAgentConversationData() },
-                secondaryButton: .cancel(L("Cancel"))
-            )
-            .themedAlert(
                 L("Expose Agent to Internet?"),
                 isPresented: $showRelayConfirmation,
                 message:
@@ -2001,9 +1991,6 @@ struct AgentDetailView: View {
             scheduleSection
         }
         advancedSettingsDisclosure
-        if !agent.isBuiltIn {
-            agentDataSection
-        }
         deleteAllDataSection
     }
 
@@ -2158,40 +2145,6 @@ struct AgentDetailView: View {
             }
             .onChange(of: name) { _ in debouncedSave() }
             .onChange(of: description) { _ in debouncedSave() }
-        }
-    }
-
-    private var agentDataSection: some View {
-        AgentDetailSection(title: "Agent Data", icon: "externaldrive.badge.xmark") {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Delete chats and memory", bundle: .module)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(theme.primaryText)
-                    Text(
-                        "Keeps this agent and its settings, but permanently removes its chats, pinned facts, and episode summaries.",
-                        bundle: .module
-                    )
-                    .font(.system(size: 10))
-                    .foregroundColor(theme.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 12)
-                Button(role: .destructive) {
-                    showDeleteAgentDataConfirmation = true
-                } label: {
-                    Label(localized: "Delete Data", systemImage: "trash")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(theme.errorColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7)
-                                .fill(theme.errorColor.opacity(0.12))
-                        )
-                }
-                .buttonStyle(.plain)
-            }
         }
     }
 
@@ -3966,30 +3919,6 @@ struct AgentDetailView: View {
         LocalAgentBridge.shared.forget(agentId: agentId)
         AgentManager.shared.clearStorageWarning(for: agentId)
         showSuccess("Deleted the agent's database")
-    }
-
-    /// Clear only the data that is genuinely available in the Intel build.
-    /// The private Agent Database is dependency-blocked here, but normal chat
-    /// history and memory are local and can be deleted without removing the
-    /// agent configuration itself.
-    private func deleteAgentConversationData() {
-        let agentId = agent.id
-        for session in ChatSessionsManager.shared.sessions(for: agentId) {
-            ChatSessionsManager.shared.delete(id: session.id)
-        }
-
-        do {
-            if !MemoryDatabase.shared.isOpen {
-                try MemoryDatabase.shared.open()
-            }
-            try MemoryDatabase.shared.deleteNamespaceData(agentId: agentId.uuidString)
-        } catch {
-            print("[Agent Settings] Failed to delete memory for \(agentId): \(error)")
-        }
-
-        refreshDetailCaches()
-        loadMemoryData()
-        showSuccess("Deleted chats and memory")
     }
 
     private func featureToggleRow(title: LocalizedStringKey, subtitle: LocalizedStringKey, isOn: Binding<Bool>)

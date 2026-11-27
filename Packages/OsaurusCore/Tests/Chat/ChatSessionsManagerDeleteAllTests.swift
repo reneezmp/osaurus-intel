@@ -58,6 +58,28 @@ struct ChatSessionsManagerDeleteAllTests {
         }
     }
 
+    /// An agent's General tab offers one data-deletion card, upstream's
+    /// "Delete All Data"; the older Intel "Delete chats and memory" card is
+    /// gone. Its scoping is pinned here and in `MemoryTests`.
+    @Test
+    func agentGeneralTabHasOneDataDeletionCard() throws {
+        let view = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Views/Agent/AgentsView.swift")
+        let source = try String(contentsOf: view, encoding: .utf8)
+        #expect(source.contains("deleteAllDataSection"))
+        #expect(!source.contains("agentDataSection"))
+        #expect(!source.contains("deleteNamespaceData"))
+        // The card still covers what the removed one deleted: chats, pinned
+        // facts, episodes and transcripts.
+        for call in [
+            "deleteAll(for: agentId)", "deletePinnedFacts(forAgent: agentScope)",
+            "deleteEpisodes(forAgent: agentScope)", "deleteConversationMemory(forAgent: agentScope)",
+        ] {
+            #expect(source.contains(call))
+        }
+    }
+
     @Test
     func deleteAll_forDefaultAgent_leavesOtherAgentsSessions() async throws {
         try await ChatHistoryTestStorage.run {
