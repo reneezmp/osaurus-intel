@@ -34,7 +34,8 @@ public struct SettingsSearchEntry: Identifiable, Sendable, Hashable {
     /// Label of the settings control that hosts this entry when it differs
     /// from `title` (e.g. the "Tools" subsection hosts "Disable tools").
     public let anchorLabel: String?
-    /// Voice sub-tab to open (a `VoiceTab` raw value), as upstream does.
+    /// Sub-tab to open, as upstream does: a `VoiceTab` or `ToolsTab` raw
+    /// value, or a Server settings section (`ServerSettingsSection`).
     public let subTab: String?
 
     public init(
@@ -557,6 +558,14 @@ public enum SettingsSearchIndex {
         .init(
             id: "server.accessKeys", tab: .server, title: "Access Keys",
             keywords: ["api keys", "tokens", "authentication", "revoke"]),
+        .init(
+            id: "server.localAccessKey", tab: .server, section: "Connection",
+            title: "Require an access key for local apps",
+            keywords: [
+                "local access key", "local api key", "require key locally", "loopback auth", "localhost key",
+                "authentication", "browser origin",
+            ],
+            subTab: "connection"),
         .init(
             id: "server.endpoints", tab: .server, title: "API Endpoints",
             keywords: ["openai compatible", "rest", "documentation", "test endpoint"]),

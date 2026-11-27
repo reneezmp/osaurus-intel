@@ -146,6 +146,7 @@ struct ConnectionSection: View {
                 description: L(
                     "Off: apps on this Mac can reach chats, agents and tools without a key. On: they must send an access key, like other devices. Browser pages are always refused unless listed in Allowed Origins."
                 ),
+                anchorId: "server.localAccessKey",
                 isOn: LocalAPIKeyPolicy.binding(
                     get: { requireLocalKey }, set: { requireLocalKey = $0 })
             )

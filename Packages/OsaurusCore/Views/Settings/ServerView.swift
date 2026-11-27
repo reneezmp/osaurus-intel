@@ -46,12 +46,21 @@ private nonisolated(unsafe) let sharedByteCountFormatter: ByteCountFormatter = {
 struct ServerView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @EnvironmentObject var server: ServerController
+    @ObservedObject private var managementState = ManagementStateManager.shared
 
     private var theme: ThemeProtocol { themeManager.currentTheme }
 
     @State private var selectedTab: ServerTab = .overview
     @State private var searchText: String = ""
     @State private var hasAppeared = false
+
+    /// A settings-search result targeting a Server section opens the Settings
+    /// tab (the content view does the section scroll; upstream).
+    private func focusSettingsTabIfRequested() {
+        if managementState.serverSectionRequest != nil {
+            selectedTab = .settings
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -78,10 +87,12 @@ struct ServerView: View {
         .background(theme.primaryBackground)
         .environment(\.theme, themeManager.currentTheme)
         .onAppear {
+            focusSettingsTabIfRequested()
             withAnimation(.easeOut(duration: 0.25).delay(0.05)) {
                 hasAppeared = true
             }
         }
+        .onChange(of: managementState.serverSectionRequest) { _ in focusSettingsTabIfRequested() }
     }
 
     private var headerView: some View {

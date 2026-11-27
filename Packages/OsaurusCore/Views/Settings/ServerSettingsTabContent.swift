@@ -276,6 +276,7 @@ struct ServerSettingsTabContent: View {
     @State private var saving: Bool = false
     @State private var successMessage: String?
     @State private var activeSection: ServerSettingsSection = .connection
+    @ObservedObject private var managementState = ManagementStateManager.shared
 
     private var theme: ThemeProtocol { themeManager.currentTheme }
 
@@ -324,6 +325,10 @@ struct ServerSettingsTabContent: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.primaryBackground)
         .onAppear {
+            // Defer a beat so the section scroll runs after first layout.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                applySectionRequest()
+            }
             guard !hasLoaded else { return }
             hasLoaded = true
             draftLegacy = server.configuration
@@ -331,6 +336,17 @@ struct ServerSettingsTabContent: View {
         .onChange(of: server.configuration) { newValue in
             if !hasUnsavedChanges { draftLegacy = newValue }
         }
+        .onChange(of: managementState.serverSectionRequest) { _ in applySectionRequest() }
+    }
+
+    /// Honour a settings-search result that targets a Server section
+    /// (upstream): scroll to it and clear the one-shot request.
+    private func applySectionRequest() {
+        guard let raw = managementState.serverSectionRequest,
+            let section = ServerSettingsSection(rawValue: raw)
+        else { return }
+        managementState.serverSectionRequest = nil
+        activeSection = section
     }
 
     // MARK: - Content pane

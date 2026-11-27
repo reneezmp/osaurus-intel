@@ -177,6 +177,9 @@ private extension ManagementView {
         if entry.tab == .tools, let subTab = entry.subTab {
             stateManager.pendingToolsSubTab = subTab
         }
+        if entry.tab == .server, let subTab = entry.subTab {
+            stateManager.serverSectionRequest = subTab
+        }
         withAnimation(.easeOut(duration: 0.2)) {
             stateManager.selectedTab = entry.tab
         }

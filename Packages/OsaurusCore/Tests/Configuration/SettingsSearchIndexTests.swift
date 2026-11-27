@@ -152,6 +152,24 @@ struct SettingsSearchIndexTests {
         #expect(missing.isEmpty, "anchors without a search entry: \(Set(missing).sorted())")
     }
 
+    /// The local access-key switch: found by search, anchored on its row, and
+    /// the result opens Server → Settings.
+    @Test("The local access key switch is findable")
+    func localAccessKeySwitchIsSearchable() throws {
+        let hit = try #require(
+            SettingsSearchIndex.search("require an access key").first)
+        #expect(hit.id == "server.localAccessKey")
+        #expect(SettingsSearchIndex.search("access key").contains { $0.id == hit.id })
+        #expect(hit.subTab.flatMap(ServerSettingsSection.init(rawValue:)) == .connection)
+        #expect(
+            try Self.source("Settings/ServerSettings/ConnectionSection.swift")
+                .contains("anchorId: \"server.localAccessKey\""))
+        #expect(
+            try Self.source("Management/ManagementView.swift")
+                .contains("stateManager.serverSectionRequest = subTab"))
+        #expect(try Self.source("Settings/ServerView.swift").contains("focusSettingsTabIfRequested()"))
+    }
+
     @Test("Mobile, Browser Use and Web Search controls are findable")
     func previouslyMissingTabsAreSearchable() {
         #expect(SettingsSearchIndex.search("pairing code").first?.tab == .connect)
