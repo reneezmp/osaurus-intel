@@ -3855,3 +3855,12 @@ Owner decision 1 (`UPSTREAM_SYNC.md`). Not in candidate 69. The local server mus
 
 - [ ] With the filter off (default), a cloud chat containing an email address replies normally, and Insights shows the real address in the request body.
 - [ ] Router, Codex and a tool-using agent still work as before (no new errors).
+
+## Apple apps as groups in the Tools picker (2026-11-27)
+
+Upstream #2835 picker part (`8cab57439`). Not in candidate 71.
+
+- [ ] A custom agent's Abilities → Tools lists one group per Apple app; the Overview has no separate Apple Apps card.
+- [ ] Turn Calendar on: macOS asks for access. After a denial, "Permission needed" opens System Settings.
+- [ ] The built-in agent's Tools tab shows no Apple groups.
+- [ ] Create Agent → Customize…: turn Notes on and save; the summary lists it and the new agent has Notes on.

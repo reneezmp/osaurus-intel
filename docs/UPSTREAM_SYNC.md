@@ -335,6 +335,14 @@ mdat and live-folder checks).
   (stage 4):** with the filter on and review needed, a chat send is blocked.
   Full suite 6,978 passed. Live hits in that run were the installed upstream
   app's own `activity.sqlite` (it held the file open).
+- **#2835 Apple app groups merged, 2026-11-27** (`8cab57439`): Abilities → Tools and
+  the Create Agent picker list one group per Apple app with a per-app switch
+  and a "Permission needed" badge (re-asks, then opens System Settings, Full
+  Disk Access first); the built-in agent sees none; Intel's own Overview
+  "Apple Apps" section is removed (upstream has none). Permission requests fire
+  only from the toggle or the badge. The rest of #2835 was already on Intel.
+  Not ported: #2306's selection callback and counter, the search landing.
+  Full suite 6,982 passed.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
