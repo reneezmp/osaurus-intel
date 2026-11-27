@@ -114,7 +114,7 @@ no port.
 | 4a | Done: chat runs on the harness, migration, narrow environment (see "Stage 4 notes") |
 | 4b | Done (2026-11-27, see "Stage 4b notes"): agent-token gate and `/mcp/*`, `/agents/{id}/run` refusal, spawn targets, built-in-loop tool refusal |
 | 5 | Code done (2026-11-27, see "Stage 5 notes"); filtered and full gate results in the stage 5 report; not run on screen |
-| 6 | Not started |
+| 6 | Done (2026-11-27, `0de8104d7`): config schema, export, planner (high-risk lines), applier, bundles, `OSAURUS_*` refused, inspect scope, samples. Runtime `environment` exported in clear as upstream |
 
 ## Facts learned
 

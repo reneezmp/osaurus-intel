@@ -3839,3 +3839,12 @@ Owner decision 1 (`UPSTREAM_SYNC.md`). Not in candidate 69. The local server mus
 - [ ] Settings → Agents → Runtimes lists Claude Code; its Test button reports signed in (on Rosy: the x64 or npm `claude`).
 - [ ] In an agent's editor, set Runtime to Claude Code and back to Built-in: chats follow the choice.
 - [ ] Ask a Claude Code agent to use an Osaurus tool (for example list your agents): it works, and an "Ask" tool still asks.
+
+## Runtimes in config documents and bundles (2026-11-27)
+
+`W-harness-runtimes` stage 6 (`0de8104d7`). Not in candidate 71.
+
+- [ ] Ask the Orchestrator to add a Pi runtime and an agent on it: the review window shows the executable, arguments, environment and high-risk lines. Cancel: Settings → Agents → Runtimes is unchanged.
+- [ ] Do it again and Apply: the runtime and agent appear; nothing starts until you chat with that agent.
+- [ ] A document naming an unknown runtime is refused (not run on the built-in loop); an `OSAURUS_X` environment key is refused.
+- [ ] Export config: it contains `harness_runtimes` and `runtime:`; planning that export shows no changes.

@@ -314,6 +314,15 @@ mdat and live-folder checks).
   it (tests, plus a source scan limiting launch calls to the harness files).
   Full suite on the rebased tree: 6,951 passed. Held branches deleted. Stage 6
   (config documents, bundles) left.
+- **Harness runtimes stage 6 merged, 2026-11-27** (`0de8104d7`):
+  `harness_runtimes`, agent `runtime` and `default_agent.runtime` /
+  `claude_code` in config documents, export, planner, applier and bundles. A
+  new or changed runtime command, its environment, and moving an agent onto a
+  harness are high-risk lines; applying only writes the runtime store and the
+  agent, never launches. `OSAURUS_*` keys are refused in documents and bundles
+  (Intel addition). As upstream, a runtime's `environment` overlay is exported
+  and shown in the review window in clear: don't keep secrets there. Full suite
+  6,965 passed. `W-harness-runtimes` complete.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
