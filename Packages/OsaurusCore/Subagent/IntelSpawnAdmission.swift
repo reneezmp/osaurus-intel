@@ -213,6 +213,10 @@ enum IntelSpawnAdmission {
             case .failure(.modelUnavailable): state = .disconnected
             case .failure: state = .missing
             }
+            // An agent on a harness runtime is never runnable here
+            // (`spawn_agent` can't drive it; upstream #3175 `runsOnHarness`).
+            let runsOnHarness = AgentManager.shared.effectiveRuntime(for: id).harnessId != nil
+            let finalState: SpawnTargetState = runsOnHarness && agent != nil ? .harness : state
             return SpawnAgentTarget(
                 descriptor: SpawnAgentDescriptor(
                     id: id,
@@ -226,7 +230,7 @@ enum IntelSpawnAdmission {
                         let path = $0.workingFolderPath?.trimmingCharacters(in: .whitespacesAndNewlines)
                         return path?.isEmpty == false ? path : nil
                     }),
-                state: state)
+                state: finalState)
         }
         return SpawnTargetAvailabilitySnapshot(agentTargets: targets)
     }

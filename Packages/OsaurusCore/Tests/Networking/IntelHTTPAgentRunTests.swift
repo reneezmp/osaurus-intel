@@ -93,6 +93,39 @@ struct IntelHTTPAgentRunTests {
         #expect(unknown.body.contains("invalid_agent_id"))
     }
 
+    /// Stage 4b (upstream #3175): an agent on a harness runtime is refused on
+    /// `/agents/{id}/run` with the typed message, and the built-in engine is
+    /// never called.
+    @Test func run_refusesAnAgentOnAHarnessRuntime() async throws {
+        try await ChatHistoryTestStorage.run {
+            let previousStoreDir = HarnessRuntimeStore.overrideDirectory
+            HarnessRuntimeStore.overrideDirectory = OsaurusPaths.root()
+            HarnessRuntimeStore.shared.resetForTests()
+            DefaultAgentConfigurationStore.resetCacheForTests()
+            defer {
+                HarnessRuntimeStore.overrideDirectory = previousStoreDir
+                HarnessRuntimeStore.shared.resetForTests()
+                DefaultAgentConfigurationStore.resetCacheForTests()
+            }
+            let engine = ScriptedRunEngine(deltas: ["BUILTIN-RAN"])
+            let server = try await startRunTestServer(engine: engine)
+            defer { Task { await server.shutdown() } }
+            // A runtime id that need not resolve: a missing runtime is refused
+            // the same way (never a silent built-in run).
+            AgentManager.shared.updateRuntime(.harness(UUID()), for: Agent.defaultId)
+            let result = try await server.post(
+                "/agents/default/run", #"{"messages":[{"role":"user","content":"hi"}]}"#)
+            #expect(result.body.contains("runs on an external harness"))
+            #expect(!result.body.contains("BUILTIN-RAN"))
+            #expect(await engine.captured == nil)
+
+            AgentManager.shared.updateRuntime(.builtIn, for: Agent.defaultId)
+            let normal = try await server.post(
+                "/agents/default/run", #"{"model":"fake","messages":[{"role":"user","content":"hi"}]}"#)
+            #expect(normal.body.contains("BUILTIN-RAN"))
+        }
+    }
+
     @Test func runs_routesAnswerRunNotFound() async throws {
         let server = try await startRunTestServer(engine: ScriptedRunEngine(deltas: []))
         defer { Task { await server.shutdown() } }

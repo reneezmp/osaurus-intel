@@ -176,6 +176,10 @@ public enum ChatExecutionContext {
     /// see. Module-internal so out-of-module callers cannot unbind it.
     @TaskLocal static var isExternalSurface: Bool = false
 
+    /// Set by `/mcp/call` only after a live harness agent token resolved
+    /// (upstream #3175): the agent the token speaks for.
+    @TaskLocal static var harnessTokenAgentId: UUID?
+
     /// Headless auto-denial for `.ask`-gated tools (upstream): bound by
     /// callers with no approval UI (external MCP, eval lanes), so a tool
     /// that would ask is refused instead of hanging on a card nobody sees.

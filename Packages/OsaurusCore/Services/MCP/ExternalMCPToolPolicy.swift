@@ -20,7 +20,9 @@ enum ExternalMCPToolPolicy {
     }
 
     @MainActor
-    static func executeToolAsExternalMCP(name: String, argumentsJSON: String) async throws -> String {
+    static func executeToolAsExternalMCP(
+        name: String, argumentsJSON: String, harnessAgentId: UUID? = nil
+    ) async throws -> String {
         guard ToolRegistry.shared.isGlobalEnabled(name) else {
             throw NSError(
                 domain: "ToolRegistry",
@@ -32,7 +34,13 @@ enum ExternalMCPToolPolicy {
         }
         return try await ChatExecutionContext.$isExternalSurface.withValue(true) {
             try await ChatExecutionContext.$denyUnapprovedToolPrompts.withValue(true) {
-                try await ToolRegistry.shared.execute(name: name, argumentsJSON: argumentsJSON)
+                // A live harness token proves which agent's chat this is; bind
+                // it for this call (attribution, not trust).
+                try await ChatExecutionContext.$currentAgentId.withValue(harnessAgentId) {
+                    try await ChatExecutionContext.$harnessTokenAgentId.withValue(harnessAgentId) {
+                        try await ToolRegistry.shared.execute(name: name, argumentsJSON: argumentsJSON)
+                    }
+                }
             }
         }
     }

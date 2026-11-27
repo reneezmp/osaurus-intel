@@ -89,7 +89,7 @@ no port.
    upstream's fake adapters; upstream's `HarnessLiveTests` (real process) is not
    ported. The Pi probe becomes the real `get_state` probe. Launch refuses an
    Incompatible binary with a clear error.
-4. **App integration** (4a done in this branch, 4b open, see "Stage 4 notes").
+4. **App integration** (4a and 4b done in this branch, see "Stage 4 notes" and "Stage 4b notes").
    `AgentManager+Harness` (effective runtime, unsupported paths,
    `claude-code/*` migration), `ChatSession+Harness`, `IntelClaudeCodeService`
    and its `CloudChatEngine` routing removed, the `claude-code/*`
@@ -112,7 +112,7 @@ no port.
 | 2 | Done (see the commit "Port #3175 (stage 2)") |
 | 3 | Done (see "Stage 3 notes") |
 | 4a | Done: chat runs on the harness, migration, narrow environment (see "Stage 4 notes") |
-| 4b | Open: agent-token gate on `/mcp/*` and the unsupported-path refusal on `/agents/{id}/run` (both in `Networking/`), `SpawnDescriptors` (`Subagent/`) |
+| 4b | Done (2026-11-27, see "Stage 4b notes"): agent-token gate and `/mcp/*`, `/agents/{id}/run` refusal, spawn targets, built-in-loop tool refusal |
 | 5-6 | Not started |
 
 ## Facts learned
@@ -193,6 +193,80 @@ caller; stage 4 wires `Agent.runtime` into the chat.
   temporary folder (never `claude` or `pi`, no network, keychain or
   `~/.osaurus`); the registry test kills only that script.
 
+## Stage 4b notes (HTTP, spawn, built-in-loop tools; 2026-11-27)
+
+- **Rule kept after 4a removed the `claude-code/*` models.** The 2026-11-27
+  fix `83bf7264c` (`ModelPickerItem.isClaudeCode`, `Array.automaticDefault`,
+  `ChatSession.needsModelChoice`, the send guard and the `FloatingInputCard`
+  picker opener) existed only because those rows could be picked
+  automatically. With no such rows it was dead, so it was reverted
+  (`git revert` of that commit applied cleanly onto 4a; its tests and the one
+  catalog string went with it). The rule now lives in the data model: only
+  `Agent.runtime` / `DefaultAgentConfiguration.runtime` start a harness, they
+  are nil for new agents, and nothing but the user's choice (the onboarding
+  Claude Code step, the future stage 5 picker) or the migration writes them.
+  Test: `HarnessAppIntegrationTests` `aHarnessRuntimeIsNeverTheDefaultOrAFallback`.
+  Leftover dead guards `!item.id.hasPrefix("claude-code/")` remain in
+  `OsaurusInspectTool`, `IntelSpawnAdmission`, `IntelOrchestratorDelegationTool`,
+  `OrchestratorDelegationSheet`, `SpawnConfigurationEditor` (harmless; left to
+  avoid conflicts with parallel work in `Subagent/` and the views).
+- **Migration only moves what the user saved.** The chat picker selection is
+  session-local (`ChatSession` init comment, 2026-09-13) and auto-selection runs
+  under `isLoadingModel`, so it never writes `Agent.defaultModel` or the global
+  `ChatConfiguration.defaultModel`. The only writers of those fields are
+  explicit: Agent editor / Orchestrator settings, `/agents` HTTP, the
+  declarative config applier, and onboarding (user's brain choice). A
+  `claude-code/*` value in those fields is therefore a saved choice. Per-chat
+  saved models in chat session files are not migrated (a stale id falls
+  through to the normal default, which is never a harness).
+- **HTTP auth gate** (`HTTPHandler.admit`): after the browser guard and before
+  the access-key gate, a live token (bridge header or `Bearer osh_...`) over
+  PHYSICAL loopback binds `RequestState.harnessGrant` and skips the key
+  gate, as upstream: it passes whether or not loopback trust is on and whether
+  or not "Require an access key for local apps" is on. Routes outside
+  `HarnessGrantStore.allowedRoutes` get 403 `harness_token_scope`. The browser
+  guard (unlisted Origin, cross-site / same-site fetch metadata, foreign Host)
+  runs BEFORE the token block, so a token cannot bypass it. Relay-origin
+  requests are never physical loopback, so they get no grant.
+- **`/mcp/*`** (`IntelHTTPMCP`): `/mcp/tools` is narrowed to
+  `HarnessGrantStore.agentPolicyAllows` for the token's agent; a presented but
+  dead token gets 401 (list) / `rejected` envelope (call), never the unscoped
+  loopback catalog; `/mcp/call` refuses tools outside the token's scope and
+  built-in-loop tools (`computer_use`, `browser_use`, `applescript`,
+  `mac_query`) with `HarnessError.unsupportedPath` when the agent is on a
+  harness, and otherwise binds `currentAgentId` and the new
+  `ChatExecutionContext.harnessTokenAgentId` while the call stays an external
+  surface (Ask tools still refused). **Intel difference:** the bridge header is
+  resolved in the handlers only for physical-loopback callers (upstream
+  resolved it for any caller that passed the gate).
+  `harnessTokenAgentId` has no reader on Intel yet: upstream uses it to let
+  custom harness agents call `osaurus_help` / `osaurus_inspect` through
+  `ConfigurationToolBase`; Intel's `osaurus_config` gate stays Default-agent
+  only, and Intel's help / inspect tools carry no such gate.
+- **Computer Use / AppleScript.** Computer Use is already on Intel's external
+  deny list (`externallyDeniedHostToolNames`), so `/mcp/call` answers
+  `tool_not_exposable` before the harness check; AppleScript, Browser and Mac
+  Query get the typed harness refusal. No Computer Use view or setting was
+  touched.
+- **`/agents/{id}/run`** (`IntelHTTPAgentRun`) refuses a harness agent (also
+  a runtime id that no longer resolves) with the typed message before any
+  model is resolved. **Spawn:** `IntelSpawnAdmission.resolveTargets` marks a
+  pool member on a harness `SpawnTargetState.harness` (not runnable);
+  Intel has no `SpawnDescriptors` source struct, so upstream's `runsOnHarness`
+  field has no equivalent beyond that.
+- **Test pitfalls found.** `HTTPServerTestLock` is not re-entrant: shut one
+  test server down before starting another in the same test. A `@MainActor`
+  test must not block on a raw socket read: the handler hops to the main actor
+  and the read times out (run it in `Task.detached`).
+- **Tests.** `HarnessTokenHTTPTests` (token alone with and without loopback
+  trust, the local-key switch on and off, route confinement, revoked / tampered
+  tokens, relay marker, browser guard with a token (Origin, fetch metadata,
+  foreign Host), no added rights (Auto runs attributed, Ask refused, out-of-scope
+  refused, spawn / loop-only tools refused), AppleScript-family refusal for a
+  harness agent, spawn targets), `IntelHTTPAgentRunTests`
+  `run_refusesAnAgentOnAHarnessRuntime`. Stage 5 needs: nothing from 4b beyond
+  the picker; the dead `claude-code/` prefix guards can go whenever convenient.
+
 ## Stage 4 notes (app integration, 4a)
 
 Ported from #3175's app-side changes on `upstream/classic`. After this stage an
@@ -251,7 +325,7 @@ nothing launches for any other agent.
   rebuilt the whole `Agent` and would have dropped it), and its Claude Code
   options explain themselves when the agent is not on the runtime.
 - **`spawn_agent`** refuses a harness agent (`SpawnAgentTool`, like upstream).
-- **Open (4b), all blocked on another agent's work in `Networking/` and
+- **(Was open, done in 4b, see "Stage 4b notes"; blocked on another agent in `Networking/` and
   `Subagent/` (2026-11-26):** (1) the HTTP auth gate and `/mcp/*` handlers
   honour `X-Osaurus-Bridge-Grant` / `Authorization: Bearer osh_...` through
   `HarnessGrantStore` (upstream `HTTPHandler.harnessGrant`, `resolvedHarnessGrant`,

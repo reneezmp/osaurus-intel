@@ -38,6 +38,35 @@ struct ClaudeCodeHarnessMigrationTests {
         }
     }
 
+    /// Owner rule: a harness runtime (the user's subscription) runs only when
+    /// the user chose it. Nothing selects it by default or as a fallback:
+    /// new agents, the Default agent, agents with ordinary models and a
+    /// seeded Claude Code runtime all stay on the built-in loop, and the
+    /// migration moves only an agent whose SAVED model was `claude-code/…`.
+    @Test func aHarnessRuntimeIsNeverTheDefaultOrAFallback() async throws {
+        try await withMigrationStorage {
+            let manager = AgentManager.shared
+            let plain = Agent(name: "Plain")
+            let withModel = Agent(name: "WithModel", defaultModel: "p/some-model")
+            manager.add(plain)
+            manager.add(withModel)
+            // The runtime existing (seeded) selects nothing.
+            _ = HarnessRuntimeStore.shared.ensureClaudeCodeRuntime()
+
+            manager.migrateClaudeCodeModelsToHarness()
+
+            for id in [plain.id, withModel.id, Agent.defaultId] {
+                #expect(manager.effectiveRuntime(for: id) == .builtIn)
+                #expect(manager.effectiveHarness(for: id) == nil)
+                #expect(manager.harnessUnsupportedError(for: id) == nil)
+            }
+            #expect(manager.agent(for: plain.id)?.runtime == nil)
+            #expect(manager.agent(for: withModel.id)?.defaultModel == "p/some-model")
+            // A brand-new agent starts on the built-in loop.
+            #expect(Agent(name: "Fresh").runtime == nil)
+        }
+    }
+
     @Test func claudeCodeModelAgentsMoveOntoTheClaudeRuntime() async throws {
         try await withMigrationStorage {
             let otherRuntime = UUID()

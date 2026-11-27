@@ -5,7 +5,8 @@
 //  Minimal MCP-style endpoints on the API port (`W-server-api` stage 3,
 //  docs/SERVER_API_INTEL.md): `GET /mcp/health`, `GET /mcp/tools`,
 //  `POST /mcp/call`. They back the `osaurus mcp` stdio proxy. Upstream's
-//  handlers, minus the harness agent-token branches (`W-harness-runtimes`).
+//  handlers, with the harness agent-token branches (`W-harness-runtimes`
+//  stage 4b, upstream #3175): loopback only, the token adds no rights.
 //
 //  External callers never see or run the app-only tool classes
 //  (`ToolRegistry.externallyDeniedToolNames`), and a call runs as an
@@ -17,16 +18,43 @@ import NIOCore
 import NIOHTTP1
 
 extension HTTPHandler {
+    /// The harness token this request carries: the one the auth gate bound,
+    /// or one on the bridge header from a PHYSICAL loopback caller that
+    /// loopback trust let past the gate. Never from a relay or remote caller
+    /// (upstream resolved the header anywhere; Intel keeps it to loopback).
+    func resolvedHarnessGrant(context: ChannelHandlerContext, head: HTTPRequestHead) -> HarnessGrant? {
+        if let bound = stateRef.value.harnessGrant { return bound }
+        guard isPhysicalLoopbackConnection(context),
+            let token = HarnessGrantStore.shared.presentedToken(
+                bridgeHeader: head.headers.first(name: HarnessGrantStore.headerName),
+                authorization: head.headers.first(name: "Authorization"))
+        else { return nil }
+        return HarnessGrantStore.shared.resolve(token)
+    }
+
     func serveMCPHealth(context: ChannelHandlerContext) {
         sendResponse(context: context, status: .ok, headers: jsonHeaders(), body: #"{"status":"ok"}"#)
     }
 
-    func serveMCPListTools(context: ChannelHandlerContext) {
+    func serveMCPListTools(context: ChannelHandlerContext, head: HTTPRequestHead) {
         let eventLoop = context.eventLoop
+        let harnessGrant = resolvedHarnessGrant(context: context, head: head)
+        // Same contract as `/mcp/call`: a revoked token must not fall back to
+        // the unscoped loopback catalog.
+        if harnessGrant == nil, !(head.headers.first(name: HarnessGrantStore.headerName) ?? "").isEmpty {
+            sendResponse(
+                context: context, status: .unauthorized, headers: jsonHeaders(),
+                body: #"{"error":"harness_token_invalid","message":"This agent token is invalid or has been revoked."}"#)
+            return
+        }
         runRequestTask {
+            // A harness token narrows the list to what its agent may call.
             let entries = await MainActor.run {
-                ToolRegistry.shared.listTools().filter {
-                    ExternalMCPToolPolicy.isToolVisibleToExternalMCP(name: $0.name, enabled: $0.enabled)
+                ToolRegistry.shared.listTools().filter { entry in
+                    guard ExternalMCPToolPolicy.isToolVisibleToExternalMCP(name: entry.name, enabled: entry.enabled)
+                    else { return false }
+                    guard let harnessGrant else { return true }
+                    return HarnessGrantStore.agentPolicyAllows(harnessGrant, toolName: entry.name)
                 }
             }
             let tools = entries.map { entry -> [String: Any] in
@@ -90,6 +118,9 @@ extension HTTPHandler {
             return
         }
 
+        let harnessTokenPresented = !(head.headers.first(name: HarnessGrantStore.headerName) ?? "").isEmpty
+        let harnessGrant = resolvedHarnessGrant(context: context, head: head)
+
         stateRef.value.routeLogsItself = true
         let toolName = req.name
         let eventLoop = context.eventLoop
@@ -110,8 +141,46 @@ extension HTTPHandler {
             do {
                 // MCP transport stays HTTP 200; a tool-level failure is
                 // `isError` (upstream). The registry validates arguments.
+                // A presented token must be live (a revoked one must not shed
+                // its scope), and attribution is not trust: the call stays an
+                // external surface, `.ask` tools are refused, and the agent's
+                // own tool policy still decides.
+                if harnessTokenPresented, harnessGrant == nil {
+                    finish(
+                        ToolEnvelope.failure(
+                            kind: .rejected, message: "This agent token is invalid or has been revoked.",
+                            tool: toolName, retryable: false),
+                        isError: true)
+                    return
+                }
+                if let harnessGrant, HarnessGrantStore.builtInLoopToolNames.contains(toolName) {
+                    // Computer Use, Browser, AppleScript, Mac Query run their
+                    // own sub-loop on the built-in model: refused, as upstream.
+                    let refusal = await MainActor.run {
+                        AgentManager.shared.harnessUnsupportedError(for: harnessGrant.agentId)
+                    }
+                    finish(
+                        ToolEnvelope.failure(
+                            kind: .unavailable,
+                            message: refusal?.localizedDescription
+                                ?? "Tool '\(toolName)' runs Osaurus's own agent loop and can't be called with an agent token.",
+                            tool: toolName, retryable: false),
+                        isError: true)
+                    return
+                }
+                if let harnessGrant,
+                    !(await MainActor.run { HarnessGrantStore.agentPolicyAllows(harnessGrant, toolName: toolName) })
+                {
+                    finish(
+                        ToolEnvelope.failure(
+                            kind: .rejected,
+                            message: "Tool '\(toolName)' is outside this agent token's scope.",
+                            tool: toolName, retryable: false),
+                        isError: true)
+                    return
+                }
                 let result = try await ExternalMCPToolPolicy.executeToolAsExternalMCP(
-                    name: toolName, argumentsJSON: argsJSON)
+                    name: toolName, argumentsJSON: argsJSON, harnessAgentId: harnessGrant?.agentId)
                 finish(result, isError: ToolEnvelope.isError(result))
             } catch {
                 finish(error.localizedDescription, isError: true)

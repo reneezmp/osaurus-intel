@@ -583,6 +583,11 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         /// The address that Secure Channel was opened with: the agent (or
         /// the Mac's connect identity) the phone pinned.
         var secureChannelAgentAddress: String?
+        /// Set by the auth gate when a local harness presented its live
+        /// agent token over physical loopback (`W-harness-runtimes` stage 4b,
+        /// upstream #3175). Confines the request to
+        /// `HarnessGrantStore.allowedRoutes` and that agent's tools.
+        var harnessGrant: HarnessGrant?
     }
 
     /// Paths whose handler logs its own Insights row (see
@@ -703,6 +708,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             stateRef.value.callerHasVerifiedAccessKey = false
             stateRef.value.callerAccessKeyIsMaster = false
             stateRef.value.loopbackTrustWithdrawn = false
+            stateRef.value.harnessGrant = nil
             stateRef.value.isSecureChannel = false
             _isSecureChannel.value = false
             stateRef.value.secureChannelAgentAddress = nil
@@ -919,8 +925,34 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         let isPluginRoute = path.hasPrefix("/plugins/")
         let isLoopback = isLoopbackConnection(context)
 
+        // A local harness presenting its live agent token (upstream #3175,
+        // `HarnessGrantStore`) is authenticated by the token: physical
+        // loopback only, even when loopback trust is off or the local-key
+        // switch is on, and confined to the inference and MCP routes. The
+        // token adds no rights: tool permissions and "Ask" still apply in the
+        // handlers. It runs AFTER the browser guard above, so a browser
+        // request is refused first whatever it presents.
+        if isPhysicalLoopbackConnection(context),
+            let token = HarnessGrantStore.shared.presentedToken(
+                bridgeHeader: head.headers.first(name: HarnessGrantStore.headerName),
+                authorization: head.headers.first(name: "Authorization")
+            ),
+            let grant = HarnessGrantStore.shared.resolve(token)
+        {
+            guard HarnessGrantStore.allowedRoutes.contains(path) else {
+                let message = "This agent token can only call the inference and MCP routes."
+                return refuse(
+                    .forbidden,
+                    #"{"error":{"code":"harness_token_scope","message":"\#(message)","type":"permission_error"}}"#,
+                    message: message
+                )
+            }
+            stateRef.value.harnessGrant = grant
+        }
+
         if !publicPaths.contains(path) && !isPluginRoute
             && (!isLoopback || (localKeyRequired && !presentedAppToken))
+            && stateRef.value.harnessGrant == nil
         {
             let authHeader = head.headers.first(name: "Authorization") ?? ""
             let token = authHeader.hasPrefix("Bearer ") ? String(authHeader.dropFirst(7)) : ""
@@ -1066,7 +1098,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         case (.GET, "/mcp/health"):
             serveMCPHealth(context: context)
         case (.GET, "/mcp/tools"):
-            serveMCPListTools(context: context)
+            serveMCPListTools(context: context, head: head)
         case (.POST, "/mcp/call"):
             serveMCPCallTool(context: context, head: head)
         default:

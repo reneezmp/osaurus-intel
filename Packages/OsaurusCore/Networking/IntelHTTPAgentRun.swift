@@ -427,6 +427,21 @@ extension HTTPHandler {
             await MainActor.run { ServerController.signalGenerationStart() }
             defer { Task { @MainActor in ServerController.signalGenerationEnd() } }
 
+            // An agent on a harness runtime has no built-in loop to run here;
+            // running it with built-in defaults would be a different agent
+            // (upstream #3175, `harnessUnsupportedError`).
+            if let harnessError = await MainActor.run(body: {
+                AgentManager.shared.harnessUnsupportedError(for: agentId)
+            }) {
+                let message = harnessError.localizedDescription
+                onLoop { ctx in
+                    writer.writeError(message, context: ctx)
+                    writer.writeEnd(ctx)
+                }
+                log(model: nil, response: "", toolCalls: [], error: message)
+                return
+            }
+
             // An omitted or "default" model is the agent's own (upstream).
             let requested = req.model ?? ""
             let model: String
