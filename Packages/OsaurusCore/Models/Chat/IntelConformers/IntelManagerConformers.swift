@@ -1157,6 +1157,15 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         return agent.settings.computerUseEnabled && !effectiveToolsDisabled(for: agentId)
     }
 
+    /// Screen context (W-computer-use stage 6), a child of Computer Use as in
+    /// upstream's `effectiveCapabilities`: the agent's Computer Use is on AND
+    /// its own screen-context switch is on. The built-in agent and an agent
+    /// with Tools off never share the screen. Off by default on Intel.
+    func effectiveScreenContextEnabled(for agentId: UUID) -> Bool {
+        guard effectiveComputerUseEnabled(for: agentId), let agent = agent(for: agentId) else { return false }
+        return agent.settings.screenContextEnabled
+    }
+
     /// `spawn_agent` (upstream `spawnAgentAvailable`, W-subagents stage 3): the
     /// launcher has at least one agent in its spawn pool (the Orchestrator's
     /// pool is its Gate 4 allowlist; a custom agent needs its own Spawn switch)

@@ -8,7 +8,15 @@ order: 160
 
 Two ways a custom agent can act beyond chat on this Mac. Both are off by default, are switched on per custom agent, and ask first before anything that changes something. Neither is available to the built-in Orchestrator itself (it has no browser or automation tools of its own); turn them on for a custom agent and chat with that agent, or allow it as a delegation target.
 
-Computer Use (driving any Mac app by clicking) and the Linux sandbox are not part of this build; see "What runs on this Intel Mac".
+Computer Use (driving any Mac app by clicking, below) works on this Mac too. The Linux sandbox is not part of this build; see "What runs on this Intel Mac".
+
+## Computer Use and screen context
+
+- An agent drives real Mac apps through the accessibility tree, clicking, typing and reading what is on screen, one goal at a time. It is a fallback for apps that Mac Automation (AppleScript) cannot script. Custom agents only, off by default.
+- Turn it on per custom agent: Agents → pick the agent → Abilities → Computer Use. Setup and the autonomy presets are in Settings → Computer Use. It needs Accessibility, which you grant yourself with the Grant button there; Osaurus never asks for it on its own.
+- It runs only in a chat you are in. Schedules, watchers, plugins, the API and other agents never start it. Reading runs on its own; anything that changes or sends something pauses for your approval, and Terminal, System Settings and password managers always ask. Stop ends a run at once. Passwords, payment details, CAPTCHAs and system permission dialogs are never filled in or answered for you.
+- **Screen context** is a separate switch under it (Abilities → Computer Use → **Share screen context**), also off by default. When on, the first message of a chat includes a frozen text snapshot of your open windows and the field you are typing in (no screenshots), so the agent knows what you are working on. It goes only to the model you chose for that chat, and this build has no Privacy Filter, so the text is not scrubbed; the **Preview screen context** link shows exactly what would be sent. It needs Accessibility, and chats started by schedules, watchers, plugins or the API never share it.
+- Screenshots, when a run uses them, stay on this Mac unless you allow cloud vision in Settings → Computer Use, and then the text in them is masked first.
 
 ## Browser Use
 

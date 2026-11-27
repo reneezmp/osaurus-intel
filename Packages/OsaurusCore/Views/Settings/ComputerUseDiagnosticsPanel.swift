@@ -78,7 +78,7 @@ struct ComputerUseDiagnosticsPanel: View {
             )
 
             VStack(spacing: 8) {
-                ForEach(doctorSnapshot.rows.filter { $0.id != .screenContext }) { row in
+                ForEach(doctorSnapshot.rows) { row in
                     diagnosticRow(row)
                 }
             }
@@ -110,8 +110,11 @@ struct ComputerUseDiagnosticsPanel: View {
                     isSessionGranted: cloudVisionConsent.isSessionGranted,
                     scrubMode: cloudVisionConsent.scrubMode
                 ),
-                // Screen context arrives with stage 6; its row is hidden below.
-                screenContextEnabled: false,
+                // Per-agent (a child of Computer Use): on when any agent
+                // would share it.
+                screenContextEnabled: agentManager.agents.contains {
+                    agentManager.effectiveScreenContextEnabled(for: $0.id)
+                },
                 agents: agentInputs
             )
         )

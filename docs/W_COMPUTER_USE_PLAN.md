@@ -56,7 +56,7 @@ native implementation, perception, the loop, and the tool and kind.
 | 3 | Native driver, not yet reachable: `Accessibility`, `ElementCache`, `Screenshot` (ScreenCaptureKit 14+, `CGWindowListCreateImage` / `CGDisplayCreateImage` on 13), `InputController`, `BackgroundDriver`, `SkyLightBridge` (dlsym, nil-safe), `NativeMacDriver`, `AutomationSession`, `CaptureMode`; route, bounds, self-guard and open-folder tests over fakes | done |
 | 4 | `ComputerUseLoop`, `ComputerUseTool`, `ComputerUseKind` (metrics and sweep were already in from stage 2); registry, `resolveTools` and execution gates; loop tests on `MockMacDriver` and a scripted model step | done (reachable from an attended chat only when the agent's switch is on; the switch has no UI until stage 5) |
 | 5 | Settings and consent UI: `ComputerUseSettingsView`, `ComputerUseDiagnosticsPanel`, `ComputerUsePermissionDoctor`, `ComputerUseGateInspector`, Abilities switch, quit/stop wiring, `/computer-use/prompts` consumers; i18n | done (gates in the log; not yet seen on screen on Ventura, see the checklist below) |
-| 6 | Screen context: `ScreenContextDistiller`, `[Screen Context]` prefix (composer row 30), per-agent screen-context option, `ScreenContextPreview`, guide topic, composer guidance loop row 12 | planned |
+| 6 | Screen context: `ScreenContextDistiller`, `[Screen Context]` prefix (composer row 30), per-agent screen-context option, `ScreenContextPreview`, guide topic, composer guidance loop row 12 | done (gates in the log; not yet seen on screen on Ventura, see the checklist below) |
 
 Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
 
@@ -285,3 +285,80 @@ Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
     card showing; (6) quit during a run: the app quits, no keys or clicks go on
     afterwards; (7) Advanced → Diagnostics: Gate Inspector previews a type into
     a password field as Block.
+- 2026-11-27 stage 6 done: screen context (opt-in, per agent).
+  - **What it is.** At the first send of a chat, a frozen, text-only
+    `[Screen Context]` block (open windows, the app the user was working in,
+    the focused field's draft, a small sample of on-screen text; no
+    screenshot) is prepended to that user turn and replayed byte for byte on
+    later turns (upstream #1610 / #1763 / #1618). It goes only to the model the
+    user chose for the chat.
+  - **Where things are.** `ComputerUse/Perception/ScreenContextDistiller`
+    (ported whole; `captureForChat()` uses `NativeMacDriver` and
+    `FrontmostAppTracker`), `ScreenContextFreeze` (new: `ScreenContextGate` +
+    capture-once freeze, pure and fakeable), `AgentSettings.screenContextEnabled`,
+    `AgentManager.effectiveScreenContextEnabled(for:)`, the `screenContext:`
+    argument of `SystemPromptComposer.composeInjectedUserPrefix` and
+    `ChatSession.freezeInjectedContextOntoLatestUserTurn` (order as upstream:
+    automation, screen, memory, time), the "Screen Context" row of the context
+    budget (`ContextBreakdown.from(... screenContextTokens:)`, tint pink),
+    `Views/Settings/ScreenContextPreview`, the **Share screen context** toggle
+    plus **Preview screen context** popover in `IntelComputerUseAbilitySection`,
+    the Settings → Computer Use "Screen context" card, the Permission Doctor row
+    (now shown) and the Guide topic (`Resources/Guide/guide-automation.md`,
+    section "Computer Use and screen context"; `guide-intel-mac.md` no longer
+    lists Computer Use as missing).
+  - **Owner policy, enforced.** Off by default, and **Intel's default differs
+    from upstream**: upstream decodes a missing key and defaults new agents to
+    on once Computer Use is on; Intel defaults and decodes to OFF (an explicit
+    `true` in a file is honoured). Effective only when the agent's own Computer
+    Use is on (`effectiveComputerUseEnabled`: custom agent, Tools on) AND its
+    option is on. Capture happens only from an attended chat
+    (`ScreenContextGate` reuses `ComputerUseKind.unattendedRefusal`: schedules,
+    watchers, self-scheduled wake-ups, plugins, HTTP/MCP, delegated children and
+    an unpublished source never capture). A send that is not allowed neither
+    captures nor freezes, and replays nothing after the user turned the option
+    off. Capture only *checks* Accessibility (`driver.availability()`); no
+    permission request exists in the distiller, the freeze or the preview (source
+    guards). The global Settings card's preview captures only on Refresh
+    (`autoCaptureOnAppear: false`); the per-agent popover captures when opened.
+  - **What Intel cannot do.** The text block is **not scrubbed**: upstream runs
+    it through the Privacy Filter before a cloud send, and Intel has none
+    (`W-privacy-filter`). `CloudVisionConsent` and `FrameScrubber` guard
+    screenshots only; screen context has no image, so they do not apply, and the
+    UI says so in plain words (preview note, card, toggle caption, Guide). When
+    `W-privacy-filter` lands, route the block through it the way upstream's
+    `latestUserTurnSegments()` does and restore the note upstream shows.
+  - **Intel adaptations.** (a) `ScreenContextPreview` drops the Privacy Filter
+    note and masked-count code. (b) The per-agent option lives in the Abilities
+    tab (Intel has no Subagents tab), not `AgentsView`. (c) No composer
+    "Screen context from <app>" chip: `FloatingInputCard` has no empty-chat
+    signal on Intel and the chip would need a `ChatContentView` change; the
+    budget row and the preview cover it. (d) Not ported on purpose:
+    `injectScreenContextPrefix` (upstream's chat path does not call it; it was
+    the older per-request injector) and its XCTest, the OsaurusEvals fixtures
+    and suites, `ScreenContextCapabilityTests` (rewritten for Intel's switch).
+    (e) `ScreenContextDistillerTests` converted from XCTest, assertions unchanged.
+  - **Composer guidance loop (audit row 12).** The registry-driven loop was
+    already in (`SubagentCapabilityRegistry.computerUse`, `guidanceSectionId`
+    `computerUse`, rendered when `computer_use` resolves). On Intel, as upstream
+    (#2250), a custom agent takes the lean prompt, which returns before that loop,
+    and only a custom agent can have Computer Use; so the section never renders
+    in practice and the model relies on the tool's own description. Pinned by a
+    test; do not "fix" it without deciding the lean-prompt policy (audit 5b row 4).
+  - **Tests (Swift Testing, fakes only):** `ScreenContextStage6Tests` (gate,
+    capture-once freeze, prefix order, frozen turn prefix, default off and
+    codable round trip, effective capability, budget row, guidance loop and lean
+    skip, source guards) and `ScreenContextDistillerTests` (21 tests over
+    `MockMacDriver`). `IntelAgentUnknownFieldsTests` now uses a made-up
+    upstream-only key, since `screenContextEnabled` is Intel-known.
+  - **How to verify on screen on Ventura (Rosy, not done yet):** (1) agent →
+    Abilities → Computer Use on: **Share screen context** is off for a new
+    agent; (2) turn it on, the preview link opens a popover that shows a text
+    snapshot only when Accessibility is granted (else a hint, and no macOS
+    prompt appears); (3) Settings → Computer Use → Screen context card: opening
+    the tab reads nothing, Refresh shows the snapshot; (4) new chat with that
+    agent, send a message about "this window": the model refers to the app you
+    were in; the context budget popover lists a Screen Context row; a second
+    message does not capture again; (5) switch the option off, new chat: no row,
+    nothing shared; (6) a schedule or watcher run of the same agent shares
+    nothing; (7) Permission Doctor shows the Screen Context row On/Off.

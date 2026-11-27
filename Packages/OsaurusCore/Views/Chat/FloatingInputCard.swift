@@ -4259,6 +4259,7 @@ private struct ContextBreakdownPopover: View {
         case .cyan: return theme.isDark ? Color(red: 0.35, green: 0.82, blue: 0.9) : .cyan
         case .teal: return theme.isDark ? Color(red: 0.3, green: 0.75, blue: 0.75) : .teal
         case .indigo: return theme.isDark ? Color(red: 0.55, green: 0.48, blue: 0.95) : .indigo
+        case .pink: return theme.isDark ? Color(red: 1.0, green: 0.5, blue: 0.7) : .pink
         }
     }
 

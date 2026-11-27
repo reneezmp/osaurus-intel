@@ -16,6 +16,8 @@ struct IntelComputerUseAbilitySection: View {
     @ObservedObject private var agentManager = AgentManager.shared
     @ObservedObject private var pickerCache = ModelPickerItemCache.shared
     @ObservedObject private var permissionService = SystemPermissionService.shared
+    /// Drives the "Preview screen context" popover (UI-only).
+    @State private var showScreenContextPreview = false
 
     let agentId: UUID
     let theme: ThemeProtocol
@@ -101,6 +103,7 @@ struct IntelComputerUseAbilitySection: View {
                                 .foregroundColor(theme.accentColor)
                             }
                         }
+                        screenContextRow
                         note(
                             "Works only in a chat you are present in; schedules and background runs never control your Mac. Stop ends a run at once. Passwords, payment details and system dialogs are never filled in or answered for you."
                         )
@@ -108,6 +111,59 @@ struct IntelComputerUseAbilitySection: View {
                 }
             }
         }
+    }
+
+    /// Per-agent screen context (W-computer-use stage 6, upstream #1763): a
+    /// child of Computer Use, off by default on Intel. Only the user's click
+    /// turns it on; the preview reads the screen only when the popover is
+    /// opened, and only if Accessibility is already granted.
+    private var screenContextRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Share screen context"))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(theme.secondaryText)
+                    Text(
+                        L(
+                            "At the first message of a chat, shares a text snapshot of your open windows and the field you are typing in with this agent's model. No screenshots. Off by default; schedules and background runs never share it."
+                        )
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { settings?.screenContextEnabled ?? false },
+                        set: { value in update { $0.screenContextEnabled = value } }
+                    )
+                )
+                .labelsHidden()
+                .toggleStyle(ThemedSwitchToggleStyle())
+                .accessibilityLabel(Text(L("Share screen context")))
+            }
+            Button {
+                showScreenContextPreview = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "eye")
+                        .font(.system(size: 10))
+                    Text(L("Preview screen context"))
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(theme.accentColor)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .popover(isPresented: $showScreenContextPreview, arrowEdge: .bottom) {
+                ScreenContextPreview(previewHeight: 220)
+                    .padding(14)
+                    .frame(width: 360)
+            }
+        }
+        .padding(.leading, 46)
     }
 
     private var modelMenu: some View {

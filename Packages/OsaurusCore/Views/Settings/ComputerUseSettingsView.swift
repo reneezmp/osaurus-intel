@@ -74,6 +74,7 @@ struct ComputerUseSettingsView: View {
                 enableCard
                     .settingsLandingAnchor("computerUse.enable")
                 consentCard
+                screenContextCard
                 policyCard
                 advancedCard
             }
@@ -256,6 +257,29 @@ struct ComputerUseSettingsView: View {
                 .font(.system(size: 12))
                 .foregroundColor(theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Screen context card (W-computer-use stage 6)
+
+    private var screenContextCard: some View {
+        SettingsSection(title: "Screen context", icon: "rectangle.on.rectangle.angled") {
+            VStack(alignment: .leading, spacing: 14) {
+                bodyText(
+                    "Give the assistant ambient awareness of what you're working on. When you turn it on for an agent, Osaurus freezes a quick snapshot of your open windows and the field you're focused on when you send the first message of a chat, and shares it as background context. It's built from on-screen text only, with no screenshots, and goes to the model you chose for that chat. It is off by default."
+                )
+
+                hintText(
+                    "Turn this on per agent: open the agent's Abilities tab, enable Computer Use, then turn on Share screen context. Requires Accessibility. Chats started by schedules, watchers, plugins or the API never share the screen."
+                )
+
+                // Capture only when you press Refresh: opening Settings never
+                // reads the screen.
+                ScreenContextPreview(
+                    autoCaptureOnAppear: false,
+                    accessibilityHint: "Grant Accessibility above to preview what would be shared."
+                )
+            }
         }
     }
 

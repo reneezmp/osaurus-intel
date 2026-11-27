@@ -823,6 +823,14 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     public var computerUseEnabled: Bool
     /// Per-agent autonomy ceiling for Computer Use and Browser Use (upstream).
     public var computerUseCeiling: AutonomyCeiling?
+    /// Per-agent screen context (upstream #1610/#1763), nested under Computer
+    /// Use: a frozen, text-only snapshot of what the user is doing is shared
+    /// with the chat's model at the first send. Intel difference: upstream
+    /// defaults this to on once Computer Use is on; Intel defaults it to OFF
+    /// (owner policy: ambient capture is its own choice). The effective value
+    /// is `computerUseEnabled && screenContextEnabled`
+    /// (`AgentManager.effectiveScreenContextEnabled`).
+    public var screenContextEnabled: Bool
     public var browserUseEnabled: Bool
     public var spawnDelegationEnabled: Bool
     public var appleScriptEnabled: Bool
@@ -871,6 +879,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         imagePermission: MediaToolPermission = .ask,
         videoPermission: MediaToolPermission = .ask,
         computerUseEnabled: Bool = false,
+        screenContextEnabled: Bool = false,
         browserUseEnabled: Bool = false,
         spawnDelegationEnabled: Bool = false,
         appleScriptEnabled: Bool = false,
@@ -885,6 +894,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     ) {
         self.computerUseEnabled = computerUseEnabled
         self.computerUseCeiling = nil
+        self.screenContextEnabled = screenContextEnabled
         self.browserUseEnabled = browserUseEnabled
         self.spawnDelegationEnabled = spawnDelegationEnabled
         self.appleScriptEnabled = appleScriptEnabled
@@ -945,6 +955,8 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         videoPermission = (try? c.decodeIfPresent(MediaToolPermission.self, forKey: .videoPermission)) ?? .ask
         computerUseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .computerUseEnabled)) ?? false
         computerUseCeiling = try? c.decodeIfPresent(AutonomyCeiling.self, forKey: .computerUseCeiling)
+        // Absent (older file) decodes to off, unlike upstream's on.
+        screenContextEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .screenContextEnabled)) ?? false
         browserUseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .browserUseEnabled)) ?? false
         spawnDelegationEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .spawnDelegationEnabled)) ?? false
         appleScriptEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .appleScriptEnabled)) ?? false
@@ -988,6 +1000,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         case videoPermission
         case computerUseEnabled
         case computerUseCeiling
+        case screenContextEnabled
         case browserUseEnabled
         case spawnDelegationEnabled
         case appleScriptEnabled
@@ -1025,6 +1038,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         try c.encode(videoPermission, forKey: .videoPermission)
         try c.encode(computerUseEnabled, forKey: .computerUseEnabled)
         try c.encodeIfPresent(computerUseCeiling, forKey: .computerUseCeiling)
+        try c.encode(screenContextEnabled, forKey: .screenContextEnabled)
         try c.encode(browserUseEnabled, forKey: .browserUseEnabled)
         try c.encode(spawnDelegationEnabled, forKey: .spawnDelegationEnabled)
         try c.encode(appleScriptEnabled, forKey: .appleScriptEnabled)

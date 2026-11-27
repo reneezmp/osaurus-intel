@@ -18,7 +18,6 @@ This build of Osaurus is for Intel Macs. Most of Osaurus works the same; the fea
 
 - **Agent Channels** (Slack, Discord, Telegram, WhatsApp, iMessage, webhooks).
 - **Workspaces and shared agents**, peer devices, and pairing a phone or another Mac.
-- **Computer Use.**
 - **Subagents** (`spawn_agent`). The Orchestrator can delegate one bounded, tool-free task at a time to an allowed custom agent instead (see The Orchestrator topic).
 - **Harness runtimes and `osaurus import` bundles.** Agent templates are here (Agents → Templates) except the first-run setup wizard and the template share-to-store flows.
 - **Some declarative configuration sections.** The Orchestrator's `osaurus_config` (and the loopback-only `/admin/config/*` routes, whose apply always waits for your approval in the app) covers memory, the Orchestrator and custom agents, tools, MCP servers, plugins, cloud providers, search providers, schedules, watchers, commands and its delegation list. Channels, harness runtimes, local models, agent skills, knowledge switches and sandbox network keys are not available on this build. Agent templates work through `template`, `overrides` and `save_as`.
@@ -29,4 +28,4 @@ This build of Osaurus is for Intel Macs. Most of Osaurus works the same; the fea
 
 ## What works the same
 
-Chat with folder tools and file history, the Orchestrator, custom agents, memory, knowledge collections, web search, MCP connectors, skills, slash commands, native plugins built for Intel, schedules, watchers, the agent database and self-scheduling, voice (Apple Speech and macOS voices), cloud images and video, Mac Automation with AppleScript (on the chat's cloud model), Browser Use (on macOS 13 all agents share one browser profile), themes, credits, identity, Insights, Shortcuts and Siri.
+Chat with folder tools and file history, the Orchestrator, custom agents, memory, knowledge collections, web search, MCP connectors, skills, slash commands, native plugins built for Intel, schedules, watchers, the agent database and self-scheduling, voice (Apple Speech and macOS voices), cloud images and video, Mac Automation with AppleScript (on the chat's cloud model), Browser Use (on macOS 13 all agents share one browser profile), Computer Use with its opt-in screen context, themes, credits, identity, Insights, Shortcuts and Siri.

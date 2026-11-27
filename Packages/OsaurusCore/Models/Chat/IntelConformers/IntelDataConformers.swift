@@ -3582,14 +3582,19 @@ final class SystemPromptComposer: @unchecked Sendable {
 
     /// Upstream `composeInjectedUserPrefix` (#1798, #2173): the memory block,
     /// then the time block right against the user's text, each with its
-    /// trailing separator; nil when both are empty. Intel has no screen or
-    /// automation context.
+    /// trailing separator; nil when all are empty. Order, as upstream:
+    /// automation, screen context (#1610, W-computer-use stage 6, already
+    /// rendered with its `[Screen Context]` tags), memory, time.
     static func composeInjectedUserPrefix(
-        memorySection: String?, automationContext: String? = nil, timeContext: String? = nil
+        memorySection: String?, screenContext: String? = nil, automationContext: String? = nil,
+        timeContext: String? = nil
     ) -> String? {
         var prefix = ""
         if let trimmed = memorySection?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
             prefix = "[Memory]\n\(trimmed)\n[/Memory]\n\n"
+        }
+        if let trimmed = screenContext?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            prefix = "\(trimmed)\n\n" + prefix
         }
         // Upstream: the automation context leads the memory block.
         if let trimmed = automationContext?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
@@ -3907,7 +3912,7 @@ struct ContextBreakdown: Sendable {
             self.id = id; self.label = label; self.tokens = tokens; self.tint = tint
         }
     }
-    enum Tint: String, Sendable { case purple, blue, orange, green, gray, cyan, teal, indigo }
+    enum Tint: String, Sendable { case purple, blue, orange, green, gray, cyan, teal, indigo, pink }
     var context: [Entry] = []
     var messages: [Entry] = []
     var disable: ContextDisableInfo? = nil
@@ -3940,6 +3945,7 @@ struct ContextBreakdown: Sendable {
 
     static func from(
         context composed: ComposedContext,
+        screenContextTokens: Int = 0,
         conversationTokens: Int = 0,
         inputTokens: Int = 0,
         outputTokens: Int = 0,
@@ -3992,6 +3998,12 @@ struct ContextBreakdown: Sendable {
         if memoryTokens > 0 {
             bd.context.append(Entry(id: "memory", label: "Memory", tokens: memoryTokens, tint: .teal))
         }
+        // The frozen `[Screen Context]` block rides the user turn like memory
+        // (upstream's own row; W-computer-use stage 6).
+        if screenContextTokens > 0 {
+            bd.context.append(
+                Entry(id: "screenContext", label: L("Screen Context"), tokens: screenContextTokens, tint: .pink))
+        }
 
         if conversationTokens > 0 {
             bd.messages.append(Entry(id: "conversation", label: "Conversation", tokens: conversationTokens, tint: .blue))
@@ -4016,6 +4028,7 @@ struct ContextBreakdown: Sendable {
         manifest: PromptManifest,
         toolTokens: Int = 0,
         memoryTokens: Int = 0,
+        screenContextTokens: Int = 0,
         conversationTokens: Int = 0,
         inputTokens: Int = 0,
         outputTokens: Int = 0
@@ -4026,6 +4039,10 @@ struct ContextBreakdown: Sendable {
         }
         if memoryTokens > 0 {
             bd.context.append(Entry(id: "memory", label: "Memory", tokens: memoryTokens, tint: .teal))
+        }
+        if screenContextTokens > 0 {
+            bd.context.append(
+                Entry(id: "screenContext", label: L("Screen Context"), tokens: screenContextTokens, tint: .pink))
         }
         if conversationTokens > 0 {
             bd.messages.append(

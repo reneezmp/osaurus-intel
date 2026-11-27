@@ -355,6 +355,11 @@ final class ChatSession: ObservableObject {
     /// so the Context Budget popover shows a "Memory" line even before the
     /// first send (when `cachedContext` is still nil).
     private var cachedMemoryTokens: Int = 0
+    /// Opt-in per-agent screen context (W-computer-use stage 6): the frozen
+    /// `[Screen Context]` block for this chat. Captured at most once, at the
+    /// first allowed send (`ScreenContextGate`); never off a schedule or other
+    /// unattended source.
+    private let screenContextFreeze = ScreenContextFreeze()
     private let budgetTracker = ContextBudgetTracker()
 
     /// Per-session always-loaded + capabilities_load tool kit lives in the
@@ -1358,6 +1363,7 @@ final class ChatSession: ObservableObject {
         if let ctx = cachedContext {
             return .from(
                 context: ctx,
+                screenContextTokens: screenContextFreeze.tokens,
                 conversationTokens: conversationTokens,
                 inputTokens: inputTokens,
                 outputTokens: outputTokens
@@ -1382,6 +1388,7 @@ final class ChatSession: ObservableObject {
         )
         return .from(
             context: preview,
+            screenContextTokens: screenContextFreeze.tokens,
             conversationTokens: conversationTokens,
             inputTokens: inputTokens,
             outputTokens: outputTokens,
@@ -1464,13 +1471,15 @@ final class ChatSession: ObservableObject {
     /// was newest and vanish from the one before). A regenerated turn keeps
     /// its original bytes.
     func freezeInjectedContextOntoLatestUserTurn(
-        memorySection: String?, automationContext: String? = nil, now: Date = Date()
+        memorySection: String?, screenContext: String? = nil, automationContext: String? = nil,
+        now: Date = Date()
     ) {
         guard let turn = turns.last(where: { $0.role == .user }) else { return }
         guard turn.injectedContextPrefix == nil else { return }
         guard
             let prefix = SystemPromptComposer.composeInjectedUserPrefix(
                 memorySection: memorySection,
+                screenContext: screenContext,
                 automationContext: automationContext,
                 timeContext: SystemPromptTemplates.timeContext(now: now, timeZone: .current)
             )
@@ -1964,6 +1973,7 @@ final class ChatSession: ObservableObject {
         projectId = nil
         conversationSummary = nil
         resetCompactionState()
+        screenContextFreeze.reset()
         folderState.clearFolder()
         applyAgentDefaultFolder()
         isDirty = false
@@ -2398,6 +2408,7 @@ final class ChatSession: ObservableObject {
         projectId = data.projectId
         conversationSummary = data.conversationSummary
         resetCompactionState()
+        screenContextFreeze.reset()
         folderState.restore(bookmark: data.folderBookmark, path: data.folderPath)
 
         // Restore the persisted model when it's still valid; otherwise
@@ -3813,8 +3824,22 @@ final class ChatSession: ObservableObject {
                     ? SystemPromptComposer.appleScriptWorkingAppContext(
                         appName: FrontmostAppTracker.shared.lastNonSelfAppName)
                     : nil
+                // W-computer-use stage 6 (upstream #1610): the opt-in screen
+                // context, frozen once per chat. Only a per-agent opt-in
+                // under Computer Use, and only from an attended chat, ever
+                // captures; the text goes to this chat's model only.
+                let screenContext = await screenContextFreeze.blockForSend(
+                    allowed: ScreenContextGate.mayCapture(
+                        agentEnabled: AgentManager.shared.effectiveScreenContextEnabled(for: effectiveAgentId),
+                        source: self.source,
+                        isUnattendedDispatch: ChatExecutionContext.isUnattendedDispatch,
+                        isExternalSurface: ChatExecutionContext.isExternalSurface),
+                    capture: { await ScreenContextDistiller.captureForChat().render() }
+                )
+                guard isRunActive(runId) else { return }
                 freezeInjectedContextOntoLatestUserTurn(
-                    memorySection: context.memorySection, automationContext: automationContext)
+                    memorySection: context.memorySection, screenContext: screenContext,
+                    automationContext: automationContext)
 
                 var sys = context.prompt
 
