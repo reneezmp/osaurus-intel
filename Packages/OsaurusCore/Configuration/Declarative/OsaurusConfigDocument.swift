@@ -71,6 +71,7 @@ extension KeyedEncodingContainer {
 /// settings; machine/app settings are Settings-UI-only.
 public enum ConfigSectionID: String, CaseIterable, Sendable {
     case memory
+    case harnessRuntimes = "harness_runtimes"
     case defaultAgent = "default_agent"
     /// Which agent NEW chats open with. `active_agent` is accepted as a
     /// legacy alias on input.
@@ -105,6 +106,8 @@ public struct OsaurusConfigDocument: Equatable, Sendable {
     /// Schema version. Currently always 1.
     public var version: Int?
     public var memory: MemorySection?
+    /// Registered harness runtimes (Claude Code, Pi, Pi-based CLIs).
+    public var harnessRuntimes: [HarnessRuntimeEntry]?
     public var defaultAgent: DefaultAgentSection?
     /// Name of the agent NEW chats open with ("default" or a custom agent's
     /// name). Serialized as `new_chat_agent`; `active_agent` still decodes.
@@ -128,6 +131,7 @@ public struct OsaurusConfigDocument: Equatable, Sendable {
     public var declaredSections: [ConfigSectionID] {
         var out: [ConfigSectionID] = []
         if memory != nil { out.append(.memory) }
+        if harnessRuntimes != nil { out.append(.harnessRuntimes) }
         if defaultAgent != nil { out.append(.defaultAgent) }
         if activeAgent != nil { out.append(.activeAgent) }
         if agents != nil { out.append(.agents) }
@@ -149,6 +153,7 @@ public struct OsaurusConfigDocument: Equatable, Sendable {
         var doc = OsaurusConfigDocument()
         doc.version = version
         if sections.contains(.memory) { doc.memory = memory }
+        if sections.contains(.harnessRuntimes) { doc.harnessRuntimes = harnessRuntimes }
         if sections.contains(.defaultAgent) { doc.defaultAgent = defaultAgent }
         if sections.contains(.activeAgent) { doc.activeAgent = activeAgent }
         if sections.contains(.agents) { doc.agents = agents }
@@ -170,6 +175,7 @@ extension OsaurusConfigDocument: Codable {
     enum CodingKeys: String, CodingKey {
         case version
         case memory
+        case harnessRuntimes = "harness_runtimes"
         case defaultAgent = "default_agent"
         case activeAgent = "new_chat_agent"
         /// Legacy spelling, read-only: older documents and habits.
@@ -192,6 +198,7 @@ extension OsaurusConfigDocument: Codable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version)
         memory = try c.decodeIfPresent(MemorySection.self, forKey: .memory)
+        harnessRuntimes = try c.decodeIfPresent([HarnessRuntimeEntry].self, forKey: .harnessRuntimes)
         defaultAgent = try c.decodeIfPresent(DefaultAgentSection.self, forKey: .defaultAgent)
         activeAgent =
             try c.decodeIfPresent(String.self, forKey: .activeAgent)
@@ -214,6 +221,7 @@ extension OsaurusConfigDocument: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encodeIfPresent(version, forKey: .version)
         try c.encodeIfPresent(memory, forKey: .memory)
+        try c.encodeIfPresent(harnessRuntimes, forKey: .harnessRuntimes)
         try c.encodeIfPresent(defaultAgent, forKey: .defaultAgent)
         try c.encodeIfPresent(activeAgent, forKey: .activeAgent)
         try c.encodeIfPresent(agents, forKey: .agents)
@@ -267,6 +275,9 @@ public struct DefaultAgentSection: Equatable, Sendable {
     public var maxTokens: ConfigField<Int> = .absent
     /// The Default agent's persona (system prompt).
     public var systemPrompt: String?
+    /// `builtin` or a registered harness runtime's name.
+    public var runtime: String?
+    public var claudeCode: AgentClaudeCodeEntry?
     public init() {}
 }
 
@@ -275,6 +286,8 @@ extension DefaultAgentSection: Codable {
         case name, model, temperature
         case maxTokens = "max_tokens"
         case systemPrompt = "system_prompt"
+        case runtime
+        case claudeCode = "claude_code"
     }
 
     public init(from decoder: Decoder) throws {
@@ -284,6 +297,8 @@ extension DefaultAgentSection: Codable {
         temperature = try c.configField(Double.self, forKey: .temperature)
         maxTokens = try c.configField(Int.self, forKey: .maxTokens)
         systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
+        runtime = try c.decodeIfPresent(String.self, forKey: .runtime)
+        claudeCode = try c.decodeIfPresent(AgentClaudeCodeEntry.self, forKey: .claudeCode)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -293,6 +308,8 @@ extension DefaultAgentSection: Codable {
         try c.encode(configField: temperature, forKey: .temperature)
         try c.encode(configField: maxTokens, forKey: .maxTokens)
         try c.encodeIfPresent(systemPrompt, forKey: .systemPrompt)
+        try c.encodeIfPresent(runtime, forKey: .runtime)
+        try c.encodeIfPresent(claudeCode, forKey: .claudeCode)
     }
 }
 
@@ -453,6 +470,8 @@ public struct AgentEntry: Equatable, Sendable {
     public var workingFolder: ConfigField<String> = .absent
     /// Provenance: the agent template this agent was created from.
     public var sourceTemplate: String?
+    /// `builtin` or a registered harness runtime's name.
+    public var runtime: String?
     public var claudeCode: AgentClaudeCodeEntry?
     /// Read only when the entry creates the agent: `false` keeps the new
     /// agent out of the Orchestrator's spawn pool. Patching an existing
@@ -480,6 +499,7 @@ extension AgentEntry: Codable {
         case subagents
         case workingFolder = "working_folder"
         case sourceTemplate = "source_template"
+        case runtime
         case claudeCode = "claude_code"
         case orchestratorSpawnable = "orchestrator_spawnable"
     }
@@ -503,6 +523,7 @@ extension AgentEntry: Codable {
         subagents = try c.decodeIfPresent(AgentSubagentsEntry.self, forKey: .subagents)
         workingFolder = try c.configField(String.self, forKey: .workingFolder)
         sourceTemplate = try c.decodeIfPresent(String.self, forKey: .sourceTemplate)
+        runtime = try c.decodeIfPresent(String.self, forKey: .runtime)
         claudeCode = try c.decodeIfPresent(AgentClaudeCodeEntry.self, forKey: .claudeCode)
         orchestratorSpawnable = try c.decodeIfPresent(Bool.self, forKey: .orchestratorSpawnable)
     }
@@ -526,6 +547,7 @@ extension AgentEntry: Codable {
         try c.encodeIfPresent(subagents, forKey: .subagents)
         try c.encode(configField: workingFolder, forKey: .workingFolder)
         try c.encodeIfPresent(sourceTemplate, forKey: .sourceTemplate)
+        try c.encodeIfPresent(runtime, forKey: .runtime)
         try c.encodeIfPresent(claudeCode, forKey: .claudeCode)
         try c.encodeIfPresent(orchestratorSpawnable, forKey: .orchestratorSpawnable)
     }

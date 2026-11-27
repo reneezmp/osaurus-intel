@@ -2,17 +2,38 @@
 //  ConfigHarnessSections.swift
 //  osaurus
 //
-//  Declarative shape for an agent's Claude Code options (`claude_code` on
-//  `agents[]` and `default_agent`). Intel has no harness runtime registry
-//  (`W-harness-runtimes`), so upstream's `harness_runtimes` section and the
-//  `runtime:` key are not part of the Intel schema.
+//  Declarative shapes for harness runtimes (`harness_runtimes`) and an
+//  agent's runtime choice (`runtime` + `claude_code` on `agents[]` and
+//  `default_agent`).
 //
 
 import Foundation
 
-/// Claude Code options for an agent.
+/// A registered harness runtime. Matched by `name` (case-insensitive).
+/// Creating one, or changing its command line or environment, is HIGH RISK:
+/// every chat of an agent on it launches that local program.
+public struct HarnessRuntimeEntry: Codable, Equatable, Sendable {
+    public var name: String
+    /// `claude_code` | `pi_rpc`. Required to create; immutable after.
+    public var kind: String?
+    /// Command name on the login-shell PATH, or a path (`~` expands).
+    public var executable: String?
+    /// Replaces the list. `{chat_id}`, `{agent_id}`, `{cwd}` and
+    /// `{system_prompt_file}` are substituted per launch.
+    public var arguments: [String]?
+    /// Plain values only; merged into the runtime's environment.
+    public var environment: [String: String]?
+
+    public init(name: String) {
+        self.name = name
+    }
+}
+
+/// Claude Code options for an agent whose runtime is a Claude Code harness.
 /// Only provided keys change.
 public struct AgentClaudeCodeEntry: Codable, Equatable, Sendable {
+    /// `--model`: `sonnet`, `opus`, `fable`, `haiku`, or a full model id.
+    public var model: String?
     /// `--effort`: `low` … `max`, or `default` for the CLI's own default.
     public var effort: String?
     /// `agent` | `text_only`.
@@ -26,7 +47,7 @@ public struct AgentClaudeCodeEntry: Codable, Equatable, Sendable {
     public init() {}
 
     enum CodingKeys: String, CodingKey {
-        case effort, mode
+        case model, effort, mode
         case allowWrites = "allow_writes"
         case allowShell = "allow_shell"
         case allowOsaurusTools = "allow_osaurus_tools"
@@ -35,6 +56,10 @@ public struct AgentClaudeCodeEntry: Codable, Equatable, Sendable {
 }
 
 enum ConfigHarness {
+    /// `runtime:` value for Osaurus's own loop. Reserved as a runtime name.
+    static let builtInRuntimeKey = "builtin"
+
+    static let kindKeys = ["claude_code", "pi_rpc"]
     static let modeKeys = ["agent", "text_only"]
     /// `claude_code.effort` value that clears the override.
     static let defaultEffortKey = "default"
@@ -45,6 +70,21 @@ enum ConfigHarness {
         let key = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if key.isEmpty || key == defaultEffortKey { return .some(nil) }
         return ClaudeCodeEffort(rawValue: key).map { .some($0) }
+    }
+
+    static func kind(forKey raw: String) -> HarnessKind? {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "claude_code": return .claudeCode
+        case "pi_rpc": return .piRPC
+        default: return nil
+        }
+    }
+
+    static func key(for kind: HarnessKind) -> String {
+        switch kind {
+        case .claudeCode: return "claude_code"
+        case .piRPC: return "pi_rpc"
+        }
     }
 
     static func mode(forKey raw: String) -> ClaudeCodeMode? {
@@ -62,8 +102,52 @@ enum ConfigHarness {
         }
     }
 
+    /// `OSAURUS_*` is Osaurus's own contract for the child; the Runtimes
+    /// editor refuses it (`HarnessRuntimeForm.parseEnvironment`) and so do
+    /// documents and bundles (Intel: upstream only lets the contract win at launch).
+    static func isReservedEnvironmentName(_ name: String) -> Bool {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().hasPrefix("OSAURUS_")
+    }
+
+    static func normalizedName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    @MainActor
+    static func runtime(named name: String) -> HarnessRuntime? {
+        let key = normalizedName(name)
+        return HarnessRuntimeStore.shared.all().first { normalizedName($0.displayName) == key }
+    }
+
+    /// `runtime:` value for an agent. Nil for a runtime that was deleted, so
+    /// an export re-applies without moving the agent anywhere.
+    @MainActor
+    static func runtimeKey(for runtime: AgentRuntime?) -> String? {
+        guard let id = runtime?.harnessId else { return builtInRuntimeKey }
+        return HarnessRuntimeStore.shared.runtime(id: id)?.displayName
+    }
+
+    /// The runtime a `runtime:` value names, or nil when no runtime by that
+    /// name is registered.
+    @MainActor
+    static func resolve(_ key: String) -> AgentRuntime? {
+        if normalizedName(key) == builtInRuntimeKey { return .builtIn }
+        return runtime(named: key).map { .harness($0.id) }
+    }
+
+    /// Runtime names that exist once the document is applied: the current
+    /// ones plus those it creates, or only the document's own when it prunes
+    /// `harness_runtimes`.
+    @MainActor
+    static func effectiveRuntimeNames(document: OsaurusConfigDocument, prune: Bool) -> Set<String> {
+        let declared = Set((document.harnessRuntimes ?? []).map { normalizedName($0.name) })
+        if prune, document.harnessRuntimes != nil { return declared }
+        return declared.union(HarnessRuntimeStore.shared.all().map { normalizedName($0.displayName) })
+    }
+
     static func export(_ config: ClaudeCodeAgentConfig, includeConfigWrites: Bool) -> AgentClaudeCodeEntry {
         var entry = AgentClaudeCodeEntry()
+        entry.model = config.resolvedModel
         entry.effort = config.resolvedEffort?.rawValue ?? defaultEffortKey
         entry.mode = key(for: config.mode)
         entry.allowWrites = config.allowWrites
@@ -74,6 +158,10 @@ enum ConfigHarness {
     }
 
     static func patch(_ config: inout ClaudeCodeAgentConfig, from entry: AgentClaudeCodeEntry) {
+        if let model = entry.model {
+            let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            config.model = trimmed.isEmpty ? nil : trimmed
+        }
         if let raw = entry.effort, let effort = effort(forKey: raw) { config.effort = effort?.rawValue }
         if let raw = entry.mode, let mode = mode(forKey: raw) { config.mode = mode }
         if let v = entry.allowWrites { config.allowWrites = v }
@@ -89,6 +177,9 @@ enum ConfigHarness {
         var desired = current
         patch(&desired, from: entry)
         var out: [String] = []
+        if desired.resolvedModel != current.resolvedModel {
+            out.append("\(prefix).model: \(current.resolvedModel) -> \(desired.resolvedModel)")
+        }
         if desired.resolvedEffort != current.resolvedEffort {
             let old = current.resolvedEffort?.rawValue ?? defaultEffortKey
             let new = desired.resolvedEffort?.rawValue ?? defaultEffortKey

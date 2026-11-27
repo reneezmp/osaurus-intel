@@ -56,9 +56,9 @@ struct ConfigAppBehaviorEnumTests {
         #expect(schema.contains("computer_use_enabled"))
         #expect(schema.contains("browser_use_enabled"))
         // The 16-section roster after scope reduction 2 plus harness_runtimes is
-        // 17 upstream; Intel's schema also omits `harness_runtimes`, `channels`
-        // and `models` (no such features), which leaves 14.
-        #expect(ConfigSectionID.allNames.count == 14, "\(ConfigSectionID.allNames)")
+        // 17 upstream; Intel's schema omits `channels` and `models` (no such
+        // features), which leaves 15.
+        #expect(ConfigSectionID.allNames.count == 15, "\(ConfigSectionID.allNames)")
     }
 }
 

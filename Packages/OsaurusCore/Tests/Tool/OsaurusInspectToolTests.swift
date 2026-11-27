@@ -39,11 +39,11 @@ struct OsaurusInspectToolTests {
         let action = try #require(props["action"] as? [String: Any])
         #expect(Set(action["enum"] as? [String] ?? []) == ["status", "list", "describe"])
         let scopes = Set(try #require((props["scope"] as? [String: Any])?["enum"] as? [String]))
-        for scope in ["agents", "providers", "mcp", "plugins", "schedules", "skills", "knowledge", "delegation"] {
+        for scope in ["agents", "providers", "mcp", "plugins", "schedules", "skills", "knowledge", "delegation", "harness_runtimes"] {
             #expect(scopes.contains(scope), "\(scope)")
         }
         // Scopes Intel lacks are not advertised.
-        for scope in ["channels", "workspaces", "shared_agents", "harness_runtimes"] {
+        for scope in ["channels", "workspaces", "shared_agents"] {
             #expect(!scopes.contains(scope), "\(scope)")
         }
         #expect(schema["additionalProperties"] as? Bool == false)
@@ -130,7 +130,7 @@ struct OsaurusInspectToolTests {
 
     @Test
     func scopesIntelLacks_areAnHonestUnavailable() async throws {
-        for scope in ["channels", "workspaces", "shared_agents", "harness_runtimes"] {
+        for scope in ["channels", "workspaces", "shared_agents"] {
             let dict = try await run(#"{"action": "list", "scope": "\#(scope)"}"#)
             #expect(dict["ok"] as? Bool == false, "\(scope)")
             #expect(dict["kind"] as? String == "unavailable", "\(scope)")

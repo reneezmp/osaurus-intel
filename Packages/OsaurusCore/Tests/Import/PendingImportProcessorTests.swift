@@ -31,10 +31,12 @@ struct PendingImportProcessorTests {
         var skill: String
         var agent: String
         var server: String
+        var runtime: String
     }
 
     private func makeFixture(
-        withServer: Bool = false, withRuntime: Bool = false, settings: [String: Any]? = nil
+        withServer: Bool = false, withRuntime: Bool = false, settings: [String: Any]? = nil,
+        runtimeEnvironment: [String: String] = ["PI_LOG_LEVEL": "info"]
     ) throws -> Fixture {
         let suffix = UUID().uuidString.prefix(8).lowercased()
         let fixture = Fixture(
@@ -43,7 +45,8 @@ struct PendingImportProcessorTests {
             bundleId: "com.example.import\(suffix)",
             skill: "triage-\(suffix)",
             agent: "Support \(suffix)",
-            server: "Tickets \(suffix)")
+            server: "Tickets \(suffix)",
+            runtime: "Pi \(suffix)")
         func write(_ text: String, _ relative: String) throws {
             let url = fixture.root.appendingPathComponent(relative)
             try FileManager.default.createDirectory(
@@ -70,9 +73,13 @@ struct PendingImportProcessorTests {
         }
         if withRuntime {
             manifest["harness_runtimes"] = [
-                ["name": "Pi \(suffix)", "kind": "pi_rpc", "executable": "/bin/cat"]
+                [
+                    "name": fixture.runtime, "kind": "pi_rpc", "executable": "/bin/cat",
+                    "arguments": ["--mode", "rpc", "--session-id", "{chat_id}"],
+                    "environment": runtimeEnvironment,
+                ]
             ]
-            agent["runtime"] = "Pi \(suffix)"
+            agent["runtime"] = fixture.runtime
         }
         if let settings { manifest["settings"] = settings }
         let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
@@ -216,6 +223,142 @@ struct PendingImportProcessorTests {
         }
     }
 
+    /// Runs `body` with an empty harness runtime store.
+    private func withRuntimeStore(_ body: @MainActor () async throws -> Void) async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("osaurus-import-runtimes-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let previous = HarnessRuntimeStore.overrideDirectory
+        HarnessRuntimeStore.overrideDirectory = directory
+        HarnessRuntimeStore.shared.resetForTests()
+        defer {
+            HarnessRuntimeStore.overrideDirectory = previous
+            HarnessRuntimeStore.shared.resetForTests()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        try await body()
+    }
+
+    /// Owner policy: the review lists the runtime's command line and
+    /// environment and a HIGH RISK line, and a declined review registers
+    /// nothing (importing never starts the program either way).
+    @Test
+    func harnessRuntimeIsReviewedAsHighRisk_andDeclinedRegistersNothing() async throws {
+        try await exclusive {
+            try await withRuntimeStore {
+                let fixture = try makeFixture(withRuntime: true)
+                defer { try? FileManager.default.removeItem(at: fixture.root) }
+                let reviews = Reviews()
+                let request = try enqueue(.install, fixture)
+                _ = await processor(answer: .denied, reviews: reviews).process(requestId: request.id)
+
+                let plan = try #require(reviews.all.first)
+                #expect(plan.hasHighRiskChanges)
+                #expect(plan.risks.contains { $0.contains("launches a local program") })
+                let row = try #require(
+                    plan.actions.first { $0.section == "harness_runtimes" && $0.target == fixture.runtime })
+                #expect(row.changes.contains { $0.contains("/bin/cat --mode rpc --session-id {chat_id}") })
+                #expect(row.changes.contains { $0.contains("environment[PI_LOG_LEVEL]: info") })
+                #expect(plan.actions.contains { $0.section == "agents" && $0.target == fixture.agent })
+                #expect(plan.risks.contains { $0.contains("runs on harness") })
+                #expect(ConfigHarness.runtime(named: fixture.runtime) == nil)
+                #expect(agent(named: fixture.agent) == nil)
+                #expect(receipts(fixture).isEmpty)
+            }
+        }
+    }
+
+    @Test
+    func harnessRuntimeInstallsWithItsAgent_afterReview_andIsRemovedOnlyWhenUnused() async throws {
+        try await exclusive {
+            try await withRuntimeStore {
+                let fixture = try makeFixture(withRuntime: true)
+                defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+                let installed = try await run(.install, fixture)
+                #expect(installed.status == .applied, "\(installed.items)")
+                #expect(installed.items.map(\.kind) == [.skill, .harnessRuntime, .agent])
+                let runtime = try #require(ConfigHarness.runtime(named: fixture.runtime))
+                #expect(runtime.kind == .piRPC)
+                #expect(runtime.executable == "/bin/cat")
+                #expect(runtime.arguments == ["--mode", "rpc", "--session-id", "{chat_id}"])
+                #expect(runtime.environment == ["PI_LOG_LEVEL": "info"])
+                let created = try #require(agent(named: fixture.agent))
+                #expect(created.runtime == .harness(runtime.id))
+                #expect(receipts(fixture).first { $0.kind == .harnessRuntime }?.harnessRuntimeId == runtime.id.uuidString)
+                #expect(receipts(fixture).first { $0.kind == .agent }?.harnessRuntime == fixture.runtime)
+
+                let again = try await run(.install, fixture)
+                #expect(again.items.allSatisfy { $0.status == .unchanged }, "\(again.items)")
+
+                let blocked = try await run(.remove, fixture, kinds: [.harnessRuntime])
+                #expect(blocked.items.first?.status == .failed)
+                #expect(blocked.items.first?.message?.contains(fixture.agent) == true)
+                #expect(ConfigHarness.runtime(named: fixture.runtime) != nil)
+
+                let removed = try await run(.remove, fixture)
+                #expect(removed.items.allSatisfy { $0.status == .done }, "\(removed.items)")
+                #expect(ConfigHarness.runtime(named: fixture.runtime) == nil)
+                #expect(agent(named: fixture.agent) == nil)
+                #expect(receipts(fixture).isEmpty)
+            }
+        }
+    }
+
+    @Test
+    func agentPullsInItsRuntime_andRemovingTheAgentRemovesIt() async throws {
+        try await exclusive {
+            try await withRuntimeStore {
+                let fixture = try makeFixture(withRuntime: true)
+                defer { try? FileManager.default.removeItem(at: fixture.root) }
+                let bundle = try OsaurusBundle.load(from: fixture.root)
+                let refs = try bundle.select(kind: .agent, names: [fixture.agent])
+                #expect(refs.contains { $0.kind == .harnessRuntime && !$0.explicit })
+                let request = ImportRequest(
+                    bundleId: bundle.id, bundleName: nil, bundleVersion: bundle.manifest.version,
+                    operations: refs.map {
+                        ImportOperation(action: .install, kind: $0.kind, name: $0.name, explicit: $0.explicit)
+                    },
+                    confirmHighRisk: true)
+                try ImportQueue.enqueue(request, bundle: bundle)
+                let installed = try #require(await processor().process(requestId: request.id))
+                guard case .completed(let result) = installed else {
+                    Issue.record("expected the request to complete, got \(installed)")
+                    return
+                }
+                #expect(result.status == .applied, "\(result.items)")
+
+                let removed = try await run(.remove, fixture, kinds: [.agent])
+                #expect(removed.items.map(\.kind) == [.agent, .harnessRuntime], "\(removed.items)")
+                #expect(ConfigHarness.runtime(named: fixture.runtime) == nil)
+                #expect(receipts(fixture).isEmpty)
+            }
+        }
+    }
+
+    /// Intel: `OSAURUS_*` is refused in an imported runtime, as the Runtimes
+    /// editor refuses it; the runtime and its agent are not installed.
+    @Test
+    func harnessRuntimeWithAnOsaurusEnvironmentKeyIsRefused() async throws {
+        try await exclusive {
+            try await withRuntimeStore {
+                let fixture = try makeFixture(
+                    withRuntime: true, runtimeEnvironment: ["OSAURUS_AGENT_TOKEN": "x", "PI_LOG_LEVEL": "info"])
+                defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+                let result = try await run(.install, fixture)
+                let runtime = try #require(result.items.first { $0.kind == .harnessRuntime })
+                #expect(runtime.status == .failed)
+                #expect(runtime.message?.contains("OSAURUS_AGENT_TOKEN") == true, "\(runtime.message ?? "")")
+                #expect(ConfigHarness.runtime(named: fixture.runtime) == nil)
+                let agentRow = try #require(result.items.first { $0.kind == .agent })
+                #expect(agentRow.status == .failed)
+                #expect(agent(named: fixture.agent) == nil)
+                #expect(HarnessRuntimeStore.shared.all().allSatisfy { $0.displayName != fixture.runtime })
+            }
+        }
+    }
+
     /// Owner policy: the review lists every change before anything lands.
     @Test
     func reviewListsSkillAndAgentRows_beforeAnythingIsApplied() async throws {
@@ -315,24 +458,6 @@ struct PendingImportProcessorTests {
             #expect(plan.risks.contains { $0.contains("launches a local process") })
             #expect(plan.actions.contains { $0.section == "mcp_servers" })
             #expect(MCPProviderManager.shared.configuration.providers.allSatisfy { $0.name != fixture.server })
-        }
-    }
-
-    @Test
-    func harnessRuntimeIsNeverInstalled_andItsAgentIsRefused() async throws {
-        try await exclusive {
-            let fixture = try makeFixture(withRuntime: true)
-            defer { try? FileManager.default.removeItem(at: fixture.root) }
-
-            let result = try await run(.install, fixture)
-            let runtime = try #require(result.items.first { $0.kind == .harnessRuntime })
-            #expect(runtime.status == .failed)
-            #expect(runtime.message?.contains("Intel") == true)
-            let agentRow = try #require(result.items.first { $0.kind == .agent })
-            #expect(agentRow.status == .failed)
-            #expect(agent(named: fixture.agent) == nil)
-
-            _ = try await run(.remove, fixture)
         }
     }
 

@@ -44,7 +44,7 @@ struct IntelConfigExportRoundTripTests {
         #expect(document.declaredSections == [.memory])
     }
 
-    @Test(arguments: ["channels", "harness_runtimes", "models"])
+    @Test(arguments: ["channels", "models"])
     func sectionsIntelLacks_areRejectedWithAnActionableError(section: String) {
         let yaml = "version: 1\n\(section): []\n"
         do {

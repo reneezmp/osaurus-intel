@@ -53,6 +53,9 @@ enum ConfigPlanner {
         if let section = document.memory {
             planMemory(section, current: current.memory, into: &actions)
         }
+        if let entries = document.harnessRuntimes {
+            planHarnessRuntimes(entries, prune: prune, into: &actions)
+        }
         if let section = document.defaultAgent {
             planDefaultAgent(section, current: current.defaultAgent, into: &actions)
         }
@@ -274,9 +277,13 @@ enum ConfigPlanner {
                 issues.append("memory.retention_days: must be in 0...3650 (0 = forever).")
             }
         }
+        validateHarnessRuntimes(document: document, prune: prune, into: &issues)
         if let section = document.defaultAgent {
             checkRange(section.temperature, 0.0...2.0, "default_agent.temperature", &issues)
             checkRange(section.maxTokens, 1...10_000_000, "default_agent.max_tokens", &issues)
+            checkRuntimeReference(
+                section.runtime, claudeCode: section.claudeCode, label: "default_agent",
+                document: document, prune: prune, into: &issues)
         }
 
         if let agents = document.agents {
@@ -299,7 +306,14 @@ enum ConfigPlanner {
                 checkRange(entry.maxTokens, 1...10_000_000, "agents[\(entry.name)].max_tokens", &issues)
                 do { try entry.generationSettings.valueOrNil?.validate() }
                 catch { issues.append("agents[\(entry.name)].generation_settings: \(error.localizedDescription)") }
-                checkClaudeCodeEntry(entry.claudeCode, label: "agents[\(entry.name)]", into: &issues)
+                checkRuntimeReference(
+                    entry.runtime, claudeCode: entry.claudeCode, label: "agents[\(entry.name)]",
+                    document: document, prune: prune, into: &issues)
+                if entry.claudeCode?.allowOsaurusConfigWrites != nil {
+                    issues.append(
+                        "agents[\(entry.name)].claude_code.allow_osaurus_config_writes: only the "
+                            + "Default agent can change Osaurus configuration.")
+                }
                 if let mode = entry.tools?.mode, ToolSelectionMode(rawValue: mode) == nil {
                     issues.append(
                         "agents[\(entry.name)].tools.mode: must be `auto` or `manual` (got `\(mode)`).")
@@ -994,7 +1008,12 @@ enum ConfigPlanner {
         diff(
             "system_prompt", desired: desired.systemPrompt,
             current: current.systemPrompt, into: &changes)
-        let risks: [String] = []
+        var risks: [String] = []
+        let stored = DefaultAgentConfigurationStore.load()
+        diffRuntime(
+            desired.runtime, claudeCode: desired.claudeCode,
+            currentRuntime: stored.runtime, currentClaudeCode: stored.claudeCode ?? .default,
+            agent: "default", into: &changes, risks: &risks)
         guard !changes.isEmpty else { return }
         actions.append(
             ConfigPlanAction(
@@ -1002,37 +1021,27 @@ enum ConfigPlanner {
                 changes: changes, risks: risks))
     }
 
-    /// Plan lines and risks for an agent's `claude_code` keys (upstream #3229
-    /// added `effort`). Intel has no harness runtime registry, so upstream's
-    /// `runtime` half of `diffRuntime` is not here (`W-harness-runtimes`).
+    /// Plan lines and risks for an agent's `runtime` and `claude_code` keys.
     @MainActor
-    private static func diffClaudeCode(
-        _ claudeCode: AgentClaudeCodeEntry?, current: ClaudeCodeAgentConfig,
+    private static func diffRuntime(
+        _ runtime: String?, claudeCode: AgentClaudeCodeEntry?,
+        currentRuntime: AgentRuntime?, currentClaudeCode: ClaudeCodeAgentConfig,
         agent: String, into changes: inout [String], risks: inout [String]
     ) {
-        guard let claudeCode else { return }
-        changes.append(contentsOf: ConfigHarness.changes(claudeCode, current: current, prefix: "claude_code"))
-        risks.append(contentsOf: ConfigHarness.risks(claudeCode, current: current, agent: agent))
-    }
-
-    /// `claude_code` values must be known keys (upstream `checkRuntimeReference`,
-    /// minus the harness `runtime` lookup). Only the Default agent may change
-    /// Osaurus configuration, and `agents[]` entries are never the Default agent.
-    private static func checkClaudeCodeEntry(
-        _ claudeCode: AgentClaudeCodeEntry?, label: String, into issues: inout [String]
-    ) {
-        if let raw = claudeCode?.mode, ConfigHarness.mode(forKey: raw) == nil {
-            issues.append(
-                "\(label).claude_code.mode: must be one of: \(ConfigHarness.modeKeys.joined(separator: ", ")).")
+        if let runtime {
+            let currentKey = ConfigHarness.runtimeKey(for: currentRuntime)
+            let desiredKey = ConfigHarness.normalizedName(runtime)
+            if currentKey.map(ConfigHarness.normalizedName) != desiredKey {
+                changes.append("runtime: \(currentKey ?? "(deleted runtime)") -> \(runtime)")
+                if desiredKey != ConfigHarness.builtInRuntimeKey {
+                    risks.append(ConfigRisk.agentOnHarness(agent, runtime))
+                }
+            }
         }
-        if let raw = claudeCode?.effort, ConfigHarness.effort(forKey: raw) == nil {
-            issues.append(
-                "\(label).claude_code.effort: must be one of: \(ConfigHarness.effortKeys.joined(separator: ", ")).")
-        }
-        if claudeCode?.allowOsaurusConfigWrites != nil {
-            issues.append(
-                "\(label).claude_code.allow_osaurus_config_writes: only the Default agent can change "
-                    + "Osaurus configuration.")
+        if let claudeCode {
+            changes.append(
+                contentsOf: ConfigHarness.changes(claudeCode, current: currentClaudeCode, prefix: "claude_code"))
+            risks.append(contentsOf: ConfigHarness.risks(claudeCode, current: currentClaudeCode, agent: agent))
         }
     }
 
@@ -1257,8 +1266,9 @@ enum ConfigPlanner {
                             ?? AutonomousExecConfig.default,
                         currentlyEnabled: AgentManager.shared.effectiveAutonomousExec(for: agent.id)?.enabled
                             ?? false))
-                diffClaudeCode(
-                    entry.claudeCode, current: agent.claudeCode ?? .default,
+                diffRuntime(
+                    entry.runtime, claudeCode: entry.claudeCode,
+                    currentRuntime: agent.runtime, currentClaudeCode: agent.claudeCode ?? .default,
                     agent: entry.name, into: &changes, risks: &risks)
                 if changes.isEmpty {
                     unchanged += 1
@@ -1289,8 +1299,9 @@ enum ConfigPlanner {
                 risks.append(
                     contentsOf: Self.sandboxRisks(
                         entry.name, entry.sandbox, current: .default, currentlyEnabled: false))
-                diffClaudeCode(
-                    entry.claudeCode, current: .default,
+                diffRuntime(
+                    entry.runtime, claudeCode: entry.claudeCode,
+                    currentRuntime: nil, currentClaudeCode: .default,
                     agent: entry.name, into: &changes, risks: &risks)
                 // Intel never adds a created agent to the Orchestrator's Gate 4
                 // allowlist implicitly (#3227): say so for either spelling.
@@ -1658,6 +1669,151 @@ enum ConfigPlanner {
     }
 
     // MARK: - MCP servers
+
+    // MARK: - Harness runtimes
+
+    @MainActor
+    private static func validateHarnessRuntimes(
+        document: OsaurusConfigDocument, prune: Bool, into issues: inout [String]
+    ) {
+        guard let entries = document.harnessRuntimes else { return }
+        var seen = Set<String>()
+        for entry in entries {
+            let key = ConfigHarness.normalizedName(entry.name)
+            let label = "harness_runtimes[\(entry.name)]"
+            if key.isEmpty {
+                issues.append("harness_runtimes[]: every runtime needs a non-empty name.")
+                continue
+            }
+            if key == ConfigHarness.builtInRuntimeKey {
+                issues.append("\(label): `builtin` is reserved for Osaurus's own loop.")
+            }
+            if !seen.insert(key).inserted {
+                issues.append("\(label): duplicate runtime name in document.")
+            }
+            let current = ConfigHarness.runtime(named: entry.name)
+            if let raw = entry.kind {
+                if let kind = ConfigHarness.kind(forKey: raw) {
+                    if let current, current.kind != kind {
+                        issues.append(
+                            "\(label).kind: immutable after create — remove and re-add the runtime "
+                                + "to change its protocol.")
+                    }
+                } else {
+                    issues.append(
+                        "\(label).kind: must be one of: \(ConfigHarness.kindKeys.joined(separator: ", ")).")
+                }
+            } else if current == nil {
+                issues.append("\(label): `kind` is required to add a new runtime.")
+            }
+            if let executable = entry.executable,
+                executable.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                issues.append("\(label).executable: must not be empty.")
+            }
+            for name in (entry.environment ?? [:]).keys
+            where name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                issues.append("\(label).environment: variable names must not be empty.")
+            }
+            // Intel: same rule as the Runtimes editor; `OSAURUS_*` is Osaurus's own contract.
+            for name in (entry.environment ?? [:]).keys.sorted()
+            where ConfigHarness.isReservedEnvironmentName(name) {
+                issues.append(
+                    "\(label).environment: `\(name)` is set by Osaurus and can't be overridden "
+                        + "(`OSAURUS_*` is reserved).")
+            }
+        }
+    }
+
+    /// `runtime` must name Osaurus's own loop or a runtime that exists after
+    /// apply. Never falls back to the built-in loop: an agent the document
+    /// meant for a harness would silently run somewhere else.
+    @MainActor
+    private static func checkRuntimeReference(
+        _ runtime: String?, claudeCode: AgentClaudeCodeEntry?, label: String,
+        document: OsaurusConfigDocument, prune: Bool, into issues: inout [String]
+    ) {
+        if let runtime {
+            let key = ConfigHarness.normalizedName(runtime)
+            if key != ConfigHarness.builtInRuntimeKey,
+                !ConfigHarness.effectiveRuntimeNames(document: document, prune: prune).contains(key)
+            {
+                issues.append(
+                    "\(label).runtime: runtime `\(runtime)` is not registered; add it under "
+                        + "harness_runtimes, or use `builtin`.")
+            }
+        }
+        if let raw = claudeCode?.mode, ConfigHarness.mode(forKey: raw) == nil {
+            issues.append(
+                "\(label).claude_code.mode: must be one of: \(ConfigHarness.modeKeys.joined(separator: ", ")).")
+        }
+        if let raw = claudeCode?.effort, ConfigHarness.effort(forKey: raw) == nil {
+            issues.append(
+                "\(label).claude_code.effort: must be one of: \(ConfigHarness.effortKeys.joined(separator: ", ")).")
+        }
+    }
+
+    @MainActor
+    private static func planHarnessRuntimes(
+        _ entries: [HarnessRuntimeEntry], prune: Bool, into actions: inout [ConfigPlanAction]
+    ) {
+        let existing = HarnessRuntimeStore.shared.all()
+        var matched = Set<UUID>()
+
+        for entry in entries {
+            let key = ConfigHarness.normalizedName(entry.name)
+            if let runtime = existing.first(where: { ConfigHarness.normalizedName($0.displayName) == key }) {
+                matched.insert(runtime.id)
+                var changes: [String] = []
+                var risks: [String] = []
+                let executable = entry.executable ?? runtime.executable
+                let arguments = entry.arguments ?? runtime.arguments
+                if executable != runtime.executable {
+                    changes.append("executable: \(runtime.executable) -> \(executable)")
+                }
+                if arguments != runtime.arguments {
+                    changes.append("arguments: \(display(runtime.arguments)) -> \(display(arguments))")
+                }
+                if executable != runtime.executable || arguments != runtime.arguments {
+                    risks.append(
+                        ConfigRisk.harnessCommand(entry.name, ([executable] + arguments).joined(separator: " ")))
+                }
+                let envBefore = changes.count
+                diffMap("environment", desired: entry.environment, current: runtime.environment, into: &changes)
+                if changes.count > envBefore { risks.append(ConfigRisk.harnessEnvironment(entry.name)) }
+                if !changes.isEmpty {
+                    actions.append(
+                        ConfigPlanAction(
+                            section: "harness_runtimes", target: entry.name, kind: .update,
+                            changes: changes, risks: risks))
+                }
+            } else {
+                // Validation guarantees a kind for new runtimes.
+                let kind = entry.kind.flatMap(ConfigHarness.kind(forKey:)) ?? .piRPC
+                let executable = entry.executable ?? kind.defaultExecutable
+                let arguments = entry.arguments ?? kind.defaultArguments
+                let commandLine = ([executable] + arguments).joined(separator: " ")
+                var changes = ["add \(ConfigHarness.key(for: kind)) runtime running: \(commandLine)"]
+                for (name, value) in (entry.environment ?? [:]).sorted(by: { $0.key < $1.key }) {
+                    changes.append("environment[\(name)]: \(value)")
+                }
+                actions.append(
+                    ConfigPlanAction(
+                        section: "harness_runtimes", target: entry.name, kind: .create,
+                        changes: changes, risks: [ConfigRisk.harnessCommand(entry.name, commandLine)]))
+            }
+        }
+
+        if prune {
+            for runtime in existing where !matched.contains(runtime.id) {
+                actions.append(
+                    ConfigPlanAction(
+                        section: "harness_runtimes", target: runtime.displayName, kind: .delete,
+                        changes: ["remove runtime \(runtime.executable)"],
+                        risks: [ConfigRisk.deleteHarnessRuntime(runtime.displayName)]))
+            }
+        }
+    }
 
     private static func planMCPServers(
         _ entries: [MCPServerEntry], prune: Bool, into actions: inout [ConfigPlanAction]

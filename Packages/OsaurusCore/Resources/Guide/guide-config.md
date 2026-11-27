@@ -20,9 +20,10 @@ Parts of Osaurus can be configured from a single YAML document that describes th
 The document has these sections (plus `version`):
 
 - `memory`: persistent memory: enabled, token budget, retention days.
-- `default_agent`: the built-in Orchestrator: display name, model, temperature, max tokens, persona.
+- `harness_runtimes`: external agent harnesses (Settings → Agents → Runtimes): `name`, `kind` (`claude_code` or `pi_rpc`; required to add, fixed after), `executable`, `arguments` (`{chat_id}`, `{agent_id}`, `{cwd}`, `{system_prompt_file}` are filled in per launch) and `environment` (plain values, merged; never secrets, and `OSAURUS_*` names are refused). `builtin` is reserved. Applying a document only registers the runtime; it never starts it. Adding one, or changing its command line or environment, is high risk: every chat of an agent on it runs that program.
+- `default_agent`: the built-in Orchestrator: display name, model, temperature, max tokens, persona, and `runtime` / `claude_code` (as on `agents`, plus `claude_code.allow_osaurus_config_writes`).
 - `new_chat_agent`: which agent new chats open with: `default` or a custom agent's name (`active_agent` is still accepted as an older spelling).
-- `agents`: custom agents: prompt, model, sampling, and per-agent capability toggles (tools, web search, Browser Use, relay, `apple_apps`, and more). `tools` with `mode: manual` is the exact tool list. `capabilities.apple_apps` lists the built-in Apple apps the agent may use (`calendar`, `reminders`, `contacts`, `notes`, `mail`, `messages`, `maps`, `music`, `shortcuts`); the full list replaces the set and `[]` turns them all off. Specialist tools are off on a new agent: set `capabilities.calculator_enabled: true` for an agent that works with numbers, in the same apply that creates it. `task_checklist_enabled`, `clarify_enabled` and `artifacts_enabled` are on by default. `orchestrator_spawnable` is accepted but does nothing here: a new agent is never added to the Orchestrator's delegation list automatically (see Delegation).
+- `agents`: custom agents: prompt, model, sampling, and per-agent capability toggles (tools, web search, Browser Use, relay, `apple_apps`, and more). `tools` with `mode: manual` is the exact tool list. `capabilities.apple_apps` lists the built-in Apple apps the agent may use (`calendar`, `reminders`, `contacts`, `notes`, `mail`, `messages`, `maps`, `music`, `shortcuts`); the full list replaces the set and `[]` turns them all off. Specialist tools are off on a new agent: set `capabilities.calculator_enabled: true` for an agent that works with numbers, in the same apply that creates it. `task_checklist_enabled`, `clarify_enabled` and `artifacts_enabled` are on by default. `orchestrator_spawnable` is accepted but does nothing here: a new agent is never added to the Orchestrator's delegation list automatically (see Delegation). `runtime` is `builtin` (Osaurus's own loop) or a `harness_runtimes` name; a name that is not registered (and not added by the same document) fails validation instead of falling back to the built-in loop. `claude_code` (`model`, `effort`, `mode: agent | text_only`, `allow_writes`, `allow_shell`, `allow_osaurus_tools`) applies when the runtime is Claude Code; only listed keys change.
 - `tools`: global tool enablement and per-tool policies (`auto` / `ask` / `deny`). Tools that send or delete as you (`messages_send`, `calendar_delete_event`, `reminders_delete`, `delete_knowledge`) ask on every call regardless; `auto` on them is stored but has no effect, and the plan says so.
 - `delegation`: which custom agents the Orchestrator may delegate to (`spawnable_agents`). See below.
 - `commands`: your slash-command templates.
@@ -36,7 +37,7 @@ The document has these sections (plus `version`):
 
 Agent templates: `osaurus_config` action `templates` lists the templates the user left visible to the Orchestrator. `plan` / `apply` with `template: "<name>"` (and optional `overrides`: `name`, `description`, `system_prompt`, `model`, `capabilities`) builds the agent from a template; it is planned and approved like any other change, and the new agent records the template in `source_template`. `export` with `save_as` saves a YAML document in `~/.osaurus/templates`, which `template` also names. Templates never carry secrets.
 
-Not available on this Mac yet: channels, harness runtimes, local models, agent skills lists, knowledge switches, and sandbox network keys. A document that uses one of them is refused with a message naming the key.
+Not available on this Mac yet: channels, local models, agent skills lists, knowledge switches, and sandbox network keys. A document that uses one of them is refused with a message naming the key.
 
 ## Delegation
 
@@ -58,7 +59,7 @@ delegation:
 - **Plan is a dry run.** Only `apply` changes anything. A planned change is not a done change; after a successful apply the tool says so and the assistant stops.
 - **Prune is explicit and destructive.** It is a tool argument, never a document key. Applying with prune also deletes entries not listed in the sections the document declares; it never touches undeclared sections. A prune that would delete an agent while a surviving schedule or watcher still runs on it is refused.
 - **Validation is all-or-nothing.** Any invalid key, value or reference fails the whole document with every issue listed; nothing is half-applied.
-- **High-risk changes always show their risks in the approval window**: prune deletions, Browser Use grants, agent relay exposure, new MCP endpoints, stdio MCP commands, setting a tool policy to `auto`, and emptying the delegation list.
+- **High-risk changes always show their risks in the approval window**: prune deletions, Browser Use grants, agent relay exposure, new MCP endpoints, stdio MCP commands, harness runtime commands and environment, moving an agent onto a harness, Claude Code shell or configuration-change permission, setting a tool policy to `auto`, and emptying the delegation list.
 - **JSON works everywhere YAML does.** `export` and `schema` accept `format: json`, and `plan` / `apply` accept JSON in the same field.
 
 ## Secrets
@@ -78,11 +79,11 @@ For scripts on this Mac. All four routes answer only a caller on this Mac itself
 
 ## Osaurus bundles: `osaurus import`
 
-A vendor or IT team can ship a ready-made setup as a folder with `osaurus-bundle.json`: agents, skills, MCP servers and a short list of server settings (`require_local_access_key`, `allowed_origins`). Run `osaurus import validate --from <folder>` to check it, `osaurus import install --from <folder>` to queue it, and `osaurus import list` / `remove` to see or undo what a bundle installed.
+A vendor or IT team can ship a ready-made setup as a folder with `osaurus-bundle.json`: agents, skills, MCP servers, harness runtimes and a short list of server settings (`require_local_access_key`, `allowed_origins`). Run `osaurus import validate --from <folder>` to check it, `osaurus import install --from <folder>` to queue it, and `osaurus import list` / `remove` to see or undo what a bundle installed.
 
 Nothing in a bundle lands without your approval in the Mac app. Queuing only copies the folder into `~/.osaurus/import/pending`. The request then waits until you open **Agents → Bundles**, read what it would create, update or remove (with the same high-risk lines as a configuration review), and click **Apply**. A running Osaurus also shows the review in the Review configuration changes window when the CLI asks it to apply; with no chat window open that answers 409 and the request stays queued. `--yes` on the command line is ignored by the app: a script cannot approve for you.
 
-A bundle is data. Nothing in it is run: skills are copied as files, MCP servers are registered (a stdio server's command is listed as a risk) and secrets are only `keychain:` / `env:` references. Plugins are never installed by a bundle (use the signed plugin installer), and harness runtimes, agent `skills` allow-lists and models are not available in Osaurus for Intel yet, so those items are reported as failed and skipped.
+A bundle is data. Nothing in it is run: skills are copied as files, MCP servers are registered (a stdio server's command is listed as a risk) and secrets are only `keychain:` / `env:` references. Plugins are never installed by a bundle (use the signed plugin installer), and agent `skills` allow-lists and models are not available in Osaurus for Intel yet, so those items are reported as failed and skipped. A harness runtime in a bundle is only registered (its program is listed as a high-risk line in the review and is never started by the import); an agent that names one starts it only when you chat with that agent, and `OSAURUS_*` environment names are refused.
 
 ## Not configurable declaratively
 

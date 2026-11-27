@@ -5,9 +5,8 @@
 //  The risk strings the planner and the apply gate share. Upstream keeps
 //  this enum at the top of `ConfigPlanner.swift`; Intel keeps it in its own
 //  file so the exporter and harness helpers can use it before the planner
-//  lands. Channel, harness-runtime and model-deletion risks are left out:
-//  Intel has none of those sections (`W-channels`, `W-harness-runtimes`,
-//  no local models).
+//  lands. Channel and model-deletion risks are left out: Intel has none of
+//  those sections (`W-channels`, no local models).
 //
 
 import Foundation
@@ -118,6 +117,18 @@ enum ConfigRisk {
     }
     static func deleteSearchProvider(_ id: String) -> String {
         "Removes search provider `\(id)` and its stored key (prune)."
+    }
+    static func harnessCommand(_ name: String, _ commandLine: String) -> String {
+        "Harness runtime `\(name)` launches a local program for every chat of an agent on it: \(commandLine)"
+    }
+    static func harnessEnvironment(_ name: String) -> String {
+        "Changes the environment harness runtime `\(name)` launches with."
+    }
+    static func deleteHarnessRuntime(_ name: String) -> String {
+        "Removes harness runtime `\(name)` (prune); agents on it stop running until they get another runtime."
+    }
+    static func agentOnHarness(_ agent: String, _ runtime: String) -> String {
+        "Agent `\(agent)` runs on harness `\(runtime)`: a local program with its own tools, outside the Osaurus sandbox."
     }
     /// W-seatbelt-sandbox stage 5. Upstream flags none of these; on Intel each
     /// switch that widens what an agent can do must be approved as high risk.

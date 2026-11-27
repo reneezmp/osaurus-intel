@@ -117,7 +117,6 @@ struct IntelConfigApplierTests {
     func omittedSections_failAtDecode() {
         for yaml in [
             "channels:\n  telegram:\n    write_enabled: true\n",
-            "harness_runtimes:\n  - name: x\n    kind: claude_code\n",
             "models:\n  - mlx-community/Some-Model-4bit\n",
         ] {
             #expect(throws: (any Error).self) { try ConfigYAML.decode(yaml) }

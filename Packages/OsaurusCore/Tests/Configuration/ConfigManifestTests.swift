@@ -23,11 +23,10 @@ struct ConfigManifestDerivationTests {
         // Root must know every section plus `version`.
         let root = ConfigManifest.knownKeys[""]
         #expect(root == Set(ConfigSectionID.allNames + ["version"]))
-        // Spot-check derived paths exist. (`harness_runtimes[]` is left out:
-        // Intel has no harness runtime registry, `W-harness-runtimes`; so is
-        // `default_agent.claude_code`.)
+        // Spot-check derived paths exist.
         for path in ["memory", "delegation", "agents[]", "agents[].capabilities",
-            "search_providers.providers[]", "agents[].claude_code"]
+            "search_providers.providers[]", "harness_runtimes[]", "agents[].claude_code",
+            "default_agent.claude_code"]
         {
             #expect(ConfigManifest.knownKeys[path] != nil, "missing knownKeys path `\(path)`")
         }

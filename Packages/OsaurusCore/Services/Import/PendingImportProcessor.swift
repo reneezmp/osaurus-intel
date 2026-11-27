@@ -14,7 +14,9 @@
 //  to show the review (`.cancelled`) or a timeout the request stays queued and
 //  nothing is applied. The caller's `--yes` is ignored: a script cannot
 //  approve for the user. A bundle is data: nothing in it is executed, and
-//  harness runtimes (`W-harness-runtimes`) and plugins are not installed.
+//  plugins are not installed. A harness runtime is only registered (written
+//  to `HarnessRuntimeStore`); importing one never starts it, and an agent
+//  that runs on it only starts the runtime when the user chats with it.
 //
 //  Within a request, skills install first, then MCP servers, then harness
 //  runtimes, then agents, so an agent's skill allow-list, server tools and
@@ -395,7 +397,7 @@ public final class PendingImportProcessor {
     private enum Payload {
         case skill(source: OsaurusBundle.Skill, existing: Skill?)
         case mcp(entry: MCPServerEntry, existingId: UUID?)
-        case harnessRuntime
+        case harnessRuntime(entry: HarnessRuntimeEntry)
         case agent(
             entry: AgentEntry, existingId: UUID?, quickActions: [AgentQuickAction]?,
             source: OsaurusBundle.Agent)
@@ -491,18 +493,46 @@ public final class PendingImportProcessor {
             return item
 
         case .harnessRuntime:
-            // A harness runtime launches a local program for every chat. Intel
-            // has no runtime registry (`W-harness-runtimes`), so it is never installed.
-            throw PrepareFailure(
-                message: "Harness runtimes are not available in Osaurus for Intel yet, so this runtime is not installed.")
+            guard let raw = try? bundle.rawHarnessRuntimeEntries()[Self.runtimeKey(op.name)] else {
+                throw PrepareFailure(message: "Not found in the bundle.")
+            }
+            var entry: HarnessRuntimeEntry
+            do {
+                let data = try JSONSerialization.data(withJSONObject: raw)
+                entry = try JSONDecoder().decode(HarnessRuntimeEntry.self, from: data)
+            } catch {
+                throw PrepareFailure(message: "The runtime entry does not decode: \(error.localizedDescription)")
+            }
+            let owned = receipt?.bundleId == bundle.id ? receipt : nil
+            let existing =
+                owned?.harnessRuntimeId.flatMap(UUID.init(uuidString:)).flatMap {
+                    HarnessRuntimeStore.shared.runtime(id: $0)
+                } ?? ConfigHarness.runtime(named: entry.name)
+            let decision = decide(
+                op, bundle: bundle, bundleVersion: bundleVersion, hash: hash, receipt: receipt,
+                exists: existing != nil, what: "harness runtime")
+            // A runtime the user renamed keeps its name; the applier matches by it.
+            if let existing, decision == .replace { entry.name = existing.displayName }
+            var document = OsaurusConfigDocument()
+            document.version = 1
+            document.harnessRuntimes = [entry]
+            // Intel: the plan rows (executable, arguments, environment and the
+            // HIGH RISK line) are what the user approves in the review window.
+            let planned: ConfigPlan
+            do {
+                planned = try ConfigPlanner.plan(document: document, prune: false)
+            } catch {
+                throw PrepareFailure(message: Self.describe(error))
+            }
+            var item = PreparedItem(
+                op: op, hash: hash, receipt: receipt, decision: decision,
+                payload: .harnessRuntime(entry: entry))
+            item.plan = planned
+            return item
 
         case .agent:
             guard let source = bundle.agent(named: op.name) else {
                 throw PrepareFailure(message: "Not found in the bundle.")
-            }
-            if let runtime = source.harnessRuntime {
-                throw PrepareFailure(
-                    message: "It runs on the harness runtime \"\(runtime)\", which Osaurus for Intel does not support yet.")
             }
             let template: Template
             do {
@@ -549,6 +579,10 @@ public final class PendingImportProcessor {
             var document = OsaurusConfigDocument()
             document.version = 1
             document.agents = [planEntry]
+            // The runtime installs ahead of the agent in the same request.
+            if let runtime = source.harnessRuntime.flatMap(bundle.harnessRuntime(named:)) {
+                document.harnessRuntimes = [Self.runtimeEntry(runtime)]
+            }
             let planned: ConfigPlan
             do {
                 planned = try ConfigPlanner.plan(document: document, prune: false)
@@ -609,6 +643,19 @@ public final class PendingImportProcessor {
                     + "Run install to set it again.")
         }
         return setting.isSatisfied(wanted, by: current) ? .unchanged : .replace
+    }
+
+    private static func runtimeKey(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func runtimeEntry(_ ref: OsaurusBundleManifest.HarnessRuntimeReference) -> HarnessRuntimeEntry {
+        var entry = HarnessRuntimeEntry(name: ref.name)
+        entry.kind = ref.kind
+        entry.executable = ref.executable
+        entry.arguments = ref.arguments
+        entry.environment = ref.environment
+        return entry
     }
 
     /// Ownership rules. An item another bundle (or the user) owns is never
@@ -745,10 +792,33 @@ public final class PendingImportProcessor {
             let status: ImportItemStatus = row.status == .needsUserAction ? .needsUserAction : .done
             return result(status, row.message ?? "\(verb) MCP server.", pending: receipt.pendingSecrets, name: entry.name)
 
-        case .harnessRuntime:
-            return result(.failed, "Harness runtimes are not available in Osaurus for Intel yet.")
+        case .harnessRuntime(let entry):
+            var document = OsaurusConfigDocument()
+            document.version = 1
+            document.harnessRuntimes = [entry]
+            let rows = await ConfigApplier.apply(document: document, prune: false, options: .bundleImport)
+            guard let row = rows.first(where: { $0.section == "harness_runtimes" }) else {
+                return result(.failed, "The runtime was not applied.")
+            }
+            if row.status == .failed { return result(.failed, row.message) }
+            guard let runtime = ConfigHarness.runtime(named: entry.name) else {
+                return result(.failed, "The runtime was applied but could not be found afterwards.")
+            }
+            receipt.harnessRuntimeId = runtime.id.uuidString
+            receipt.needsUserAction = nil
+            upsert(receipt, into: &receipts)
+            return result(.done, "\(verb) harness runtime \(runtime.displayName).", name: runtime.displayName)
 
         case .agent(let entry, _, let quickActions, let source):
+            let bundleRuntime = source.harnessRuntime.flatMap(bundle.harnessRuntime(named:))
+            if let bundleRuntime,
+                !receipts.contains(where: {
+                    $0.bundleId == bundle.id && $0.matches(kind: .harnessRuntime, name: bundleRuntime.name)
+                })
+            {
+                return result(
+                    .failed, "Its harness runtime \"\(bundleRuntime.name)\" from this bundle is not installed.")
+            }
             var document = OsaurusConfigDocument()
             document.version = 1
             document.agents = [entry]
@@ -788,6 +858,7 @@ public final class PendingImportProcessor {
             receipt.agentId = agent.id.uuidString
             receipt.skills = source.skills
             receipt.mcpServers = source.mcpServers.isEmpty ? nil : source.mcpServers
+            receipt.harnessRuntime = bundleRuntime?.name
             receipt.needsUserAction = needsUser ? true : nil
             upsert(receipt, into: &receipts)
             return result(
@@ -904,6 +975,7 @@ public final class PendingImportProcessor {
         let dependencies =
             (receipt.skills ?? []).map { (BundleItemKind.skill, $0) }
             + (receipt.mcpServers ?? []).map { (BundleItemKind.mcp, $0) }
+            + (receipt.harnessRuntime.map { [(BundleItemKind.harnessRuntime, $0)] } ?? [])
         for (kind, name) in dependencies {
             guard
                 let dependency = receipts.first(where: {
@@ -940,14 +1012,23 @@ public final class PendingImportProcessor {
             case .mcp:
                 uses = (receipt.mcpServers ?? []).contains { $0.caseInsensitiveCompare(name) == .orderedSame }
             case .harnessRuntime:
-                uses = false
+                uses = receipt.harnessRuntime.map { Self.runtimeKey($0) == Self.runtimeKey(name) } ?? false
             case .agent, .setting:
                 uses = false
             }
             if uses { users.append(receipt.name) }
         }
-        // Intel has no per-agent skill allow-list or harness runtimes
-        // (`W-harness-runtimes`), so only receipts name an agent's dependencies.
+        // Intel has no per-agent skill allow-list, so only receipts name an agent's
+        // skill and server dependencies; a runtime is also in use by any agent on it.
+        if kind == .harnessRuntime,
+            let id = receipts.first(where: { $0.matches(kind: .harnessRuntime, name: name) })?
+                .harnessRuntimeId.flatMap(UUID.init(uuidString:))
+        {
+            for agent in AgentManager.shared.agents
+            where AgentManager.shared.effectiveRuntime(for: agent.id) == .harness(id) && !users.contains(agent.name) {
+                users.append(agent.name)
+            }
+        }
         return users
     }
 
@@ -989,7 +1070,14 @@ public final class PendingImportProcessor {
                 gone = true
             }
         case .harnessRuntime:
-            gone = true
+            if let id = receipt.harnessRuntimeId.flatMap(UUID.init(uuidString:)),
+                HarnessRuntimeStore.shared.runtime(id: id) != nil
+            {
+                HarnessRuntimeStore.shared.remove(id: id)
+                Task { await HarnessSessionManager.shared.closeIdleSessions(runtimeId: id) }
+            } else {
+                gone = true
+            }
         case .setting:
             receipts.removeAll { $0.bundleId == receipt.bundleId && $0.matches(kind: .setting, name: receipt.name) }
             guard let setting = BundleSetting.named(receipt.name) else { return row(.done, nil) }
