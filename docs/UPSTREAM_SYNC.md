@@ -284,6 +284,12 @@ mdat and live-folder checks).
   security, chat, config approval, templates, delete-all-data and sandbox
   self-test passed; six findings, the main one: the Sandbox page is stuck
   "Unavailable" until a sandbox agent has chatted.
+- **All six fixed, 2026-11-27** (`fc13e6034`..`a21f4e639`). Behaviour change:
+  Claude Code is used only when picked, so a schedule or watcher with no model
+  set and no other provider now ends with "Choose a model…". A set-up sandbox
+  auto-starts at launch again (upstream). On-screen retest still to do.
+  The fixing agent's report listed two tests that were in no commit; the lead
+  wrote them (rule added to `AGENT_PORT_BRIEF.md`).
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

@@ -112,6 +112,10 @@ no port.
 
 ## Facts learned
 
+- Since 2026-11-27 a `claude-code/…` model is never the automatic default
+  (`Array.automaticDefault`, `ChatSession.needsModelChoice`). Stage 4a removes
+  those model ids, so stage 4a/5 must keep the rule for `Agent.runtime` and the
+  harness picker: the subscription runs only when the user chose it.
 - Upstream Classic's harness code is 11 files (~3.7k lines) in
   `Services/Harness`; `ClaudeCodeConfiguration` was rewritten and
   `ClaudeCodeService` / `ClaudeCodeBridgeGrantStore` deleted by #3175. Intel's

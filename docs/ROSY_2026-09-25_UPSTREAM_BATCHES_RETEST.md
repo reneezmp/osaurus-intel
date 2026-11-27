@@ -3784,3 +3784,16 @@ Owner decision 1 (`UPSTREAM_SYNC.md`). Not in candidate 69. The local server mus
 - [ ] Settings shows "Require an access key for local apps", off. Turn it on: `curl localhost:<port>/sessions` without a key is refused; turn it off again.
 - [ ] The paired iPhone still lists and opens chats.
 - [ ] Press Stop on a background delegation: its result still arrives in the chat afterwards (as upstream).
+
+## Dev-Mac pass fixes (2026-11-27)
+
+`DEV_MAC_UI_PASS_2026-11-27.md`. Not in candidate 70.
+
+- [ ] Fresh launch, Settings → (Developer Tools) Sandbox without chatting: no "Unavailable"; status and the Start button show.
+- [ ] The sidebar lists only Local Models under "Not Available on This Mac".
+- [ ] After setting the sandbox up once, quit and reopen: it reads Running without chatting; agents that never opted in still have it off.
+- [ ] With Claude Code signed in and another provider added, a new chat starts on the other model. With Claude Code only: "Select Model"; Return opens the picker and keeps the text. A chat or agent you already set to Claude Code stays on it.
+- [ ] A schedule with no model and only Claude Code available ends with "Choose a model…" (nothing is billed).
+- [ ] An agent's General tab ends with one "Delete All Data" card (throwaway agent if you use it).
+- [ ] Cloud Models → Claude Code → Configure: the title is readable in a dark and a light theme.
+- [ ] Settings search "access key" → "Require an access key for local apps" opens Server → Settings and highlights the row.

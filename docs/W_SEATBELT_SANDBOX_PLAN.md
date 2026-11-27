@@ -359,3 +359,11 @@ have; stage 5 did not add them. The user adds secrets in the agent's Sandbox tab
   jobs and calls `SandboxPluginManager.removeAgentState(for:)` (its plugin record;
   the tools unregister when no other agent has the plugin). Other agents'
   records are untouched (tested).
+
+## Launch behaviour (2026-11-27)
+
+`AppDelegate` calls `SandboxToolRegistrar.shared.start()`: resolve
+availability, then, as upstream, start a sandbox that is set up with
+auto-start on (the default; Intel has no auto-start switch in its page).
+Nothing registers tools at launch. `refreshAtLaunch()` alone also runs when the
+Sandbox page appears.

@@ -35,6 +35,8 @@ You are porting a group of upstream commits into the **Osaurus Intel fork**. Rea
 
 Per commit: `#NNNN` — Ported / Covered / Needs work (W-item) / Skipped (why) — one or two sentences: what changed for users and where on Intel; tests added; anything you adapted. Then: the build and test results (copy the gate's summary lines), your worktree path and branch name, and the list of your commits (`git log --oneline intel-fork..HEAD`).
 
+Name in the report only tests that are in your commits: before writing it, `grep` each test name in your worktree (2026-11-27: a report listed two tests that were never committed).
+
 ## Shared-machine rules (2026-11-18)
 
 - Other agents build and test on this Mac at the same time. Never run a global `pkill`/`killall` on `swift-test`, `swiftpm-testing-helper` or `swift-build`; kill only the PIDs of your own run (find them by your worktree path in `ps`).

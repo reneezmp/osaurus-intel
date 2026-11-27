@@ -33,7 +33,7 @@ Safety: postflight showed identity `mdat` unchanged and no file under
 - Sandbox self-test: exec, workspace read/write, outside writes blocked,
   network blocked.
 
-## Findings (open)
+## Findings (fixed in code 2026-11-27; see "Fixes")
 
 1. **Sandbox page stuck "Unavailable".** `SandboxManager.State.availability`
    starts as `unavailable("Intel: host sandbox not enabled")` and nothing calls
@@ -60,3 +60,28 @@ Safety: postflight showed identity `mdat` unchanged and no file under
 Denying a tool batch (needs a working folder dialog), delegation/`spawn_agent`
 (needs an admitted model), Bundles, Computer Use (not enabled), every real
 provider, and everything Ventura-specific.
+
+## Fixes (2026-11-27)
+
+Merged into `intel-fork` as `fc13e6034`..`a21f4e639`. Full suite on
+`2fc5c7362`: 6856 tests passed (6 known issues); the last commit
+(`a21f4e639`) ran the related suites only (215 tests passed). **On-screen
+retest: not done yet** (the Mac's screen was locked).
+
+1. Availability is resolved at launch and when the Sandbox page appears. As
+   upstream, a set-up sandbox with auto-start on is started again at launch;
+   no tool is registered for an agent that has not opted in, and the page
+   itself starts nothing. Side effect (upstream's own line): finishing
+   onboarding now writes the default `sandbox.json`.
+2. Sandbox sits under Developer Tools, a collapsible sidebar section. Only
+   Local Models stays under "Not Available on This Mac".
+3. Claude Code is never the automatic default
+   (`Array.automaticDefault`). With no other chat model the chip says
+   "Select Model" and Send opens the picker, keeping the text; voice,
+   schedules, watchers and queued sends show "Choose a model…" instead of
+   using the subscription. Saved selections are untouched.
+4. One "Delete All Data" card (upstream's). The removed Intel card deleted
+   nothing the kept one misses.
+5. The Claude Code sheet paints the theme background.
+6. Search finds the access-key switch and opens Server → Settings →
+   Connection.
