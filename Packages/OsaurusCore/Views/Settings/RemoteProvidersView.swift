@@ -115,6 +115,10 @@ struct RemoteProvidersView: View {
                 onDone: { showingClaudeCodeSetup = false }
             )
             .frame(minWidth: 520, minHeight: 520)
+            // The step draws theme text colours but no surface of its own
+            // (onboarding supplies one). Without this a dark theme's light
+            // title sat on the sheet's light window background.
+            .background(themeManager.currentTheme.primaryBackground)
             .environment(\.theme, themeManager.currentTheme)
         }
     }

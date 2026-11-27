@@ -35,6 +35,17 @@ struct IntelSettingsRedesignTests {
         #expect(SettingsSearchIndex.search("sandbox").contains { $0.id == "sandbox.overview" })
     }
 
+    /// The Claude Code setup sheet paints the theme's surface behind its
+    /// theme-coloured title.
+    @Test func claudeCodeSheetHasAThemedBackground() throws {
+        let source = try String(
+            contentsOf: Self.viewsRoot.appendingPathComponent("Settings/RemoteProvidersView.swift"),
+            encoding: .utf8)
+        let start = try #require(source.range(of: ".sheet(isPresented: $showingClaudeCodeSetup)"))
+        let sheet = source[start.lowerBound...].prefix(700)
+        #expect(sheet.contains(".background(themeManager.currentTheme.primaryBackground)"))
+    }
+
     /// The Commands page's New / Edit used to open an "Apple Silicon only"
     /// placeholder; step 5 ported upstream's real editor sheet.
     @Test func slashCommandEditorIsTheRealSheet() throws {
