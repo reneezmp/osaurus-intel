@@ -40,6 +40,9 @@ public actor SandboxManager {
     /// Tests give each manager its own throwaway workspace.
     private let workspaceRootOverride: URL?
     private let publishesState: Bool
+    /// Tests: a fresh `State` for a throwaway manager to publish availability
+    /// into, so the shared one is never touched.
+    private let availabilityStateOverride: State?
 
     public var stoppedExplicitly: Bool { _stoppedExplicitly }
     public var lastBootReadyAt: Date? { _lastBootReadyAt }
@@ -51,14 +54,20 @@ public actor SandboxManager {
     public init() {
         self.workspaceRootOverride = nil
         self.publishesState = true
+        self.availabilityStateOverride = nil
         self.backgroundJobs = SandboxBackgroundJobs.shared
     }
 
     /// Test seam: a manager rooted at a temp workspace that does not touch the
     /// shared `State` or the sandbox configuration file.
-    init(workspaceRoot: URL, maxJobLifetime: TimeInterval = SandboxBackgroundJobs.defaultMaxLifetime) {
+    init(
+        workspaceRoot: URL,
+        maxJobLifetime: TimeInterval = SandboxBackgroundJobs.defaultMaxLifetime,
+        availabilityState: State? = nil
+    ) {
         self.workspaceRootOverride = workspaceRoot
         self.publishesState = false
+        self.availabilityStateOverride = availabilityState
         self.backgroundJobs = SandboxBackgroundJobs(maxLifetime: maxJobLifetime)
     }
 
@@ -104,6 +113,8 @@ public actor SandboxManager {
         _availability = result
         if publishesState && Self.publishesAvailabilityToUI {
             await MainActor.run { State.shared.availability = result }
+        } else if let state = availabilityStateOverride {
+            await MainActor.run { state.availability = result }
         }
         return result
     }

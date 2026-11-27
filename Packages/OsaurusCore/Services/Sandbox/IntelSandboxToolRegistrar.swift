@@ -107,6 +107,22 @@ final class SandboxToolRegistrar: @unchecked Sendable {
         session.
         """
 
+    /// Call once at app launch (upstream `start()`): resolve availability, so
+    /// the Sandbox page, the chat chip and the agent editor don't read
+    /// "Unavailable" until a sandbox-enabled agent has chatted.
+    func start() {
+        Task { await refreshAtLaunch() }
+    }
+
+    /// Availability, then the status the saved setup implies. Intel differs
+    /// from upstream on purpose: nothing is started here (the host sandbox
+    /// starts on an opted-in agent's first use or from the page), no tool is
+    /// registered, and `sandbox.json` is only read.
+    func refreshAtLaunch(manager: SandboxManager = .shared) async {
+        guard await manager.refreshAvailability().isAvailable else { return }
+        _ = await manager.refreshStatus()
+    }
+
     /// Make the sandbox ready for `agentId`: register the tools (idempotent)
     /// and, on first use, start the backend and create the agent's home.
     /// Does nothing for an agent that has not opted in.

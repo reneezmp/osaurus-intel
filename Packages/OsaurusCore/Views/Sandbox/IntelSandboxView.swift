@@ -59,6 +59,7 @@ struct IntelSandboxView: View {
         .background(theme.primaryBackground)
         .environment(\.theme, theme)
         .onAppear { startRefreshing() }
+        .task { await SandboxToolRegistrar.shared.refreshAtLaunch() }
         .onDisappear {
             refreshTask?.cancel()
             refreshTask = nil
