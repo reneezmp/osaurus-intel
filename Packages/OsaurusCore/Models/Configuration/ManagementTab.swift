@@ -52,7 +52,7 @@ public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
         case .models: [.providers]
         case .agents: [.orchestrator, .agents]
         case .capabilities: [.search, .knowledge, .memory, .tools, .skills, .commands, .plugins]
-        case .automation: [.schedules, .watchers, .browser]
+        case .automation: [.schedules, .watchers, .computerUse, .browser]
         case .unavailable: [.models]
         case .developerTools: [.server, .sandbox, .insights]
         }
@@ -91,6 +91,8 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     case chat
     /// Upstream's Browser Use settings (`W-browser-use`).
     case browser
+    /// Upstream's Computer Use settings (`W-computer-use` stage 5).
+    case computerUse
 
     public var id: String { rawValue }
 
@@ -131,6 +133,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .settings: "gearshape.fill"
         case .chat: "text.bubble.fill"
         case .browser: "globe"
+        case .computerUse: "cursorarrow.rays"
         }
     }
 
@@ -162,6 +165,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .settings: L("General")
         case .chat: L("Conversation")
         case .browser: L("Browser Use")
+        case .computerUse: L("Computer Use")
         }
     }
 

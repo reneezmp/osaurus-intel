@@ -1798,6 +1798,10 @@ final class ChatSession: ObservableObject {
         // Background workers this run launched sit outside the task tree:
         // stop them explicitly before the run's own cancellation.
         interruptBackgroundSpawnsOfCurrentRun()
+        // W-computer-use stage 5: Stop ends this chat's Computer Use run at once.
+        ComputerUseTeardown.interruptRuns(
+            ownedBy: [sessionId?.uuidString, expectedTodoSessionId].compactMap { $0 }
+        )
         let task = currentTask
         task?.cancel()
         if let runId = activeRunId {

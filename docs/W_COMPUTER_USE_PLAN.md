@@ -55,7 +55,7 @@ native implementation, perception, the loop, and the tool and kind.
 | 2 | Perception with fakes: `CloudVisionConsent`, `FrameScrubber` (Vision; fail-closed, see log), `VisionAttachment`, `CaptureRouter`, `ScreenContextSnapshot`, `AxResolvableSweep`, `ComputerUseRunMetrics`; router, consent, scrub, attachment and metrics tests | done |
 | 3 | Native driver, not yet reachable: `Accessibility`, `ElementCache`, `Screenshot` (ScreenCaptureKit 14+, `CGWindowListCreateImage` / `CGDisplayCreateImage` on 13), `InputController`, `BackgroundDriver`, `SkyLightBridge` (dlsym, nil-safe), `NativeMacDriver`, `AutomationSession`, `CaptureMode`; route, bounds, self-guard and open-folder tests over fakes | done |
 | 4 | `ComputerUseLoop`, `ComputerUseTool`, `ComputerUseKind` (metrics and sweep were already in from stage 2); registry, `resolveTools` and execution gates; loop tests on `MockMacDriver` and a scripted model step | done (reachable from an attended chat only when the agent's switch is on; the switch has no UI until stage 5) |
-| 5 | Settings and consent UI: `ComputerUseSettingsView`, `ComputerUseDiagnosticsPanel`, `ComputerUsePermissionDoctor`, `ComputerUseGateInspector`, Abilities switch, quit/stop wiring, `/computer-use/prompts` consumers; i18n | planned |
+| 5 | Settings and consent UI: `ComputerUseSettingsView`, `ComputerUseDiagnosticsPanel`, `ComputerUsePermissionDoctor`, `ComputerUseGateInspector`, Abilities switch, quit/stop wiring, `/computer-use/prompts` consumers; i18n | done (gates in the log; not yet seen on screen on Ventura, see the checklist below) |
 | 6 | Screen context: `ScreenContextDistiller`, `[Screen Context]` prefix (composer row 30), per-agent screen-context option, `ScreenContextPreview`, guide topic, composer guidance loop row 12 | planned |
 
 Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
@@ -239,3 +239,49 @@ Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
     blaming code. Live hits listed only files the running upstream app holds open.
   - **Stage 5 not started.** The Computer Use switch has no UI yet; until
     stage 5 it can be set only through the declarative config.
+- 2026-11-27 stage 5 done: settings and consent UI. **Reachable by a user now.**
+  - **Where things are.** Settings tab `Computer Use` (`ManagementTab.computerUse`,
+    sidebar section Automation, deep link `osaurus://settings?tab=computerUse`,
+    search entry and anchor `computerUse.enable`): `Views/Settings/ComputerUseSettingsView`
+    (about, Setup with the two permission rows, how to turn it on, consent,
+    autonomy presets, Advanced: per-app rules, app allowlist, cloud vision, and
+    `ComputerUseDiagnosticsPanel` with the Permission Doctor and Gate Inspector).
+    The per-agent switch is `Views/Agent/IntelComputerUseAbilitySection` in the agent's
+    **Abilities** tab (custom agents only; model override, autonomy ceiling,
+    Accessibility warning with a button to Settings). Off by default; the only
+    place `computerUseEnabled` is set from UI is that toggle.
+  - **Permissions by click only.** `requestPermission(` appears once, in the
+    Grant button of `ComputerUsePermissionRow`; appear/refresh use checks only
+    (`startPeriodicRefresh`, `cachedIsGranted`). A source guard test enforces it.
+    Screen Recording's Grant only opens System Settings (macOS offers no prompt).
+  - **Stop and quit.** `ComputerUseTeardown` (new): `ChatSession.stop()` trips the
+    token of this chat's Computer Use runs (matched by feed `parentSessionId`, the
+    session id or the `chatwindow-` sentinel) and denies their cards, besides the
+    existing Task cancellation the loop polls; `applicationShouldTerminate` calls
+    `stopEverything()` first (all tokens tripped, every pending card denied, never
+    approved); `applicationWillTerminate` trips tokens again and flushes
+    `ComputerUsePolicyStore`. New small members: `SubagentInterruptCenter.interruptAll`,
+    `SubagentFeedRegistry.liveFeeds`, `ComputerUsePromptQueue.denyAllPending`.
+  - **Prompt consumers** were already in: `ComputerUseConfirmOverlay` is mounted in
+    both chat prompt layers (registers as presenter), and `IntelHTTPApprovals`
+    serves `GET/POST /computer-use/prompts` for the paired phone. Nothing new needed.
+  - **Intel changes against upstream.** No Models sub-tab (on-device AppleScript
+    models need MLX); no Screen context card, toggle or Doctor row (stage 6; the
+    Doctor keeps the row, the panel hides it); no "mask only detected text"
+    toggle (no Privacy Filter: the scrubber masks all text either way) and the
+    Doctor no longer calls `.pii` a reduced-privacy state; the Gate Inspector
+    preview also runs `ComputerUseHardStops` so a password-field preview shows
+    Block, like the live loop. Upstream's tests were XCTest; converted.
+  - **Tests (Swift Testing, fakes and source guards only):** `ComputerUsePermissionDoctorTests`,
+    `ComputerUseGateInspectorTests`, `ComputerUseGateInspectorHardStopTests`,
+    `ComputerUseSettingsSafetyTests`, `ComputerUseTeardownTests`.
+  - **How to verify on screen on Ventura (Rosy, not done yet):** (1) Settings →
+    Computer Use opens, search "computer use" lands on it; (2) opening the tab
+    shows no macOS permission prompt; Grant on Accessibility opens the system
+    prompt only after the click; (3) agent → Abilities → Computer Use is off on
+    a new agent, the Default agent shows the "never controls your Mac" note;
+    (4) turn it on, Accessibility warning shows while ungranted; (5) in a chat,
+    start a run and press Stop mid-run: it ends at once, also with a confirm
+    card showing; (6) quit during a run: the app quits, no keys or clicks go on
+    afterwards; (7) Advanced → Diagnostics: Gate Inspector previews a type into
+    a password field as Block.

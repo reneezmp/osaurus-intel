@@ -404,6 +404,13 @@ public enum SettingsSearchIndex {
                 "handoff", "continue", "resume", "iphone", "phone", "bring to front", "focus", "come back",
                 "return", "unlock",
             ]),
+        // MARK: Computer Use
+        .init(
+            id: "computerUse.enable", tab: .computerUse, title: "Computer Use",
+            keywords: [
+                "screen control", "cursor", "automation", "accessibility", "per-app",
+                "autonomy", "app allowlist", "computer use", "mouse", "keyboard", "cloud vision",
+            ]),
         // MARK: Browser Use
         .init(
             id: "browser.enable", tab: .browser, title: "Turn it on",

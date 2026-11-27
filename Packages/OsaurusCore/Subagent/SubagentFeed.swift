@@ -556,6 +556,14 @@ public final class SubagentFeedRegistry: @unchecked Sendable {
         return feeds[toolCallId]
     }
 
+    /// Live feeds right now (a snapshot), for teardown code that must find a
+    /// session's runs by `parentSessionId` / `kindId`.
+    public func liveFeeds() -> [SubagentFeed] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(feeds.values)
+    }
+
     public func register(_ feed: SubagentFeed) {
         lock.lock()
         pendingDrops.removeValue(forKey: feed.toolCallId)?.cancel()
@@ -639,5 +647,16 @@ public final class SubagentInterruptCenter: @unchecked Sendable {
         lock.unlock()
         token?.interrupt()
         return token != nil
+    }
+
+    /// Trip every registered token (quit teardown, Stop). Returns the tool-call
+    /// ids that were interrupted.
+    @discardableResult
+    public func interruptAll() -> [String] {
+        lock.lock()
+        let snapshot = tokens
+        lock.unlock()
+        for token in snapshot.values { token.interrupt() }
+        return Array(snapshot.keys)
     }
 }

@@ -215,6 +215,22 @@ public final class ComputerUsePromptQueue: ObservableObject {
 
     // MARK: - Teardown
 
+    /// Deny and clear every pending prompt of every run (quit teardown): a card
+    /// nobody can answer must never leave a run parked, and never approves.
+    public func denyAllPending() {
+        autoApprove.removeAll()
+        let confirms = pending
+        pending.removeAll()
+        for request in confirms {
+            continuations.removeValue(forKey: request.id)?.resume(returning: false)
+        }
+        let consents = pendingConsent
+        pendingConsent.removeAll()
+        for request in consents {
+            consentContinuations.removeValue(forKey: request.id)?.resume(returning: .deny)
+        }
+    }
+
     /// Deny + clear every pending prompt (confirm + consent) for a run and drop
     /// its "approve remaining" thresholds. Called on interrupt / teardown, and
     /// by the feed's Stop control so Stop works even while a card is up.

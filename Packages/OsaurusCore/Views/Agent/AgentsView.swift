@@ -2305,6 +2305,11 @@ struct AgentDetailView: View {
             theme: theme
         )
 
+        IntelComputerUseAbilitySection(
+            agentId: agent.id,
+            theme: theme
+        )
+
         IntelBrowserUseAbilitySection(
             agentId: agent.id,
             theme: theme

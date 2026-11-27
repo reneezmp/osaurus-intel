@@ -588,6 +588,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // first), so nothing starts new work during the drain and a
             // schedule's run record ends as cancelled instead of staying
             // "running". Intel never called these at quit before 2026-11-06.
+            // W-computer-use stage 5: a Computer Use run stops first, before
+            // anything else can wait on it; pending cards are denied.
+            ComputerUseTeardown.stopEverything()
             ChatWindowManager.shared.stopAllSessions()
             BackgroundTaskManager.shared.cancelAllTasks()
             // Stop the microphone and playback first (bounded by nothing
@@ -609,6 +612,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         SharedConfigurationService.shared.remove()
         // Upstream: close every Browser Use session (`W-browser-use`).
         BrowserSessionManager.shared.shutdownAll()
+        // Computer Use never outlives the app (also covers a quit that skipped
+        // `applicationShouldTerminate`).
+        SubagentInterruptCenter.shared.interruptAll()
         // W-seatbelt-sandbox stage 4: sandbox background processes never
         // outlive the app.
         SandboxBackgroundJobs.shared.killAllNow()
@@ -622,6 +628,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             NSLog("Osaurus retained Activity tab flush timed out; writes may still be pending")
         }
         ToolConfigurationStore.flushPendingWrites()
+        ComputerUsePolicyStore.flushPendingWrites()
         ChatSessionsManager.flushPendingWrites()
         ScheduleManager.flushPendingWrites()
         ConfigDiskWriter.flushPendingWrites(timeout: 2.5)

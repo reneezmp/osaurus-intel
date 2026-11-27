@@ -269,6 +269,8 @@ private extension ManagementView {
             ChatSettingsView()
         case .browser:
             BrowserSettingsView()
+        case .computerUse:
+            ComputerUseSettingsView()
         case .none:
             Text("Unknown tab", bundle: .module)
         }
