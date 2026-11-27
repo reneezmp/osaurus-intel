@@ -290,6 +290,12 @@ mdat and live-folder checks).
   auto-starts at launch again (upstream). All six passed the on-screen retest.
   The fixing agent's report listed two tests that were in no commit; the lead
   wrote them (rule added to `AGENT_PORT_BRIEF.md`).
+- **Computer Use stage 5 merged, 2026-11-27** (`0f6c7d1f9`): settings, switch,
+  Stop/quit wiring. Full suite 6,871 passed. **Harness stage 4 (4a + 4b) done
+  on branch `worktree-agent-a92848c4d3ddba24d`, NOT merged** (full suite 6,871
+  passed): it removes the `claude-code/*` models and reverts `83bf7264c` as dead
+  code, so it ships only with stage 5 (runtime picker), which must keep "a
+  harness runs only when the user chose it".
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

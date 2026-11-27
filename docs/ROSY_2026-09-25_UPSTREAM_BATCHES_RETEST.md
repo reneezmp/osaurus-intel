@@ -3802,3 +3802,13 @@ Owner decision 1 (`UPSTREAM_SYNC.md`). Not in candidate 69. The local server mus
 - [ ] An agent's General tab ends with one "Delete All Data" card (throwaway agent if you use it).
 - [ ] Cloud Models → Claude Code → Configure: the title is readable in a dark and a light theme.
 - [ ] Settings search "access key" → "Require an access key for local apps" opens Server → Settings and highlights the row.
+
+## Computer Use stage 5: settings and switch (2026-11-27)
+
+`W-computer-use` stage 5 (`W_COMPUTER_USE_PLAN.md`). Not in candidate 71. **Close sensitive apps first; use a throwaway agent.**
+
+- [ ] Settings → Computer Use opens without any macOS permission prompt. The Permission Doctor shows Accessibility and Screen Recording as they really are.
+- [ ] Only pressing a Grant button opens the macOS permission prompt or System Settings.
+- [ ] A throwaway agent's Abilities has a Computer Use switch, off. Turn it on, then ask it to open TextEdit and type a word: a confirm card appears before acting, and it works on Ventura. **Screenshot** the settings page and a card.
+- [ ] Press Stop mid-run: it stops at once. Start again and quit Osaurus: nothing keeps moving the mouse.
+- [ ] Ask it to type a password into a field: refused.
