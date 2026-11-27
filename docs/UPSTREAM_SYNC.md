@@ -4914,8 +4914,9 @@ important first: Provider slice 3 (Codex GPT-5.6 Lite), Provider slice 1
 data deletion, throwaway agents only).
 
 **Stopped 2026-11-26 (break).** Held back, not in this build: harness runtimes
-stage 4a (branch `worktree-agent-a80f9307657960243`, worktree kept; filtered
-run only; must ship with stage 5's runtime picker because it removes the
+stage 4a (branch `worktree-agent-a80f9307657960243`, local only; its worktree
+was removed in the 2026-11-26 cleanup, recreate it with `git worktree add`;
+filtered run only; must ship with stage 5's runtime picker because it removes the
 `claude-code/*` models). Next: harness 4b–6, Computer Use stages 5–6, privacy
 filter stages 3–6, the small leftovers (#2647 items 3/5/6,
 `sandbox_secret_set`, Apple app groups, Document Builder, CLI in Rosy builds,
