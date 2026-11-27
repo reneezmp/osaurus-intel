@@ -13,7 +13,12 @@ nothing here is accepted until checked on Rosy.
 
 ## Candidate
 
-- **Current: `1.0.62` build `70`** (Debug, thin x86_64), built from
+- **Current: `1.0.62` build `71`** (Debug, thin x86_64), built from
+  `94544e537` on 2026-11-27: archive
+  `build/rosy-deploy/Osaurus-Intel-RC-1.0.62-71-2026-11-27.zip`, SHA-256
+  `673fc0c5b81f8a0d543026e177b436deb4161d319be36a8f6508f232dbeea34c`. Build 70 plus the six Dev-Mac pass
+  fixes. **Start with [`ROSY_BUILD_71_SHORT_LIST.md`](ROSY_BUILD_71_SHORT_LIST.md).**
+- Previous, never tested: `1.0.62` build `70` (Debug, thin x86_64), built from
   `d87400b4a` on 2026-11-26: archive
   `build/rosy-deploy/Osaurus-Intel-RC-1.0.62-70-2026-11-26.zip`, SHA-256
   `78865dfe953d0f1f5afe848f87143b46797e9a807df768f023f8df5bb4a9e8e8`. It
@@ -3787,7 +3792,7 @@ Owner decision 1 (`UPSTREAM_SYNC.md`). Not in candidate 69. The local server mus
 
 ## Dev-Mac pass fixes (2026-11-27)
 
-`DEV_MAC_UI_PASS_2026-11-27.md`. Not in candidate 70.
+`DEV_MAC_UI_PASS_2026-11-27.md`. Not in candidate 70; in candidate 71.
 
 - [ ] Fresh launch, Settings → (Developer Tools) Sandbox without chatting: no "Unavailable"; status and the Start button show.
 - [ ] The sidebar lists only Local Models under "Not Available on This Mac".

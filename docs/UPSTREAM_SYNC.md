@@ -4901,6 +4901,29 @@ Sparkle key `bYYJJqFx…`. Not launched on the build Mac (macOS 27.2 beta
 26B5086k). The public release needs build 67 or higher. Rosy steps: "Release
 candidate 1.0.62 (build 66)" in the Rosy retest checklist.
 
+### Rosy candidate 1.0.62 (build 71) — 2026-11-27
+
+Built from `94544e537` with `scripts/build/build_rosy.sh`: build 70 plus the
+six Dev-Mac pass fixes and the launch auto-start of a set-up sandbox. Full
+suite on that commit: 6,859 passed (6 known issues). Archive
+`build/rosy-deploy/Osaurus-Intel-RC-1.0.62-71-2026-11-27.zip` in the main
+checkout (100,815,092 bytes, SHA-256 `673fc0c5…eea34c`); strict codesign before
+and after unpacking, 6 framework symlinks kept, x86_64, minimum macOS 13.0,
+canonical `~/.osaurus`, Sparkle key matches `App/osaurus/Info.plist`. Not
+launched on Ventura. Test from `ROSY_BUILD_71_SHORT_LIST.md` first. Next build
+number > 71; a public release needs >= 72 plus the signed plugin publish.
+
+**Testing on Ventura (2026-11-27).** The owner tests by hand on Rosy.
+- The Claude desktop app's computer use needs macOS 14, so it cannot run on
+  Rosy (owner's finding).
+- A virtual machine was considered and set aside (29 GB free on the build Mac;
+  about 40–60 GB wanted). If revisited: arm64 Ventura only, 13.4 or later on an
+  M4 host, with the x86_64 app under the guest's Rosetta (not confirmed for a
+  Ventura guest; Ventura's Rosetta is believed to lack AVX).
+- **Keep the build Mac on macOS 27.** Apple says that from macOS 28, Rosetta
+  is only for certain older games (support.apple.com/102527); our x86_64 test
+  gate and dev-app runs depend on it.
+
 ### Rosy candidate 1.0.62 (build 70) — 2026-11-26
 
 Built from `d87400b4a` with `scripts/build/build_rosy.sh` (Debug, thin x86_64,
