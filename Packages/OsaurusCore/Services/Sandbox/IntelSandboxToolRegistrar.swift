@@ -111,16 +111,35 @@ final class SandboxToolRegistrar: @unchecked Sendable {
     /// the Sandbox page, the chat chip and the agent editor don't read
     /// "Unavailable" until a sandbox-enabled agent has chatted.
     func start() {
-        Task { await refreshAtLaunch() }
+        Task {
+            await refreshAtLaunch()
+            await autoStartIfConfigured()
+        }
     }
 
-    /// Availability, then the status the saved setup implies. Intel differs
-    /// from upstream on purpose: nothing is started here (the host sandbox
-    /// starts on an opted-in agent's first use or from the page), no tool is
-    /// registered, and `sandbox.json` is only read.
+    /// Availability, then the status the saved setup implies. Also run when
+    /// the Sandbox page appears, so it starts nothing, registers no tool and
+    /// only reads `sandbox.json`.
     func refreshAtLaunch(manager: SandboxManager = .shared) async {
         guard await manager.refreshAvailability().isAvailable else { return }
         _ = await manager.refreshStatus()
+    }
+
+    /// Upstream `autoStartContainerIfConfigured`: a sandbox the user already
+    /// set up, with auto-start on, is running again after a relaunch. Tools
+    /// still register only for opted-in agents.
+    func autoStartIfConfigured(
+        manager: SandboxManager = .shared,
+        config: SandboxConfiguration = SandboxConfigurationStore.load()
+    ) async {
+        guard config.autoStart, config.setupComplete,
+            await manager.refreshAvailability().isAvailable
+        else { return }
+        do {
+            try await manager.startContainer()
+        } catch {
+            debugLog("[Sandbox] Auto-start during launch failed: \(error.localizedDescription)")
+        }
     }
 
     /// Make the sandbox ready for `agentId`: register the tools (idempotent)

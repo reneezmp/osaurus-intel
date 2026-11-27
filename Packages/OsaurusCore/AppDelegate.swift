@@ -275,8 +275,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         // Free reconstructible caches under memory pressure (upstream).
         MemoryPressureResponder.shared.start()
         #if OSAURUS_INTEL
-            // Upstream starts its sandbox registrar here; Intel only resolves
-            // availability (nothing starts, no tools register).
+            // Upstream starts its sandbox registrar here: availability, then
+            // auto-start of an already set-up sandbox. No tools register.
             SandboxToolRegistrar.shared.start()
         #endif
         // Resolve the user's login-shell PATH off-main now so host MCP servers

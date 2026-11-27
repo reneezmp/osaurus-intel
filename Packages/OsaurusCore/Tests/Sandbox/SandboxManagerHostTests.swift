@@ -55,6 +55,46 @@ struct SandboxManagerHostTests {
         #expect(!shared.isAvailable)
     }
 
+    /// The launch refresh: a fresh `State` stops reading "Unavailable" without
+    /// anything being started.
+    @MainActor
+    @Test func launchRefreshMakesAFreshStateAvailable() async throws {
+        let state = SandboxManager.State()
+        #expect(!state.availability.isAvailable)
+        let manager = SandboxManager(workspaceRoot: try tempWorkspace(), availabilityState: state)
+        await SandboxToolRegistrar.shared.refreshAtLaunch(manager: manager)
+        #expect(state.availability.isAvailable == SeatbeltSandbox.isSupported)
+        #expect(!(await manager.status()).isRunning)
+    }
+
+    /// Upstream's launch auto-start: only a sandbox that was set up, with
+    /// auto-start on, is started again.
+    @Test func launchAutoStartFollowsTheSavedSetup() async throws {
+        guard SeatbeltSandbox.isSupported else { return }
+        for (autoStart, setupComplete) in [(false, false), (false, true), (true, false), (true, true)] {
+            let manager = SandboxManager(workspaceRoot: try tempWorkspace())
+            await SandboxToolRegistrar.shared.autoStartIfConfigured(
+                manager: manager,
+                config: SandboxConfiguration(autoStart: autoStart, setupComplete: setupComplete))
+            let running = await manager.status().isRunning
+            #expect(running == (autoStart && setupComplete), "\(autoStart) \(setupComplete)")
+        }
+    }
+
+    /// The app launch refreshes and auto-starts; opening the page only
+    /// refreshes.
+    @Test func appLaunchAndSandboxPageRunTheRefresh() throws {
+        let core = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        func source(_ path: String) throws -> String {
+            try String(contentsOf: core.appendingPathComponent(path), encoding: .utf8)
+        }
+        #expect(try source("AppDelegate.swift").contains("SandboxToolRegistrar.shared.start()"))
+        let page = try source("Views/Sandbox/IntelSandboxView.swift")
+        #expect(page.contains("SandboxToolRegistrar.shared.refreshAtLaunch()"))
+        #expect(!page.contains("autoStartIfConfigured"))
+    }
+
     @Test func execBeforeStartThrowsNotRunning() async throws {
         let manager = SandboxManager(workspaceRoot: try tempWorkspace())
         await #expect(throws: SandboxError.self) {
