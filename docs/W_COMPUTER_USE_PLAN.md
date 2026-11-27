@@ -362,3 +362,11 @@ Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
     message does not capture again; (5) switch the option off, new chat: no row,
     nothing shared; (6) a schedule or watcher run of the same agent shares
     nothing; (7) Permission Doctor shows the Screen Context row On/Off.
+  - **Gate results.** Filtered (ComputerUse, ScreenContext, Composer,
+    SystemPrompt, Agent, Settings, IntelVenturaControlGuard, IntelFrozenUserPrefix,
+    IntelLeanPrompt, OsaurusHelpTool, ContextBudget): 1109 tests in 209 suites
+    passed. Full (`gate_pty.sh`): 6919 tests in 896 suites passed with 6 known
+    issues, mdat unchanged, live hits empty. The filtered run listed one hit,
+    `~/.osaurus/memory/memory.sqlite-wal` at 15:12:21, before the test window
+    (held by the user's running upstream app); the Vision OCR failures of
+    stage 4 did not appear in this run.
