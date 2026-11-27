@@ -612,7 +612,9 @@ struct IntelCodexResponsesSSEDecoder {
             tool.arguments += delta
             tool.emittedArguments = tool.emittedArguments || !delta.isEmpty
             pendingTools[index] = tool
-            if !delta.isEmpty { emissions.append(StreamingToolHint.encodeArgs(delta)) }
+            if !delta.isEmpty, !SecretArgumentScrubber.isSecretSetToolName(tool.name) {
+                emissions.append(StreamingToolHint.encodeArgs(delta))
+            }
 
         case "response.function_call_arguments.done":
             let index = try requiredIndex(event, context: type)
@@ -718,7 +720,9 @@ struct IntelCodexResponsesSSEDecoder {
                 pending.announced = true
             }
             if capture || !call.arguments.isEmpty { pending.arguments = call.arguments }
-            if capture, !call.arguments.isEmpty, !pending.emittedArguments {
+            if capture, !call.arguments.isEmpty, !pending.emittedArguments,
+                !SecretArgumentScrubber.isSecretSetToolName(call.name)
+            {
                 emissions.append(StreamingToolHint.encodeArgs(call.arguments))
                 pending.emittedArguments = true
             }

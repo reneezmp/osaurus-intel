@@ -1581,7 +1581,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         requestBody: requestBody,
                         responseBody: responseText.isEmpty ? nil : responseText,
                         wireRequestBody: wire.request,
-                        wireResponseBody: wire.response.isEmpty ? nil : wire.response,
+                        // A raw response that carries a `sandbox_secret_set` call may hold a
+                        // secret `value` the model sent; it cannot be rewritten, so it is not
+                        // kept (upstream omits such wire snapshots too).
+                        wireResponseBody: (wire.response.isEmpty || SecretArgumentScrubber.wireMentionsSecretSet(wire.response))
+                            ? nil : wire.response,
                         wireResponseTruncated: wire.truncated,  // upstream #3284
                         connection: destination.connection,
                         path: loggedPathIsInternal ? loggedPath : destination.path,
@@ -2300,7 +2304,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     continuation.yield(emission)
                                 }
                             }
-                            finalized = try decoder.finish()
+                            finalized = try decoder.finish().scrubbingSecretSetArguments()
                             transientRetries = 0
                             // Upstream `captureOpenResponsesUsage`: the provider's own
                             // counts for this round (Insights "Reported", API usage).
@@ -2516,10 +2520,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                             try await ChatExecutionContext.$retainsOversizedToolResults.withValue(
                                                 retainsOversized
                                             ) {
-                                                try await ToolRegistry.shared.execute(
-                                                    name: batchCall.toolName,
-                                                    argumentsJSON: batchCall.jsonArguments
-                                                )
+                                                // See the chat-completions branch below.
+                                                await IntelSecretPromptIntercept.resolving(
+                                                    toolName: batchCall.toolName,
+                                                    result: try await ToolRegistry.shared.execute(
+                                                        name: batchCall.toolName,
+                                                        argumentsJSON: batchCall.jsonArguments
+                                                    ))
                                             }
                                         }
                                     }
@@ -2959,7 +2966,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                                 // Stream the args into the pending
                                                 // card so the user sees the query
                                                 // build up — not just a bare name.
-                                                continuation.yield(StreamingToolHint.encodeArgs(a))
+                                                // Never for `sandbox_secret_set`: a model that
+                                                // sent a secret `value` must not stream it into
+                                                // the card or the saved chat (the prompt is the
+                                                // only way a secret is entered).
+                                                if !SecretArgumentScrubber.isSecretSetToolName(partial.name) {
+                                                    continuation.yield(StreamingToolHint.encodeArgs(a))
+                                                }
                                             }
                                         }
                                         partials[idx] = partial
@@ -3156,6 +3169,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         var orderedCalls = partials.sorted { $0.key < $1.key }.map { entry in
                             var call = entry.value
                             call.name = Self.resolvedOfferedToolName(call.name, offered: activeTools)
+                            // Recording view: every later use of the call (result card,
+                            // history, model re-feed, Insights, logs) sees the scrubbed
+                            // arguments; `sandbox_secret_set` ignores `value` anyway.
+                            call.arguments = SecretArgumentScrubber.recordedArguments(
+                                toolName: call.name, argumentsJSON: call.arguments)
                             return call
                         }
                         // Upstream Classic `uniquelyIdentifiedInvocations`: unique ids per round.
@@ -3252,10 +3270,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         try await ChatExecutionContext.$retainsOversizedToolResults.withValue(
                                             retainsOversized
                                         ) {
-                                            try await ToolRegistry.shared.execute(
-                                                name: batchCall.toolName,
-                                                argumentsJSON: batchCall.jsonArguments
-                                            )
+                                            // `sandbox_secret_set`'s prompt marker becomes the secure
+                                            // dialog's answer here (IntelSecretPromptIntercept).
+                                            await IntelSecretPromptIntercept.resolving(
+                                                toolName: batchCall.toolName,
+                                                result: try await ToolRegistry.shared.execute(
+                                                    name: batchCall.toolName,
+                                                    argumentsJSON: batchCall.jsonArguments
+                                                ))
                                         }
                                     }
                                 }

@@ -236,6 +236,39 @@ struct IntelSandboxToolsTests {
         }
     }
 
+    @Test func aSecretStoredThroughThePromptReachesSandboxExecAndIsScrubbed() async throws {
+        let value = "prompted-secret-value-77"
+        try await AgentSecretsKeychain._withInMemoryStoreForTesting {
+            try await withEnv { _ in
+                let queue = await MainActor.run { PromptQueue() }
+                let marker = await runTool(
+                    SandboxSecretSetTool(),
+                    ["key": "PROMPTED_TOKEN", "description": "d", "instructions": "i"])
+                let stored = await IntelSecretPromptIntercept.$testingQueue.withValue(queue) {
+                    async let resolved = IntelSecretPromptIntercept.resolving(
+                        toolName: "sandbox_secret_set", result: marker)
+                    await SecretPromptDriver.submit(value, on: queue)
+                    return await resolved
+                }
+                #expect(stored == SecretToolResult.stored(key: "PROMPTED_TOKEN"), "\(stored)")
+                // The exec tool sees it as an env var (no testing override: the
+                // stored value is read from the in-memory keychain seam) ...
+                // (`withEnv` binds an empty override; clear it so the real read path runs.)
+                let ran = await SandboxExecSecrets.$testingSecrets.withValue(nil) {
+                    await runTool(
+                        SandboxExecTool(),
+                        ["command": "test -n \"$PROMPTED_TOKEN\" && echo set; echo $PROMPTED_TOKEN"])
+                }
+                let stdout = payload(ran)?["stdout"] as? String ?? ""
+                #expect(stdout.contains("set"), "\(ran)")
+                // ... and the value is scrubbed from what the model reads back.
+                #expect(stdout.contains("[REDACTED:PROMPTED_TOKEN]"), "\(ran)")
+                #expect(!ran.contains(value))
+                #expect(!stored.contains(value))
+            }
+        }
+    }
+
     // MARK: - Registry gates
 
     @Test func sandboxToolsAreHiddenFromAgentsThatDidNotOptIn() async throws {

@@ -64,9 +64,9 @@ enum BuiltinSandboxTools {
             SandboxProcessTool(),
             SandboxPluginRegisterTool(),
             SandboxSecretCheckTool(),
-            // `sandbox_secret_set` stays unregistered: its prompt marker needs
-            // the chat view to intercept it, and Intel's tool loop runs inside
-            // `CloudChatEngine`, which does not (docs/W_SEATBELT_SANDBOX_PLAN.md).
+            // The prompt marker is turned into the secure dialog by
+            // `CloudChatEngine` (`IntelSecretPromptIntercept`).
+            SandboxSecretSetTool(),
         ]
         for tool in tools { registry.registerSandboxTool(tool) }
     }

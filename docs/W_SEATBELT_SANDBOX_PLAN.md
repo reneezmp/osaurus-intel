@@ -70,9 +70,9 @@ Facts from upstream's profile that matter:
 |---|-------|--------|
 | 1 | **Seatbelt core, unwired.** `SeatbeltSandbox` (profile, backend enum, path mapper), `SeatbeltExecutor` (pipes, idle timeout, hard deadline, NUL check), Intel stand-ins for `Writer` and `SandboxError`. Tests. No behaviour change. | Done |
 | 2 | **Host sandbox runtime.** A compiled Intel `SandboxManager` slice with upstream's `exec` / Seatbelt branch, workspace folders under `OsaurusPaths.containerWorkspace()`, per-agent homes, `SandboxLogBuffer`, availability cache (#3094, #3105), `SandboxError` merge. Default network denied. A confinement self-test (upstream's diagnostic: a write outside the workspace must fail). | Done (2026-11-26) |
-| 3 | **Tools.** Host-capable slice of `BuiltinSandboxTools` as Intel files: `sandbox_exec` (foreground), `sandbox_read_file`, `sandbox_write_file`, `sandbox_search_files`, `sandbox_secret_check` (#2157 output scrubbing), per-agent `AutonomousExecConfig` (`enabled`, `maxCommandsPerTurn`, `sandboxNetworkEnabled`, `backgroundProcessEnabled`), `ToolRegistry` gating, permission "Ask" for write/exec, composer sections (environment, `sandboxState`, `sandboxUnavailable`, `secretHandling`, `soul`). `sandbox_secret_set` is written but not registered; `selfImprovement` / `pluginCreator` wait for stage 4. | Done (2026-11-26) |
+| 3 | **Tools.** Host-capable slice of `BuiltinSandboxTools` as Intel files: `sandbox_exec` (foreground), `sandbox_read_file`, `sandbox_write_file`, `sandbox_search_files`, `sandbox_secret_check` (#2157 output scrubbing), per-agent `AutonomousExecConfig` (`enabled`, `maxCommandsPerTurn`, `sandboxNetworkEnabled`, `backgroundProcessEnabled`), `ToolRegistry` gating, permission "Ask" for write/exec, composer sections (environment, `sandboxState`, `sandboxUnavailable`, `secretHandling`, `soul`). `sandbox_secret_set` was registered later (2026-11-27); `selfImprovement` / `pluginCreator` wait for stage 4. | Done (2026-11-26) |
 | 4 | **Background processes and plugins.** `sandbox_exec(background:true)`, `sandbox_process`, sandbox plugins on the host backend (`sandbox_plugin_register`, plugin tools). Avoids `BackgroundTaskManager` and the spawn tools while `W-subagents` is open. | Done (2026-11-26) |
-| 5 | **UI and declarative config.** Intel Sandbox page (`IntelSandboxView`, instead of upstream's VM `SandboxView` with `isSeatbelt` branches), per-agent switches in the agent editor (network and background processes default off), `sandbox.*` keys in declarative config with high-risk flags. Ventura rules apply. | Done (2026-11-26), except `sandbox_secret_set` (see notes) |
+| 5 | **UI and declarative config.** Intel Sandbox page (`IntelSandboxView`, instead of upstream's VM `SandboxView` with `isSeatbelt` branches), per-agent switches in the agent editor (network and background processes default off), `sandbox.*` keys in declarative config with high-risk flags. Ventura rules apply. | Done (2026-11-26); `sandbox_secret_set` registered 2026-11-27 |
 
 ## Upstream items this row still owns
 
@@ -185,16 +185,9 @@ execution (`runtimeCapabilityDenial`), and denies them to external surfaces
 
 **Deliberate differences from upstream.**
 
-- `sandbox_secret_set` is not registered. Upstream's prompt path returns a
-  marker that the chat view turns into a secure dialog; Intel's tool loop runs
-  inside `CloudChatEngine`, which does not intercept it, so the marker would
-  reach the model and nothing would be stored. The direct `value` argument is
-  not offered at all (it would put a secret in the tool call, and Intel has
-  not ported `SecretArgumentScrubber`'s recording-side redaction). The
-  secret-handling prompt tells the model to ask the user to add the secret in
-  the agent's settings. The tool, the real `SecretPromptParser` and
-  `SecretToolResult` are in place for when the engine intercept lands
-  (it is in code the unattended-approvals work owns).
+- `sandbox_secret_set` was unregistered until 2026-11-27 and is now registered
+  (see "`sandbox_secret_set` registered" below). The direct `value` argument is
+  still not offered.
 - Prompt wording is Intel's own (`IntelSandboxPrompt`): upstream's blocks
   describe the Linux VM or the unified file tools. No `selfImprovement` or
   `pluginCreator` yet (they reference plugins, stage 4). The sandboxState
@@ -336,13 +329,56 @@ exporter writes `network_enabled` and `background_process_enabled` (not
 Processes off stops the agent's running background jobs
 (`SandboxToolGate.enforcePolicy`, called from `AgentManager.update`).
 
-**`sandbox_secret_set` stays unregistered.** Registering it needs the chat to
-show a secure secret prompt when the tool returns its marker: upstream does it in
-`ChatView` with `SecretPromptOverlay` and `PromptQueue`, which Intel does not
-have; stage 5 did not add them. The user adds secrets in the agent's Sandbox tab
-(the existing secrets list) and the prompt says so. When the overlay lands, add
-`SandboxSecretSetTool` to `BuiltinSandboxTools.register()` and
-`sandbox_secret_set` to the prompt's tool list.
+**`sandbox_secret_set` registered (2026-11-27).** The stage 5 note that the
+overlay and queue were missing was stale: `SecretPromptOverlay`, `PromptQueue`
+and `ChatView`'s `promptOverlayLayer` were already compiled on Intel (the
+`ChatView` handler for the marker sits in the in-view loop Intel does not
+run). What was missing was the engine hook. Now:
+
+- **Hook.** `CloudChatEngine`'s two `runTool` closures (Chat Completions and
+  Responses branches) pass each tool result through
+  `IntelSecretPromptIntercept.resolving` (`Tools/IntelSecretPromptIntercept.swift`).
+  For `sandbox_secret_set`'s `secret_prompt` marker it enqueues a
+  `SecretPromptState` on the running chat's `promptQueue` (found through
+  `ChatExecutionContext.currentChatSessionBox`, always bound by `ChatSession`)
+  and waits. Submit: the card writes the Keychain, the hook re-reads it and
+  returns upstream's `stored` envelope (a refused Keychain write returns an
+  execution error instead of "stored"). Cancel, Esc or Stop: nothing is stored
+  and the model gets upstream's `cancelled` (`userDenied`) envelope. Like any
+  `userDenied` result the chat loop then ends the run after the round
+  (`IntelAgentLoopTerminal`, upstream's rule). No chat to host the card: an
+  `unavailable` envelope. `PromptQueue` keeps a clarify card from stacking on
+  a secret card.
+- **Registered** in `BuiltinSandboxTools.register()`; the usual opt-in gates
+  apply (hidden from, and refused for, every agent that has no sandbox;
+  denied to external surfaces). The secret-handling prompt now tells the model
+  to call `sandbox_secret_set` (key, description, instructions) and that there
+  is no `value`.
+- **Recording-side redaction.** `SecretArgumentScrubber` (upstream's rules) is
+  applied where the engine first builds a call: the call list, the result card,
+  the next request's echoed assistant message, task state, Insights tool log and
+  logs all see the scrubbed arguments; the Responses decoder's replayed output
+  item is rewritten too; the live argument stream (`encodeArgs`) is suppressed
+  for this tool in both wires; an Insights wire-response snapshot that names the
+  tool is dropped (it cannot be rewritten). Intel never offers `value`; this
+  only covers a model that sends one anyway (the value is ignored and the prompt
+  still opens).
+- **Remote prompts.** Intel already has `RemoteSecretPromptQueue` and the
+  phone endpoints (`IntelHTTPApprovals`), so the tool has upstream's branch: a
+  run with `hasRemoteReviewer` asks the phone and stores what it sends.
+- Tests: `Tests/Sandbox/IntelSecretSetTests.swift` (prompt, store, cancel,
+  Stop, remote, registration and opt-in, scrubber, Responses wire, engine
+  leak test) and one end-to-end test in `IntelSandboxToolsTests`
+  (prompted secret reaches `sandbox_exec` as an env var and is scrubbed).
+  Keychain access in tests goes through the in-memory seam only.
+- Manual check on screen: open a chat with an agent whose sandbox is on, ask it
+  to set up a service that needs an API key. A "Secret Required" card appears
+  above the input with a secure field. Type a dummy value and submit: the tool
+  card says stored; asking the agent to run `sandbox_exec` with
+  `echo $KEY_NAME` shows `[REDACTED:KEY_NAME]`; the saved chat and Insights
+  show no value. Repeat and press Cancel: the card closes, the tool card shows
+  the cancelled message, and `sandbox_secret_check` says the secret does not
+  exist.
 
 ## Hardening after stage 5 (2026-11-26)
 

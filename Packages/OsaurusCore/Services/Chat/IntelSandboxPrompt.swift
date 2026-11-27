@@ -96,15 +96,17 @@ enum IntelSandboxPrompt {
         This agent has the sandbox turned on, but this Mac cannot run it (`sandbox-exec` is missing), so no sandbox tools are offered. Do not pretend to run commands; say so if the user asks for something that needs a shell.
         """
 
-    /// Secret-handling discipline. Intel's version: secrets are added by the
-    /// user in the agent's settings (the secure prompt tool is not offered).
+    /// Secret-handling discipline (upstream Classic's `secretHandlingGuidance`;
+    /// Intel offers no `value` argument, so the prompt is the only way in).
     static let secretHandling = """
 
         ## Secret handling
 
-        - Never ask the user to paste a secret (API key, token, password) into chat: chat is persisted.
-        - Call `sandbox_secret_check` to see whether a secret exists. If it is missing, tell the user which secret name you need and that they can add it in this agent's settings, then wait.
-        - Stored secrets reach `sandbox_exec` as environment variables named by their key: read them from the environment, never inline them in scripts or files, and never record a value in SOUL.md or notes.
+        - Never ask the user to paste a secret (API key, token, password, connection string) into chat: chat is persisted to the transcript.
+        - To collect a secret, call `sandbox_secret_set` with `key`, `description` and `instructions` (what to paste and where to find it). The app asks the user in a secure dialog; the value never enters the conversation, and there is no `value` argument. If the user cancels, nothing is stored: do not ask again unprompted.
+        - Call `sandbox_secret_check` first and skip collection if the secret exists.
+        - Stored secrets reach `sandbox_exec` as environment variables named by their key: read them from the environment, never inline them in scripts or files. No tool returns a secret value, by design.
+        - Never echo a secret value, write it to a file in plaintext, pass it as a tool argument, or record it in SOUL.md or notes.
         """
 
     /// SOUL.md (the agent's own notes). Upstream's `soulSection` renders it;

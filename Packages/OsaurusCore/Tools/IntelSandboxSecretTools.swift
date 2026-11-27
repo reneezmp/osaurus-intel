@@ -7,11 +7,12 @@
 //
 //  - `sandbox_secret_check` is upstream's, unchanged in behaviour.
 //  - `sandbox_secret_set` supports ONLY the prompt path: the tool returns
-//    the secure-dialog marker and the chat view stores what the user types.
+//    the secure-dialog marker, `CloudChatEngine` shows the dialog
+//    (`IntelSecretPromptIntercept`) and the card stores what the user types.
 //    Upstream's direct `value` argument is not in the schema: it would put a
-//    credential into the model's tool call, which Intel has no recording-side
-//    scrubber for (`SecretArgumentScrubber` covers many surfaces upstream).
-//    The secret value never enters the conversation.
+//    credential into the model's tool call. A model that sends one anyway is
+//    scrubbed from every recording (`SecretArgumentScrubber`) and the value
+//    is ignored. The secret value never enters the conversation.
 //  - Output scrubbing of stored secret values (#2157) is
 //    `SecretScrubber`, applied by `sandbox_exec`.
 //
@@ -119,8 +120,24 @@ struct SandboxSecretSetTool: OsaurusTool, PermissionedTool, @unchecked Sendable 
             args, "instructions", expected: "instructions for the user on how to obtain the secret", tool: name)
         guard case .value(let instructions) = instReq else { return instReq.failureEnvelope ?? "" }
 
+        // A run from the owner's paired phone never reaches the chat view
+        // that shows the dialog: ask the phone directly (upstream,
+        // MOBILE_PROTOCOL section 16.5) and store what it sends.
+        if ChatExecutionContext.hasRemoteReviewer {
+            let value = await RemoteSecretPromptQueue.shared.request(
+                key: key, description: desc, instructions: instructions)
+            guard let value, !value.isEmpty else { return SecretToolResult.cancelled(key: key) }
+            guard AgentSecretsKeychain.saveSecret(value, id: key, agentId: context.agentId) else {
+                return ToolEnvelope.failure(
+                    kind: .executionError,
+                    message:
+                        "Secret storage failed for `\(key)`: the Keychain write did not succeed, so the value will NOT be available to sandbox commands. Do not report the secret as stored.",
+                    tool: name, retryable: false)
+            }
+            return SecretToolResult.stored(key: key)
+        }
         // A run with no chat view to host the dialog (HTTP, background,
-        // schedule, remote phone) cannot collect the secret: say so rather
+        // schedule) cannot collect the secret: say so rather
         // than returning a marker nobody will turn into a prompt.
         guard ChatExecutionContext.interactiveChatRun || SandboxToolContext.testingContext != nil else {
             return ToolEnvelope.failure(
