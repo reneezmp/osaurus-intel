@@ -839,7 +839,7 @@ final class ChatSession: ObservableObject {
     }
 
     /// Pick the picker item that best matches the agent's preferred model
-    /// (falling back to the first chat-capable item). Wrapped in
+    /// (falling back to `automaticDefault`, which is never Claude Code). Wrapped in
     /// `isLoadingModel = true` so the auto-persist sink in `init()` does
     /// not write the selection back to the agent's settings as if the
     /// user had manually changed it.
@@ -849,7 +849,7 @@ final class ChatSession: ObservableObject {
         if let model = effectiveModel, let resolved = Self.resolvePickerModel(model, among: pickerItems) {
             selectedModel = resolved
         } else {
-            selectedModel = pickerItems.firstChatCapable?.id
+            selectedModel = pickerItems.automaticDefault?.id
         }
         loadActiveModelOptions(for: selectedModel)
         applyImageModelDefaults(for: selectedModel)
@@ -930,8 +930,9 @@ final class ChatSession: ObservableObject {
 
     /// The selection once discovery replaces the picker items: the user's pick
     /// in this chat, then a restored chat's saved model, then the agent
-    /// default, then the previous selection, then the first chat model
-    /// (upstream ChatSession's order, #3200).
+    /// default, then the previous selection, then the first chat model that
+    /// may be taken automatically (upstream ChatSession's order, #3200; on
+    /// Intel never Claude Code, see `automaticDefault`).
     static func modelAfterDiscovery(
         manual: String?,
         restored: String?,
@@ -944,7 +945,13 @@ final class ChatSession: ObservableObject {
                 return resolved
             }
         }
-        return items.firstChatCapable?.id
+        return items.automaticDefault?.id
+    }
+
+    /// Intel: nothing is selected because the only chat model left is one that
+    /// is never taken automatically (Claude Code). The user has to pick.
+    nonisolated static func needsModelChoice(selected: String?, among items: [ModelPickerItem]) -> Bool {
+        selected == nil && items.contains(where: \.isClaudeCode) && items.automaticDefault == nil
     }
 
     /// Preserve provider ownership in picker ids while accepting old sessions
@@ -3671,6 +3678,15 @@ final class ChatSession: ObservableObject {
             #endif
             do {
                 let engine = chatEngineFactory()
+                // Paths that don't go through the composer (schedules, voice,
+                // queued sends) say why nothing can answer. Only the real
+                // engine resolves a model; an injected one brings its own.
+                if engine is ChatEngine,
+                    Self.needsModelChoice(selected: selectedModel, among: pickerItems)
+                {
+                    throw ChatEngine.EngineError(
+                        message: L("Choose a model in the model picker below the message box, then send again."))
+                }
                 let chatCfg = ChatConfigurationStore.load()
                 // A saved agent reasoning default the selected model cannot
                 // honor stops the send with a clear message (upstream #3233).
@@ -4986,7 +5002,7 @@ struct ChatView: View {
             for item in items { if item.id == model { found = true; break } }
             if found { session.selectedModel = model; return }
         }
-        if let firstChat = session.pickerItems.firstChatCapable {
+        if let firstChat = session.pickerItems.automaticDefault {
             session.selectedModel = firstChat.id
         }
     }
@@ -5221,7 +5237,7 @@ struct ChatView: View {
             onUseFoundation: windowState.foundationModelAvailable
                 ? {
                     session.selectedModel =
-                        session.pickerItems.firstChatCapable?.id
+                        session.pickerItems.automaticDefault?.id
                         ?? "foundation"
                 } : nil,
             onQuickAction: { prompt in

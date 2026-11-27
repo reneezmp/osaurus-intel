@@ -364,6 +364,9 @@ extension ModelPickerItem {
 
     var isMediaGeneration: Bool { mediaModel != nil }
 
+    /// Intel: served by the user's own Claude Code CLI (`claude-code/…`).
+    var isClaudeCode: Bool { id.hasPrefix(ClaudeCodeConfiguration.modelPrefix) }
+
     /// Token- and prefix-based classifier that returns `true` when the model
     /// ID almost certainly belongs to an embedding or reranker family.
     ///
@@ -412,6 +415,18 @@ extension Array where Element == ModelPickerItem {
     /// just not preferentially.
     var firstChatCapable: ModelPickerItem? {
         first(where: { $0.isLikelyChatCapable }) ?? first
+    }
+
+    /// Intel: the model a chat may take on its own when nothing the user
+    /// chose is available. A Claude Code model runs the signed-in CLI on the
+    /// user's subscription, so it is used only when picked (globally, per
+    /// agent or in the chat), never as a fallback. With Claude Code listed and
+    /// no other chat model there is no default: the picker asks for a choice
+    /// (so an image or video model isn't taken in its place either).
+    var automaticDefault: ModelPickerItem? {
+        let others = filter { !$0.isClaudeCode }
+        guard others.count < count else { return firstChatCapable }
+        return others.first(where: { $0.isLikelyChatCapable })
     }
 
     var imageGenerationDelegateCandidates: [ModelPickerItem] {
