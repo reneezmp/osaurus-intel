@@ -70,22 +70,6 @@ retest (same day, dev app on `ba546ae9a`):** all six passed. Auto-start
 after a relaunch was not checked here (the launcher deletes the data root).
 Postflight clean (`mdat` unchanged, nothing changed under `~/.osaurus`).
 
-- 1: fresh app, Sandbox page reads "Not set up" with Start Sandbox; the
-  template agent's chat shows the Sandbox chip.
-- 2: only Local Models is under "Not Available on This Mac".
-- 3: Claude Code only: "Select Model", Send opens the picker and keeps the
-  text. After adding the fake provider, the chat, a new tab and a new template
-  agent use `mock-model`.
-- 6: both searches open Server → Settings → Connection with the row lit, also
-  from the Overview tab.
-- 4: the template agent's General tab ends with one "Delete All Data" card
-  (button not pressed this time).
-- 5: the Claude Code sheet title is readable on the System (dark) and Light
-  themes.
-- Tool limit: an agent card in Settings → Agents is a menu control, so the
-  background computer-use tools can't open it (and the sidebar gear needs a
-  hover): the owner clicked it.
-
 1. Availability is resolved at launch and when the Sandbox page appears. As
    upstream, a set-up sandbox with auto-start on is started again at launch;
    no tool is registered for an agent that has not opted in, and the page
@@ -103,3 +87,21 @@ Postflight clean (`mdat` unchanged, nothing changed under `~/.osaurus`).
 5. The Claude Code sheet paints the theme background.
 6. Search finds the access-key switch and opens Server → Settings →
    Connection.
+
+### What the retest showed
+
+- 1: fresh app, Sandbox page reads "Not set up" with Start Sandbox; the
+  template agent's chat shows the Sandbox chip.
+- 2: only Local Models is under "Not Available on This Mac".
+- 3: Claude Code only: "Select Model", Send opens the picker and keeps the
+  text. After adding the fake provider, the chat, a new tab and a new template
+  agent use `mock-model`.
+- 4: the template agent's General tab ends with one "Delete All Data" card
+  (button not pressed this time).
+- 5: the Claude Code sheet title is readable on the System (dark) and Light
+  themes.
+- 6: both searches open Server → Settings → Connection with the row lit, also
+  from the Overview tab.
+- Tool limit: an agent card in Settings → Agents is a menu control, so the
+  background computer-use tools can't open it (and the sidebar gear needs a
+  hover): the owner clicked it.
