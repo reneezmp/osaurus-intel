@@ -53,8 +53,8 @@ public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
         case .agents: [.orchestrator, .agents]
         case .capabilities: [.search, .knowledge, .memory, .tools, .skills, .commands, .plugins]
         case .automation: [.schedules, .watchers, .browser]
-        case .unavailable: [.models, .sandbox]
-        case .developerTools: [.server, .insights]
+        case .unavailable: [.models]
+        case .developerTools: [.server, .sandbox, .insights]
         }
     }
 }
@@ -179,8 +179,8 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     /// Whether the tab's underlying subsystem is functional on Intel.
     ///
     /// On the Intel fork, the tabs whose upstream backing stack is not
-    /// compiled stay visibly disabled in the sidebar. MLX local inference and
-    /// the Containerization sandbox need Apple Silicon. They use
+    /// compiled stay visibly disabled in the sidebar. MLX local inference
+    /// needs Apple Silicon (the sandbox runs under `sandbox-exec` here). It uses
     /// `SidebarItemData.isDisabled` + a `.help()` tooltip, so users see what
     /// is not available; clicking is a no-op.
     ///
@@ -198,8 +198,8 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     ///
     /// Note this deliberately has **no architecture check**, and that is
     /// correct: `Package.swift` defines `OSAURUS_INTEL` for every build of this
-    /// fork, so an arm64 build of *this* codebase still amputates MLX, voice and
-    /// the sandbox and must still disable those tabs. The property name refers
+    /// fork, so an arm64 build of *this* codebase still amputates MLX and must
+    /// still disable that tab. The property name refers
     /// to the fork, not the CPU. Upstream's tree has no equivalent property at
     /// all — there, every tab is simply available.
     public var isAvailableOnIntel: Bool {

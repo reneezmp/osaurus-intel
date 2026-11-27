@@ -26,6 +26,15 @@ struct IntelSettingsRedesignTests {
         #expect(ManagementTab.chat.label == L("Conversation"))
     }
 
+    /// Upstream Classic lists Sandbox with the developer tools; only Local
+    /// Models is unavailable on Intel.
+    @Test func sandboxSitsWithDeveloperTools() {
+        #expect(ManagementSection.developerTools.tabs == [.server, .sandbox, .insights])
+        #expect(ManagementSection.unavailable.tabs == [.models])
+        #expect(ManagementTab.sandbox.isAvailableOnIntel)
+        #expect(SettingsSearchIndex.search("sandbox").contains { $0.id == "sandbox.overview" })
+    }
+
     /// The Commands page's New / Edit used to open an "Apple Silicon only"
     /// placeholder; step 5 ported upstream's real editor sheet.
     @Test func slashCommandEditorIsTheRealSheet() throws {

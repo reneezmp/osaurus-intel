@@ -132,7 +132,7 @@ public enum SettingsSearchIndex {
         "themes.overview", "providers.overview", "agents.overview", "search.overview",
         "knowledge.overview", "tools.overview", "skills.overview", "commands.overview",
         "plugins.overview", "schedules.overview", "watchers.overview", "insights.overview",
-        "permissions.overview",
+        "permissions.overview", "sandbox.overview",
     ]
 
     public static let entries: [SettingsSearchEntry] = [
@@ -560,6 +560,12 @@ public enum SettingsSearchIndex {
         .init(
             id: "server.endpoints", tab: .server, title: "API Endpoints",
             keywords: ["openai compatible", "rest", "documentation", "test endpoint"]),
+        .init(
+            id: "sandbox.overview", tab: .sandbox, title: "Sandbox",
+            keywords: [
+                "isolation", "container", "seatbelt", "network access", "background processes",
+                "self-test", "workspace folder",
+            ]),
         .init(
             id: "insights.overview", tab: .insights, title: "Insights",
             keywords: [
