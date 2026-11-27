@@ -66,9 +66,9 @@ provider, and everything Ventura-specific.
 Merged into `intel-fork` as `fc13e6034`..`a21f4e639`. Full suite on
 `2fc5c7362`: 6856 tests passed (6 known issues); the last commit
 (`a21f4e639`) ran the related suites only (215 tests passed). **On-screen
-retest (same day, dev app on `ba546ae9a`):** 1, 2, 3 and 6 passed; 5 passed
-on the dark theme (light theme not checked); 4 still to check. Auto-start
+retest (same day, dev app on `ba546ae9a`):** all six passed. Auto-start
 after a relaunch was not checked here (the launcher deletes the data root).
+Postflight clean (`mdat` unchanged, nothing changed under `~/.osaurus`).
 
 - 1: fresh app, Sandbox page reads "Not set up" with Start Sandbox; the
   template agent's chat shows the Sandbox chip.
@@ -78,9 +78,13 @@ after a relaunch was not checked here (the launcher deletes the data root).
   agent use `mock-model`.
 - 6: both searches open Server → Settings → Connection with the row lit, also
   from the Overview tab.
+- 4: the template agent's General tab ends with one "Delete All Data" card
+  (button not pressed this time).
+- 5: the Claude Code sheet title is readable on the System (dark) and Light
+  themes.
 - Tool limit: an agent card in Settings → Agents is a menu control, so the
-  background computer-use tools can't open it, and the sidebar gear needs a
-  hover.
+  background computer-use tools can't open it (and the sidebar gear needs a
+  hover): the owner clicked it.
 
 1. Availability is resolved at launch and when the Sandbox page appears. As
    upstream, a set-up sandbox with auto-start on is started again at launch;

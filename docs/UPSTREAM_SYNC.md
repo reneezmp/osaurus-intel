@@ -287,8 +287,7 @@ mdat and live-folder checks).
 - **All six fixed, 2026-11-27** (`fc13e6034`..`a21f4e639`). Behaviour change:
   Claude Code is used only when picked, so a schedule or watcher with no model
   set and no other provider now ends with "Choose a model…". A set-up sandbox
-  auto-starts at launch again (upstream). Retested on screen: 1, 2, 3, 6 and 5
-  (dark) pass; 4 and 5 on a light theme still to check.
+  auto-starts at launch again (upstream). All six passed the on-screen retest.
   The fixing agent's report listed two tests that were in no commit; the lead
   wrote them (rule added to `AGENT_PORT_BRIEF.md`).
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
