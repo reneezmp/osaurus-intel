@@ -111,3 +111,9 @@ free-form secrets. The UI and manual say so.
   three `dropWordFragments` tests are not ported.
 - Next: stage 3 (wiring). Nothing in the app calls the pipeline yet, so the
   filter is not active for any send.
+
+## Waiting consumer (2026-11-27)
+
+Computer Use stage 6 screen context sends the distilled on-screen text to the
+chosen model without redaction (off by default; the UI and guide say so). When
+the filter is wired, run that text through it before it enters the prompt.

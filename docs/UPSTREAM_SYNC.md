@@ -301,6 +301,11 @@ mdat and live-folder checks).
   model-sent `value` is scrubbed from history, Insights and the args stream.
   Seatbelt sandbox row complete. Full suite 6,885 passed. The plan note "no
   `SecretPromptOverlay` on Intel" was stale: it was already compiled.
+- **Computer Use stage 6 merged, 2026-11-27** (`420db794a`, `a06c54d38`):
+  per-agent screen context, off by default (upstream: on with Computer Use).
+  Full suite 6,919 passed. **Its text is sent unscrubbed** (no privacy filter
+  wired yet; the UI says so): wire it through `W-privacy-filter` when that
+  lands. Computer Use row complete except the composer chip.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

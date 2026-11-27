@@ -3821,3 +3821,11 @@ Owner decision 1 (`UPSTREAM_SYNC.md`). Not in candidate 69. The local server mus
 - [ ] Ask again and type `test-123` in the card: the agent's Sandbox tab lists DEMO_KEY.
 - [ ] Ask it to run `echo $DEMO_KEY`: the output shows it masked, not `test-123`.
 - [ ] Search the chat and Insights for `test-123`: it appears nowhere.
+
+## Computer Use stage 6: screen context (2026-11-27)
+
+`W-computer-use` stage 6. Not in candidate 71. Throwaway agent; nothing private on screen.
+
+- [ ] The agent's Abilities has a screen context option, off. With it off, a chat sends no screen text (check Insights' request).
+- [ ] Turn it on and open the preview: it shows what would be sent, from the app in front. It says the text is not redacted.
+- [ ] Start a chat with TextEdit in front: the reply knows what TextEdit shows. A second message in the same chat doesn't capture again.
