@@ -1332,12 +1332,6 @@ extension FloatingInputCard {
 
     private func syncAndSend() {
         guard canSend else { return }
-        // No model is chosen and none may be chosen for the user (only Claude
-        // Code is available): open the picker and keep the typed text.
-        if ChatSession.needsModelChoice(selected: selectedModel, among: pickerItems) {
-            showModelPicker = true
-            return
-        }
         let message = localText
         // Hold first responder through the binding-flush cascade
         // (clearing local + bound text, parent reconcile, optional
