@@ -275,7 +275,7 @@ mdat and live-folder checks).
   `/memory/ingest`, whatever the local-key switch says; CORS never `*` there;
   Settings row "Require an access key for local apps" (default off). Stopped
   background subagent workers report back like upstream. Combined suite 6,848.
-- **Harness stage 4a is NOT merged** (branch `worktree-agent-a80f9307657960243`,
+- **(Superseded 2026-11-27: merged with stage 5.)** Harness stage 4a was not merged (branch `worktree-agent-a80f9307657960243`,
   commits `f41da36cc`, `77073cf0f`, `18136aae1`, only a filtered run): it
   removes the `claude-code/*` models, so it must ship together with stage 5
   (runtime picker). 4b (the `/mcp/*` agent-token gate, `/agents/{id}/run` and
@@ -306,6 +306,14 @@ mdat and live-folder checks).
   Full suite 6,919 passed. **Its text is sent unscrubbed** (no privacy filter
   wired yet; the UI says so): wire it through `W-privacy-filter` when that
   lands. Computer Use row complete except the composer chip.
+- **Harness runtimes stages 4–5 merged, 2026-11-27** (`bbac52f69`..`6eeedb88a`):
+  Claude Code and Pi run as per-agent runtimes (Settings → Agent Runtimes,
+  picker columns, agent editor Runtime section, effort picker); the
+  `claude-code/*` models and `IntelClaudeCodeService` are gone; saved Claude
+  Code selections migrate at launch. A harness starts only when the user chose
+  it (tests, plus a source scan limiting launch calls to the harness files).
+  Full suite on the rebased tree: 6,951 passed. Held branches deleted. Stage 6
+  (config documents, bundles) left.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

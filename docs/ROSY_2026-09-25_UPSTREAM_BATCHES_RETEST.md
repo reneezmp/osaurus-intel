@@ -3829,3 +3829,13 @@ Owner decision 1 (`UPSTREAM_SYNC.md`). Not in candidate 69. The local server mus
 - [ ] The agent's Abilities has a screen context option, off. With it off, a chat sends no screen text (check Insights' request).
 - [ ] Turn it on and open the preview: it shows what would be sent, from the app in front. It says the text is not redacted.
 - [ ] Start a chat with TextEdit in front: the reply knows what TextEdit shows. A second message in the same chat doesn't capture again.
+
+## Claude Code and Pi as agent runtimes (2026-11-27)
+
+`W-harness-runtimes` stages 4–5 (`W_HARNESS_RUNTIMES_PLAN.md`, which has the full on-screen list). Not in candidate 71. **Important if you use Claude Code.**
+
+- [ ] After updating, an agent that used a Claude Code model shows "Claude Code · Sonnet" (or its alias) in the composer and still answers; an old chat continues.
+- [ ] A new chat on any other agent does not start Claude Code. The picker has a Claude Code column; nothing runs until you pick a row.
+- [ ] Settings → Agents → Runtimes lists Claude Code; its Test button reports signed in (on Rosy: the x64 or npm `claude`).
+- [ ] In an agent's editor, set Runtime to Claude Code and back to Built-in: chats follow the choice.
+- [ ] Ask a Claude Code agent to use an Osaurus tool (for example list your agents): it works, and an "Ask" tool still asks.
