@@ -3812,3 +3812,12 @@ Owner decision 1 (`UPSTREAM_SYNC.md`). Not in candidate 69. The local server mus
 - [ ] A throwaway agent's Abilities has a Computer Use switch, off. Turn it on, then ask it to open TextEdit and type a word: a confirm card appears before acting, and it works on Ventura. **Screenshot** the settings page and a card.
 - [ ] Press Stop mid-run: it stops at once. Start again and quit Osaurus: nothing keeps moving the mouse.
 - [ ] Ask it to type a password into a field: refused.
+
+## Sandbox secrets (2026-11-27)
+
+`W-seatbelt-sandbox`, `sandbox_secret_set`. Not in candidate 71. Throwaway sandbox agent; use a fake key (e.g. `test-123`).
+
+- [ ] Ask the agent to store an API key called DEMO_KEY: a secure card appears in the chat. Cancel: nothing is stored and the agent says so.
+- [ ] Ask again and type `test-123` in the card: the agent's Sandbox tab lists DEMO_KEY.
+- [ ] Ask it to run `echo $DEMO_KEY`: the output shows it masked, not `test-123`.
+- [ ] Search the chat and Insights for `test-123`: it appears nowhere.

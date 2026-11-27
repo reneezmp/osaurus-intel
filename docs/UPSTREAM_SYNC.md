@@ -296,6 +296,11 @@ mdat and live-folder checks).
   passed): it removes the `claude-code/*` models and reverts `83bf7264c` as dead
   code, so it ships only with stage 5 (runtime picker), which must keep "a
   harness runs only when the user chose it".
+- **`sandbox_secret_set` registered, 2026-11-27** (`3ef911aeb`): the secure
+  secret card opens from the Intel engine (`IntelSecretPromptIntercept`), a
+  model-sent `value` is scrubbed from history, Insights and the args stream.
+  Seatbelt sandbox row complete. Full suite 6,885 passed. The plan note "no
+  `SecretPromptOverlay` on Intel" was stale: it was already compiled.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
