@@ -9,6 +9,7 @@ DEV_ID="com.dinoki.osaurus.intel-dev"
 APP="${1:-build/intel-dev/Build/Products/Debug/osaurus.app}"
 cd "$(dirname "$0")/../.." || exit 1
 [[ -x "$APP/Contents/MacOS/osaurus" ]] || { echo "no app at $APP"; exit 1; }
+APP_ABS="$(cd "$APP" && pwd)"
 id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
 [[ "$id" == "$DEV_ID" ]] || { echo "refusing: bundle id is '$id', not $DEV_ID"; exit 1; }
 
@@ -23,9 +24,14 @@ defaults write "$DEV_ID" SUAutomaticallyUpdate -bool false
 
 echo "data root: $INTEL_RUN_ROOT  (keychain off, Sparkle off)"
 echo "Quit the app (Cmd-Q) when done; cleanup runs after."
-OSAURUS_TEST_ROOT="$INTEL_RUN_ROOT" OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1 \
-  "$APP/Contents/MacOS/osaurus" > "$INTEL_RUN_ROOT/../osaurus-intel-run.log" 2>&1
+# Launched through LaunchServices (open), so the app is visible as a running
+# app (computer-use tools can target it); --env passes the safety variables.
+L=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+"$L" -f "$APP_ABS"
+open -n -W --env OSAURUS_TEST_ROOT="$INTEL_RUN_ROOT" --env OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1 \
+  --stdout "${INTEL_RUN_ROOT}.log" --stderr "${INTEL_RUN_ROOT}.log" "$APP_ABS"
 echo "app exited ($?)"
+"$L" -u "$APP_ABS" 2>/dev/null
 
 mdat_after="$(security find-generic-password -s com.osaurus.account -a master-key 2>/dev/null | grep mdat)"
 [[ "$mdat_before" == "$mdat_after" ]] && echo "mdat unchanged" || echo "MDAT CHANGED: $mdat_before -> $mdat_after"

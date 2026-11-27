@@ -280,6 +280,10 @@ mdat and live-folder checks).
   removes the `claude-code/*` models, so it must ship together with stage 5
   (runtime picker). 4b (the `/mcp/*` agent-token gate, `/agents/{id}/run` and
   `SpawnDescriptors` refusals) is left too.
+- **Dev-Mac UI pass, 2026-11-27** (`DEV_MAC_UI_PASS_2026-11-27.md`): server
+  security, chat, config approval, templates, delete-all-data and sandbox
+  self-test passed; six findings, the main one: the Sandbox page is stuck
+  "Unavailable" until a sandbox agent has chatted.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

@@ -161,8 +161,13 @@ corrupt them.
   **Script (2026-11-26):** `scripts/test/run_dev_app.sh` does steps 2–5
   (refuses any bundle id but the dev one, turns Sparkle off for the dev
   domain, launches, then runs the postflight checks and cleans up after you
-  quit). Build command is in its last lines. First end-to-end launch:
-  record what it shows here.
+  quit). Build command is in its last lines. It launches through
+  LaunchServices (`open --env`), otherwise computer-use tools can't see the
+  app. First end-to-end launches (2026-11-27): isolated (no open file under
+  `~/.osaurus`, `mdat` unchanged, nothing changed there), cleanup worked.
+  Beware: the dev app detects a signed-in Claude Code CLI and may default new
+  chats to it, which spends real usage; switch the model first (see
+  `DEV_MAC_UI_PASS_2026-11-27.md`).
 
 ## Preflight and postflight
 
