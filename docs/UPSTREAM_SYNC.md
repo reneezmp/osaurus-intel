@@ -323,6 +323,18 @@ mdat and live-folder checks).
   (Intel addition). As upstream, a runtime's `environment` overlay is exported
   and shown in the review window in clear: don't keep secrets there. Full suite
   6,965 passed. `W-harness-runtimes` complete.
+- **Privacy filter stage 3 merged, 2026-11-27** (`914bd0a55`): the rule-only
+  filter is wired into the cloud send path (`CloudChatEngine` via
+  `IntelPrivacyWire`): outbound scrub before the stream (a blocked send throws
+  before any request), every tool round, Responses replay items (Intel scrubs
+  them in the engine; `RemoteResponsesPrivacyStream` not ported), argument and
+  reply unscrub, one-shot path, Insights post-scrub bodies, 422
+  `privacy_filter` on the four HTTP surfaces, inline highlights in chat
+  bubbles. Screen context rides the user turn, so it is scrubbed too. Off by
+  default; a test pins the off path byte-for-byte. **No review sheet yet
+  (stage 4):** with the filter on and review needed, a chat send is blocked.
+  Full suite 6,978 passed. Live hits in that run were the installed upstream
+  app's own `activity.sqlite` (it held the file open).
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

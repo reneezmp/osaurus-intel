@@ -109,11 +109,22 @@ free-form secrets. The UI and manual say so.
   the review service and tests use them; `PostScrubInvariantTests` replaces
   Intel's old excluded stub (removed from the test `exclude:` list). Rampart's
   three `dropWordFragments` tests are not ported.
-- Next: stage 3 (wiring). Nothing in the app calls the pipeline yet, so the
-  filter is not active for any send.
+- 2026-11-27: stage 3 done (`914bd0a55`). `Services/Chat/IntelPrivacyWire.swift`
+  hooks `CloudChatEngine` (first scrub before the stream, `scrubRound` per tool
+  round, Responses replay items patched in place, `unscrubArguments` before a
+  tool runs, reply / reasoning unscrub, one-shot path). `ChatCompletionRequest.messages`
+  became `var`. HTTP 422 `privacy_filter` on OpenAI, Anthropic, Responses and
+  Ollama handlers; Insights logs the post-scrub body and the redaction count;
+  `ChatView` shows the blocked-send message; highlights in user and assistant
+  bubbles. Computer Use and AppleScript loops auto-scrub as upstream. Not done:
+  review presenter (stage 4: until then a needed review blocks the send, and
+  the message mentions Settings → Privacy, which arrives with stage 4),
+  highlights in thinking panes and activity groups, phone `/privacy/reviews`
+  routes, `FrameScrubber` (stage 6). Tests: `IntelPrivacyWireTests` (13),
+  including off-means-unchanged for streaming and one-shot.
+- Next: stage 4 (UI: Privacy settings, review sheet and presenter).
 
 ## Waiting consumer (2026-11-27)
 
-Computer Use stage 6 screen context sends the distilled on-screen text to the
-chosen model without redaction (off by default; the UI and guide say so). When
-the filter is wired, run that text through it before it enters the prompt.
+Done with stage 3: the screen-context block rides the user turn, so the outbound
+scrub covers it when the filter is on; the preview note says so.

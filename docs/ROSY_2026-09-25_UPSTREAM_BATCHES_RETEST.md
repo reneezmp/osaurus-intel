@@ -3848,3 +3848,10 @@ Owner decision 1 (`UPSTREAM_SYNC.md`). Not in candidate 69. The local server mus
 - [ ] Do it again and Apply: the runtime and agent appear; nothing starts until you chat with that agent.
 - [ ] A document naming an unknown runtime is refused (not run on the built-in loop); an `OSAURUS_X` environment key is refused.
 - [ ] Export config: it contains `harness_runtimes` and `runtime:`; planning that export shows no changes.
+
+## Privacy filter wired into sending (2026-11-27)
+
+`W-privacy-filter` stage 3 (`914bd0a55`). Not in candidate 71. The filter is off by default and has no switch in Settings until stage 4, so for now check only the off path:
+
+- [ ] With the filter off (default), a cloud chat containing an email address replies normally, and Insights shows the real address in the request body.
+- [ ] Router, Codex and a tool-using agent still work as before (no new errors).

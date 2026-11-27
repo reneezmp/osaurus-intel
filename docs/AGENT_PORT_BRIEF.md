@@ -11,6 +11,8 @@ You are porting a group of upstream commits into the **Osaurus Intel fork**. Rea
 - Intel targets **macOS 13 Ventura, x86_64**. Intel replaces many upstream files with its own code (`Intel*` files, `Models/Chat/IntelConformers/*`); `Packages/OsaurusCore/Package.swift`'s `exclude:` list names upstream files Intel doesn't compile, and `#if !OSAURUS_INTEL` code isn't compiled either.
 - The draft verdicts are in `/Users/renee/Developer/osaurus/docs/UPSTREAM_AUDIT_2026-11-11.md` (rows by number). **They are unverified.** For each commit, first check Intel's code: if Intel already has the fix, record "Covered" with evidence and move on; if it needs a feature Intel lacks, record "Needs work (W-item)" and move on. Only port what really applies.
 
+- **Check your base first** (2026-11-27: two worktrees started on an old upstream-era `main`): `git merge-base --is-ancestor intel-fork HEAD`; if it fails, `git reset --hard intel-fork` before any work.
+
 ## How to port
 
 - Port the upstream change faithfully ("follow upstream by default"), adapting only what Intel's own files or Ventura force. Keep upstream's names and structure where Intel has the same file. Short comments citing the upstream PR (`#3266`) where Intel's code differs from upstream.
