@@ -7773,6 +7773,34 @@
         }
       }
     },
+    "Apple apps: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple-Apps: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 应用：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 앱: %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Приложения Apple: %@"
+          }
+        }
+      }
+    },
     "AppleScript" : {
       "extractionState" : "manual",
       "shouldTranslate" : false
@@ -36735,6 +36763,34 @@
         }
       }
     },
+    "Per app" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pro App"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "앱별"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По приложению"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按应用"
+          }
+        }
+      }
+    },
     "Per-Agent Memory" : {
       "localizations" : {
         "de" : {
@@ -36960,6 +37016,62 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "權限診斷和自主權限門控檢查器。"
+          }
+        }
+      }
+    },
+    "Permission needed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Berechtigung erforderlich"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "권한 필요"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нужно разрешение"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要权限"
+          }
+        }
+      }
+    },
+    "Permissions needed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Berechtigungen erforderlich"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "권한 필요"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нужны разрешения"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要权限"
           }
         }
       }
@@ -64273,6 +64385,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "最後手段"
+          }
+        }
+      }
+    },
+    "macOS has not granted: %@. Click to grant or open System Settings." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS hat nicht erteilt: %@. Klicke, um sie zu erteilen oder die Systemeinstellungen zu öffnen."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS에서 허용되지 않음: %@. 클릭하여 허용하거나 시스템 설정을 여세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS не предоставила: %@. Нажмите, чтобы разрешить или открыть Системные настройки."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 尚未授予：%@。点按以授权或打开系统设置。"
           }
         }
       }

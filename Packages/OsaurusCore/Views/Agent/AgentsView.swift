@@ -2254,11 +2254,6 @@ struct AgentDetailView: View {
             theme: theme
         )
 
-        IntelAppleAppsAbilitySection(
-            agentId: agent.id,
-            theme: theme
-        )
-
         AgentDetailSection(title: L("Web"), icon: "globe") {
             abilityToggleRow(
                 title: "Web Search",
@@ -6088,158 +6083,6 @@ private struct IntelKnowledgeGrantSection: View {
     }
 }
 
-// MARK: - Apple Apps Ability Section
-
-/// Per-app switches for the built-in Apple app tools
-/// (docs/APPLE_APPS_INTEL_PLAN.md). The switch is the grant; reading runs
-/// automatically, changes ask first, and deleting asks every time. Writes
-/// go straight to `AgentManager.updateEnabledAppleApps`, like Knowledge.
-private struct IntelAppleAppsAbilitySection: View {
-    @ObservedObject private var agentManager = AgentManager.shared
-    @ObservedObject private var permissions = SystemPermissionService.shared
-
-    let agentId: UUID
-    let theme: ThemeProtocol
-
-    private var enabledApps: Set<AppleApp> {
-        agentManager.agent(for: agentId)?.settings.enabledAppleApps ?? []
-    }
-
-    var body: some View {
-        AgentDetailSection(title: L("Apple Apps"), icon: "square.grid.2x2") {
-            VStack(alignment: .leading, spacing: 10) {
-                if agentId == Agent.defaultId {
-                    Text(
-                        "The built-in agent can't use Apple apps. Create an agent to use them.",
-                        bundle: .module
-                    )
-                    .font(.system(size: 11))
-                    .foregroundColor(theme.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    ForEach(AppleApp.availableOnIntel, id: \.self) { app in
-                        appRow(app)
-                    }
-                    Text(
-                        "Reading runs on its own. Creating or changing anything asks you first, and deleting asks every time. What the agent reads passes through its cloud provider.",
-                        bundle: .module
-                    )
-                    .font(.system(size: 11))
-                    .foregroundColor(theme.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-        .onAppear { permissions.refreshAllPermissions() }
-    }
-
-    private func appRow(_ app: AppleApp) -> some View {
-        let isOn = enabledApps.contains(app)
-        let missing = isOn ? Self.missingPermissions(for: app, states: permissions.permissionStates) : []
-        return HStack(alignment: .top, spacing: 10) {
-            Image(systemName: app.icon)
-                .font(.system(size: 13))
-                .foregroundColor(isOn ? theme.accentColor : theme.tertiaryText)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(app.displayName)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(theme.primaryText)
-                Text(Self.summary(for: app))
-                    .font(.system(size: 11))
-                    .foregroundColor(theme.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let first = missing.first {
-                    HStack(spacing: 8) {
-                        Text(Self.missingText(for: first))
-                        .font(.system(size: 11))
-                        .foregroundColor(theme.warningColor)
-                        Button(L("Allow Access…")) { request(missing) }
-                            .buttonStyle(ThemedBorderedButtonStyle())
-                            .controlSize(.small)
-                    }
-                    .padding(.top, 2)
-                }
-            }
-            Spacer(minLength: 8)
-            Toggle(
-                "",
-                isOn: Binding(
-                    get: { isOn },
-                    set: { setApp(app, enabled: $0) }
-                )
-            )
-            .toggleStyle(ThemedSwitchToggleStyle())
-            .labelsHidden()
-            .accessibilityLabel(Text(app.displayName))
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(theme.inputBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(theme.inputBorder, lineWidth: 1)
-                )
-        )
-    }
-
-    private func setApp(_ app: AppleApp, enabled: Bool) {
-        var apps = enabledApps
-        if enabled { apps.insert(app) } else { apps.remove(app) }
-        agentManager.updateEnabledAppleApps(apps, for: agentId)
-        guard enabled else { return }
-        request(Self.missingPermissions(for: app, states: permissions.permissionStates))
-    }
-
-    /// Ask macOS for each missing permission and wait for the answer. When
-    /// macOS no longer shows a dialog (already denied), open the matching
-    /// System Settings pane instead. Then refresh the badges.
-    private func request(_ missing: [SystemPermission]) {
-        guard !missing.isEmpty else { return }
-        Task { @MainActor in
-            for permission in missing {
-                let granted = await permissions.requestPermissionAndWait(permission)
-                if !granted, let url = permission.systemSettingsURL {
-                    NSWorkspace.shared.open(url)
-                }
-            }
-            permissions.refreshAllPermissions()
-        }
-    }
-
-    /// Permissions macOS reports as not granted. Automation (Notes, Mail,
-    /// Messages sending, Music) has no silent probe, so macOS asks the first
-    /// time the agent uses the app instead. Full Disk Access (Messages
-    /// reading) has no dialog at all: the button opens System Settings.
-    static func missingPermissions(
-        for app: AppleApp, states: [SystemPermission: Bool]
-    ) -> [SystemPermission] {
-        app.systemPermissions.filter { !$0.isAutomationBased && states[$0] != true }
-    }
-
-    static func missingText(for permission: SystemPermission) -> String {
-        if permission == .disk { return L("Osaurus doesn't have Full Disk Access yet.") }
-        return String(format: L("Osaurus doesn't have %@ access yet."), permission.displayName)
-    }
-
-    static func summary(for app: AppleApp) -> String {
-        switch app {
-        case .calendar: return L("Read, add and change events.")
-        case .reminders: return L("Read, add, complete and change reminders.")
-        case .contacts: return L("Look up, add and update contacts.")
-        case .notes: return L("Search, read, create and add to notes. macOS asks the first time.")
-        case .mail: return L("Read, search and file mail; write drafts or send. macOS asks the first time.")
-        case .messages: return L("Read your conversations and send iMessages or texts. Reading needs Full Disk Access; every send asks first.")
-        case .maps: return L("Search places, get directions and travel times, and find where this Mac is.")
-        case .music: return L("See what's playing, control playback and play from your library. macOS asks the first time.")
-        case .shortcuts: return L("List and run your shortcuts.")
-        }
-    }
-}
-
 // MARK: - Agent Data Wipe Dialog
 
 /// Selection state for the "Delete All Data" confirmation. A reference type
@@ -6750,6 +6593,11 @@ private struct AgentEditorSheet: View {
     @State private var draftMode: ToolSelectionMode = .auto
     @State private var draftToolNames: Set<String> = []
     @State private var draftSeeded: Bool = false
+    /// Optional Apple app families to provision at creation, picked in the
+    /// same Customize… tool picker (one group per app; Abilities → Tools
+    /// after the fact). Empty by default; macOS is asked for permission
+    /// only once an app is on.
+    @State private var draftAppleApps: Set<AppleApp> = []
 
     @FocusState private var nameFocused: Bool
 
@@ -6865,6 +6713,7 @@ private struct AgentEditorSheet: View {
         AgentCapabilityManagerView(
             draftMode: $draftMode,
             draftTools: $draftToolNames,
+            draftAppleApps: $draftAppleApps,
             onDismiss: {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
                     inlineCustomize = false
@@ -7176,7 +7025,11 @@ private struct AgentEditorSheet: View {
             ? L("Loaded on demand from your assigned set.")
             : L("All assigned tools are sent every turn.")
         let countLabel = toolCount == 1 ? L("1 tool assigned") : L("\(toolCount) tools assigned")
-        return "\(countLabel) · \(modeBlurb)"
+        if draftAppleApps.isEmpty {
+            return "\(countLabel) · \(modeBlurb)"
+        }
+        let apps = AppleApp.sorted(draftAppleApps).map(\.displayName).joined(separator: ", ")
+        return "\(countLabel) · \(L("Apple apps: \(apps)")) · \(modeBlurb)"
     }
 
     private var promptField: some View {
@@ -7356,7 +7209,7 @@ private struct AgentEditorSheet: View {
         // agent so `seedEnabledCapabilitiesIfNeeded` is a no-op on first
         // Capabilities-tab open. The auto-grow path keeps these sets fresh
         // when new plugins are installed later.
-        let agent = Agent(
+        var agent = Agent(
             id: UUID(),
             name: trimmedName,
             description: AgentDescriptionPolicy.normalized(descriptionText),
@@ -7372,6 +7225,7 @@ private struct AgentEditorSheet: View {
             manualToolNames: Array(draftToolNames),
             avatar: selectedAvatar
         )
+        agent.settings.enabledAppleApps = draftAppleApps
 
         onSave(agent)
     }
