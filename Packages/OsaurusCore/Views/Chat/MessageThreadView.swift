@@ -58,6 +58,9 @@ struct MessageThreadView: View {
     /// Occurrence the pending scroll request targets (find bar); nil for
     /// turn-level scrolls (minimap).
     var scrollToFindOccurrence: Int? = nil
+    /// Privacy Filter pairs (original -> placeholder) approved in this chat:
+    /// drives the inline highlights in the bubbles (`W-privacy-filter` stage 3).
+    var sessionRedactions: [String: String] = [:]
 
     @Environment(\.theme) private var theme
 
@@ -122,7 +125,8 @@ struct MessageThreadView: View {
             searchHighlightQuery: searchHighlightQuery,
             searchCurrentTurnId: searchCurrentTurnId,
             searchCurrentOccurrence: searchCurrentOccurrence,
-            scrollToFindOccurrence: scrollToFindOccurrence
+            scrollToFindOccurrence: scrollToFindOccurrence,
+            sessionRedactions: sessionRedactions
         )
     }
 }

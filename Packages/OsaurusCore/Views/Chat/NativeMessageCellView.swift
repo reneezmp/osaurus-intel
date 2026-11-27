@@ -79,6 +79,11 @@ struct CellRenderingContext {
     /// closed. Message cells paint every case-insensitive occurrence in
     /// their body text via `NativeMarkdownView.setSearchHighlight`.
     var searchHighlightQuery: String = ""
+    /// Privacy Filter pairs (original -> placeholder) approved in this chat.
+    /// User bubbles underline the originals as sent redacted, assistant
+    /// bubbles the restored ones (`W-privacy-filter` stage 3). Empty when the
+    /// filter has redacted nothing: no highlight work happens.
+    var sessionRedactions: [String: String] = [:]
     /// Turn owning the find bar's *current* match, or nil when no match is
     /// current (bar closed / no matches) (upstream #1969).
     var searchCurrentTurnId: UUID? = nil
@@ -2196,6 +2201,15 @@ final class NativeMessageCellView: NSTableCellView {
         )
     }
 
+    /// Convert the cell's session redaction dict (`original -> placeholder`
+    /// from the Privacy Filter) into what `RedactionHighlighter` consumes.
+    static func buildHighlights(
+        from sessionRedactions: [String: String],
+        direction: RedactionHighlight.Direction
+    ) -> [String: RedactionHighlight] {
+        RedactionHighlight.buildDictionary(from: sessionRedactions, direction: direction)
+    }
+
     // MARK: - Paragraph (native NSTextView)
 
     /// True when an assistant paragraph is really a live image-generation status
@@ -2291,6 +2305,13 @@ final class NativeMessageCellView: NSTableCellView {
             theme: context.theme,
             cacheKey: block.id,
             isStreaming: isStreaming
+        )
+        // Assistant bubble: placeholders the cloud emitted were swapped back
+        // by the unscrubber, so flag those spans `.inbound` ("Restored from
+        // [TOKEN]" in the popover).
+        mv.setRedactionHighlights(
+            Self.buildHighlights(from: context.sessionRedactions, direction: .inbound),
+            theme: context.theme
         )
         mv.setSearchHighlight(
             query: context.searchHighlightQuery,
@@ -2699,6 +2720,12 @@ final class NativeMessageCellView: NSTableCellView {
                 theme: theme,
                 cacheKey: block.id,
                 isStreaming: context.isStreaming
+            )
+            // User bubble: the typed text is what is stored, the wire saw the
+            // placeholder; flag the spans `.outbound` ("Sent to cloud as [TOKEN]").
+            mv.setRedactionHighlights(
+                Self.buildHighlights(from: context.sessionRedactions, direction: .outbound),
+                theme: theme
             )
             mv.setSearchHighlight(
                 query: context.searchHighlightQuery,

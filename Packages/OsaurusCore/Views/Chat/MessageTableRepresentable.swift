@@ -211,6 +211,9 @@ struct MessageTableRepresentable: NSViewRepresentable {
     /// coordinator scrolls to the block that renders that occurrence instead
     /// of the top of the turn.
     var scrollToFindOccurrence: Int? = nil
+    /// Privacy Filter pairs (original -> placeholder) approved in this chat;
+    /// threaded into every cell for inline highlights (`W-privacy-filter` stage 3).
+    var sessionRedactions: [String: String] = [:]
 
     // MARK: - NSViewRepresentable Lifecycle
 
@@ -406,6 +409,7 @@ struct MessageTableRepresentable: NSViewRepresentable {
             onUserImagePreview: onUserImagePreview,
             onImagePreviewImage: onImagePreviewImage,
             searchHighlightQuery: searchHighlightQuery,
+            sessionRedactions: sessionRedactions,
             searchCurrentTurnId: searchCurrentTurnId,
             searchCurrentOccurrence: searchCurrentOccurrence,
             searchOccurrenceOffset: { [weak coordinator] blockId in
@@ -439,6 +443,7 @@ struct MessageTableRepresentable: NSViewRepresentable {
             onUserImagePreview: onUserImagePreview,
             onImagePreviewImage: onImagePreviewImage,
             searchHighlightQuery: searchHighlightQuery,
+            sessionRedactions: sessionRedactions,
             searchCurrentTurnId: searchCurrentTurnId,
             searchCurrentOccurrence: searchCurrentOccurrence
         )
@@ -1059,6 +1064,7 @@ extension MessageTableRepresentable {
             let expandedIdsChanged = context.expandedIds != ctx.expandedIds
             let previousEditingTurnId = ctx.editingTurnId
             let previousSearchHighlightQuery = ctx.searchHighlightQuery
+            let previousSessionRedactions = ctx.sessionRedactions
             let previousSearchCurrentTurnId = ctx.searchCurrentTurnId
             let previousSearchCurrentOccurrence = ctx.searchCurrentOccurrence
             let previousStreaming = ctx.isStreaming
@@ -1101,7 +1107,11 @@ extension MessageTableRepresentable {
             recomputeFindOccurrenceOffsets(blocks: blocks)
             // Repaint every materialized cell when the query changes so
             // matches highlight (and un-highlight on close) immediately.
-            if context.searchHighlightQuery != previousSearchHighlightQuery {
+            if context.searchHighlightQuery != previousSearchHighlightQuery
+                || context.sessionRedactions != previousSessionRedactions
+            {
+                // Privacy Filter highlights live in the context too: a send
+                // that redacted something repaints the bubbles.
                 reconfigureAllCellsFromLookup(blockLookup)
             } else if context.searchCurrentTurnId != previousSearchCurrentTurnId
                 || context.searchCurrentOccurrence != previousSearchCurrentOccurrence

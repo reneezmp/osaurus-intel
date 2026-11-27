@@ -144,7 +144,9 @@ struct ToolCallFunction: Codable, Sendable {
 
 struct ChatCompletionRequest: Codable, Sendable {
     let model: String?
-    let messages: [ChatMessage]
+    /// `var` so the Privacy Filter can swap in the scrubbed messages
+    /// (`W-privacy-filter` stage 3).
+    var messages: [ChatMessage]
     var temperature: Double?
     var max_tokens: Int?
     var stream: Bool?

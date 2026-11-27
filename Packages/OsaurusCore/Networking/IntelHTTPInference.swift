@@ -481,9 +481,19 @@ final class SSEResponseWriter: @unchecked Sendable {
         context.flush()
     }
 
-    /// Upstream `writeErrorFromThrown`, minus the Privacy Filter case
-    /// (`W-privacy-filter`).
+    /// Upstream `writeErrorFromThrown`. Privacy Filter errors carry
+    /// `type = "privacy_filter"` and a stable `code` (e.g.
+    /// `privacy_filter_review_required`) so API clients can route them.
     func writeErrorFromThrown(_ error: Error, context: ChannelHandlerContext) {
+        if let pfError = error as? PrivacyFilterPipelineError {
+            writeStructuredError(
+                message: pfError.localizedDescription,
+                type: "privacy_filter",
+                code: pfError.httpErrorCode,
+                context: context
+            )
+            return
+        }
         if error is CancellationError {
             writeStructuredError(
                 message: L("This send was stopped before it reached the model. Nothing was sent. Try again."),
@@ -607,6 +617,12 @@ extension HTTPHandler {
     /// 404 and other engine errors 503; anything else 500 (499 when the
     /// client went away).
     static func inferenceHTTPStatus(for error: Error) -> (status: HTTPResponseStatus, type: String) {
+        // Privacy Filter (`W-privacy-filter` stage 3): a send the filter could
+        // not make safe is 422 (503 when a detector is unavailable), never a
+        // generic 500, so an API client can tell it apart.
+        if let pfError = error as? PrivacyFilterPipelineError {
+            return (HTTPResponseStatus(statusCode: pfError.httpStatus), "privacy_filter")
+        }
         if let engineError = error as? ChatEngine.EngineError {
             // The Router spend gate's 403 (upstream keeps the type
             // `service_unavailable` for every non-404 engine error).

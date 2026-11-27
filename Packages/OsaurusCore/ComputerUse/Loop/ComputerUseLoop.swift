@@ -198,9 +198,10 @@ public enum ComputerUseLoop {
         // (tests / scripted-model evals) drives the loop deterministically and
         // never constructs an engine.
         // Intel: `ChatEngine(source: .agent)`, as the AppleScript loop does
-        // (upstream also picks an inference source from the session and an
-        // auto-scrub privacy mode; Intel has neither).
-        let engine: ChatEngine? = nextAction == nil ? ChatEngine(source: .agent) : nil
+        // (upstream also picks an inference source from the session). Auto-scrub
+        // as upstream: a per-step review sheet would stall a loop that is
+        // driving other apps (`W-privacy-filter` stage 3).
+        let engine: ChatEngine? = nextAction == nil ? ChatEngine(source: .agent, privacyReviewMode: .autoScrub) : nil
 
         // Capture availability once: it gates the escalation ladder (som/vision
         // need Screen Recording) for the whole run.

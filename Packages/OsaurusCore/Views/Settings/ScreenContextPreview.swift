@@ -121,9 +121,28 @@ struct ScreenContextPreview: View {
         }
     }
 
-    /// Intel has no Privacy Filter (`W-privacy-filter`), so nothing scrubs this
-    /// text: say plainly where it goes.
+    /// With the Privacy Filter on, this text rides the first user turn and is
+    /// scrubbed with it before a cloud send (`W-privacy-filter` stage 3); with
+    /// it off nothing scrubs it: say plainly where it goes.
+    @ViewBuilder
     private var privacyNote: some View {
+        if PrivacyFilterStore.snapshot().enabled {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.successColor)
+                    .padding(.top, 1)
+                Text(L("The Privacy Filter scrubs this before it reaches a cloud model."))
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            unscrubbedNote
+        }
+    }
+
+    private var unscrubbedNote: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "info.circle")
                 .font(.system(size: 11))

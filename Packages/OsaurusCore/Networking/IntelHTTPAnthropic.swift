@@ -332,6 +332,16 @@ final class AnthropicSSEResponseWriter: @unchecked Sendable {
     }
 
     func writeErrorFromThrown(_ error: Error, context: ChannelHandlerContext) {
+        if let pfError = error as? PrivacyFilterPipelineError {
+            // Anthropic's error envelope has only type + message: fold the
+            // privacy code into the type (upstream).
+            writeAnthropicError(
+                message: pfError.localizedDescription,
+                errorType: "privacy_filter:\(pfError.httpErrorCode)",
+                context: context
+            )
+            return
+        }
         writeAnthropicError(
             message: error.localizedDescription, errorType: HTTPHandler.anthropicErrorType(for: error),
             context: context)

@@ -258,6 +258,9 @@ func openRouterUpstreamMessage(_ error: [String: Any]) -> String? {
 
 actor ChatEngine: Sendable, ChatEngineProtocol {
     private let source: InferenceSource
+    /// Privacy Filter review policy for every request this engine sends
+    /// (upstream `ChatEngine.privacyReviewMode`; `W-privacy-filter` stage 3).
+    private let privacyReviewMode: PrivacyReviewMode
     private let model: String
     private let apiBase: String
     private let providerOverride: RemoteProvider?
@@ -298,6 +301,35 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             : "you declined to run it this time"
     }
 
+    /// Outcome of the Privacy Filter preflight for one request: the messages
+    /// to send, and (when the filter is on for the provider) the pipeline
+    /// context and the session's redaction map.
+    private struct PrivacyPreflight {
+        var request: ChatCompletionRequest
+        var context: IntelPrivacyWire.Context?
+        var map: RedactionMap?
+        var redactedCount = 0
+    }
+
+    /// Scrub the request's messages before anything is sent. With the master
+    /// switch (or this provider's override) off it returns the request as is
+    /// and touches nothing: the send path is unchanged.
+    private func privacyPreflight(request: ChatCompletionRequest, providerId: UUID?) async throws -> PrivacyPreflight {
+        guard IntelPrivacyWire.isActive(providerId: providerId) else {
+            return PrivacyPreflight(request: request, context: nil, map: nil)
+        }
+        let context = IntelPrivacyWire.Context(
+            providerId: providerId ?? IntelPrivacyWire.noProviderId,
+            sessionId: request.session_id,
+            requestSource: source,
+            reviewMode: privacyReviewMode)
+        let result = try await IntelPrivacyWire.preflight(request.messages, context: context)
+        var scrubbed = request
+        scrubbed.messages = result.messages
+        let redacted = (await result.map?.snapshot().count) ?? 0
+        return PrivacyPreflight(request: scrubbed, context: context, map: result.map, redactedCount: redacted)
+    }
+
     private static func loggedSource(default engineSource: RequestSource) -> RequestSource {
         activitySource ?? (activityPurpose == nil ? engineSource : .system)
     }
@@ -331,10 +363,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         provider: RemoteProvider? = nil,
         session: URLSession? = nil,
         credentials: IntelCodexCredentials = .shared,
-        xaiCredentials: IntelXAICredentials = .shared
+        xaiCredentials: IntelXAICredentials = .shared,
+        privacyReviewMode: PrivacyReviewMode = .interactive
     ) {
         self.xaiCredentials = xaiCredentials
         self.source = source
+        self.privacyReviewMode = privacyReviewMode
         self.model = model
         self.providerOverride = provider
         self.injectedSession = session
@@ -1444,6 +1478,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             )
         }
         try checkRouterSpendAuthorization(endpoint)
+        // Privacy Filter (`W-privacy-filter` stage 3, upstream
+        // `RemoteProviderService.applyPrivacyOutbound`): the first scrub runs
+        // here, before the stream exists, so a blocked send or a canceled
+        // review throws to the caller as upstream's `streamWithTools` does.
+        // Master switch off: `privacy` is nil and nothing below changes.
+        let privacy = try await privacyPreflight(request: request, providerId: endpoint.provider?.id)
+        let request = privacy.request
+        let privacyContext = privacy.context
+        let privacyMap = privacy.map
         let toolSchemaStrict = endpoint.restrictsTopLevelToolSchema
         let toolSpecs = Self.encodeTools(request.tools, stripRestrictedTopLevelKeys: toolSchemaStrict)
         let usesResponsesLite = endpoint.isCodex
@@ -1481,8 +1524,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         // after the image fallback, is the one logged), and the raw response
         // stream, as upstream records them.
         let wireProbe = WireTransportProbe()
+        if privacyContext != nil {
+            // Insights: "privacy filter: N redacted" next to the wire bytes.
+            wireProbe.recordPrivacyFilter(applied: privacyMap != nil, redactedCount: privacy.redactedCount)
+        }
 
-        return AsyncThrowingStream { continuation in
+        let stream = AsyncThrowingStream<String, Error> { continuation in
             let task = Task {
                 // Row 11: a host with no /responses endpoint is retried once on
                 // Chat Completions, which swaps this copy's URL and wire.
@@ -1586,6 +1633,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         wireResponseTruncated: wire.truncated,  // upstream #3284
                         connection: destination.connection,
                         path: loggedPathIsInternal ? loggedPath : destination.path,
+                        privacy: wireProbe.privacyOutcome,
                         agentId: loggedAgentId,
                         sessionId: loggedSessionId
                     )
@@ -1770,6 +1818,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // the one send path every remote wire shares. Local only.
                         outboundMessages = RemoteImagePayloadPolicy.preparedWireMessages(
                             outboundMessages, cache: &imagePolicyCache)
+                        // Privacy Filter, every round: tool results and the
+                        // echoed history are scrubbed with the session's map
+                        // (upstream scrubs per `RemoteProviderService` call).
+                        // The Responses replay items are scrubbed likewise.
+                        var roundReplayItems = codexReplayItems
+                        if let privacyContext {
+                            try await IntelPrivacyWire.scrubRound(
+                                wire: &outboundMessages, items: &roundReplayItems, context: privacyContext)
+                        }
                         var body: [String: Any] = [
                             "model": endpoint.modelId,
                             "messages": Self.appendingTransientNotices(
@@ -2021,7 +2078,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 promptCacheKey: cacheRouting["prompt_cache_key"] as? String
                             )
                             var input = body["input"] as? [[String: Any]] ?? []
-                            input.append(contentsOf: codexReplayItems)
+                            input.append(contentsOf: roundReplayItems)
                             // Harness notices ride on this request only.
                             if !roundNotices.isEmpty {
                                 input.append([
@@ -2583,7 +2640,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 let call = IntelCodexResponsesToolCall(
                                     callID: rawCall.callID,
                                     name: Self.resolvedOfferedToolName(rawCall.name, offered: activeTools),
-                                    arguments: rawCall.arguments
+                                    // Privacy Filter: run the tool on the real value.
+                                    arguments: await IntelPrivacyWire.unscrubArguments(
+                                        rawCall.arguments, map: privacyMap)
                                 )
                                 // Upstream's scope gate (IntelToolScopeGate.swift).
                                 let isOffered = activeTools?.contains(where: { $0.function.name == call.name }) == true
@@ -3176,6 +3235,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // Upstream Classic `uniquelyIdentifiedInvocations`: unique ids per round.
                         let uniqueIds = Self.uniquelyIdentifiedCallIds(orderedCalls.map(\.id))
                         for index in orderedCalls.indices { orderedCalls[index].id = uniqueIds[index] }
+                        // Privacy Filter: the model saw `[PHONE_1]`; the tool
+                        // must run on the real value. The next round scrubs the
+                        // echoed arguments again.
+                        if privacyMap != nil {
+                            for index in orderedCalls.indices {
+                                orderedCalls[index].arguments = await IntelPrivacyWire.unscrubArguments(
+                                    orderedCalls[index].arguments, map: privacyMap)
+                            }
+                        }
                         // Intel desktop subagent step: hand the proposed calls
                         // back instead of running them.
                         if request.stopAtToolCalls {
@@ -3543,6 +3611,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             }
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }
+        // Inbound: placeholders in the reply (and its reasoning) become the
+        // user's values again; hint sentinels pass through. Identity when the
+        // filter did not run.
+        return PrivacyFilterPipeline.wrapInboundStream(stream, map: privacyMap)
     }
 
     func completeChat(request: ChatCompletionRequest) async throws -> ChatCompletionResponse {
@@ -3589,6 +3661,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 usage: nil
             )
         }
+
+        // Privacy Filter (`W-privacy-filter` stage 3): the plain one-shot path
+        // (titles, follow-ups, memory, compaction) is scrubbed like a chat
+        // send; the reply is restored below. Off: unchanged.
+        let privacy = try await privacyPreflight(request: request, providerId: endpoint.provider?.id)
+        let request = privacy.request
+        let privacyMap = privacy.map
 
         var urlRequest = URLRequest(url: URL(string: endpoint.url)!)
         urlRequest.httpMethod = "POST"
@@ -3693,7 +3772,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         do {
             let decoded = try Self.decodeCompletionResponse(data)
             activity.finish(response: decoded, wireResponse: data, error: nil)
-            return decoded
+            return await decoded.restoringPlaceholders(map: privacyMap)
         } catch DecodingError.dataCorrupted(let context)
             where context.debugDescription == "Completion SSE reached its output-token limit before assistant text" {
             let error = CloudChatError.outputLimit(

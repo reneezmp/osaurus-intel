@@ -494,6 +494,18 @@ final class ChatSession: ObservableObject {
     /// option (`PUT /models/options`), so reload the options when it's this
     /// window's model (upstream). Removed in deinit.
     nonisolated(unsafe) private var modelOptionsObserver: NSObjectProtocol?
+    /// Observer for `.privacyFilterRedactionsApproved` (`W-privacy-filter`
+    /// stage 3, upstream ChatView). Folds every approved (original,
+    /// placeholder) pair into `sessionRedactions` so user and assistant
+    /// bubbles inline-highlight the matching spans. Filtered by this
+    /// session's id so two open chats never share placeholders.
+    nonisolated(unsafe) private var privacyRedactionsObserver: NSObjectProtocol?
+    /// Accumulated original -> placeholder map for THIS session, populated by
+    /// the privacy filter notification. FIFO-capped (`maxSessionRedactions`)
+    /// so a long chat never grows it without bound.
+    @Published private(set) var sessionRedactions: [String: String] = [:]
+    private var sessionRedactionOrder: [String] = []
+    private static let maxSessionRedactions = 500
     /// Keeps this live session's `projectId` in sync when the chat is moved
     /// between projects (or its project is deleted) from another window —
     /// otherwise the next send would keep injecting a stale project's
@@ -593,6 +605,37 @@ final class ChatSession: ObservableObject {
             Task { @MainActor in
                 guard let self, model == self.selectedModel else { return }
                 self.loadActiveModelOptions(for: model)
+            }
+        }
+
+        privacyRedactionsObserver = NotificationCenter.default.addObserver(
+            forName: .privacyFilterRedactionsApproved,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard
+                let sid = note.userInfo?["sessionId"] as? String,
+                let pairs = note.userInfo?["redactions"] as? [[String: String]],
+                !pairs.isEmpty
+            else { return }
+            Task { @MainActor in
+                guard let self, self.sessionId?.uuidString == sid else { return }
+                var next = self.sessionRedactions
+                var order = self.sessionRedactionOrder
+                for pair in pairs {
+                    guard let original = pair["original"], let placeholder = pair["placeholder"],
+                        !original.isEmpty
+                    else { continue }
+                    if next[original] == placeholder { continue }
+                    if next[original] == nil { order.append(original) }
+                    next[original] = placeholder
+                }
+                while order.count > Self.maxSessionRedactions {
+                    next.removeValue(forKey: order.removeFirst())
+                }
+                guard next != self.sessionRedactions else { return }
+                self.sessionRedactionOrder = order
+                self.sessionRedactions = next
             }
         }
 
@@ -715,6 +758,9 @@ final class ChatSession: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = modelOptionsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = privacyRedactionsObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = agentTodoObserver {
@@ -1953,6 +1999,8 @@ final class ChatSession: ObservableObject {
         lastManualModelSelection = nil
         restoredWindowModelSelection = nil
         turns.removeAll()
+        sessionRedactions = [:]
+        sessionRedactionOrder = []
         input = ""
         pendingAttachments = []
         pendingOneOffSkillId = nil
@@ -4729,6 +4777,15 @@ final class ChatSession: ObservableObject {
                 // cancel source, the privacy review sheet, does not exist on
                 // Intel.)
                 lastStreamError = nil
+            } catch let pfError as PrivacyFilterPipelineError {
+                // Upstream: the Privacy Filter blocked the send (a detection
+                // with no one to review it, a scrub that did not hold). The
+                // user turn stays visible; the reply bubble says why, in words
+                // (`W-privacy-filter` stage 3). A Cancel in the review sheet is
+                // a `CancellationError` above, not this.
+                assistantTurn = liveAssistantTurn(fallback: assistantTurn)
+                assistantTurn.content = pfError.localizedDescription
+                lastStreamError = pfError.localizedDescription
             } catch {
                 // After tool rounds the error belongs under the tool results,
                 // in the engine's newest reply; writing it to the run's first
@@ -5416,7 +5473,8 @@ struct ChatView: View {
                     ? debouncedFindQuery.trimmingCharacters(in: .whitespacesAndNewlines) : "",
                 searchCurrentTurnId: currentFindMatch?.turnId,
                 searchCurrentOccurrence: currentFindMatch?.occurrence ?? 0,
-                scrollToFindOccurrence: scrollToFindOccurrence
+                scrollToFindOccurrence: scrollToFindOccurrence,
+                sessionRedactions: session.sessionRedactions
             )
             .safeAreaInset(edge: .top, spacing: 0) {
                 Color.clear
@@ -5658,6 +5716,9 @@ private struct IsolatedThreadView: View {
     var searchCurrentTurnId: UUID? = nil
     var searchCurrentOccurrence: Int = 0
     var scrollToFindOccurrence: Int? = nil
+    /// Privacy Filter pairs (original -> placeholder) approved in this chat,
+    /// for inline highlights in the bubbles (`W-privacy-filter` stage 3).
+    var sessionRedactions: [String: String] = [:]
 
     var body: some View {
         let _ = ChatPerfTrace.shared.count("body.IsolatedThreadView")
@@ -5694,7 +5755,8 @@ private struct IsolatedThreadView: View {
             searchHighlightQuery: searchHighlightQuery,
             searchCurrentTurnId: searchCurrentTurnId,
             searchCurrentOccurrence: searchCurrentOccurrence,
-            scrollToFindOccurrence: scrollToFindOccurrence
+            scrollToFindOccurrence: scrollToFindOccurrence,
+            sessionRedactions: sessionRedactions
         )
     }
 }

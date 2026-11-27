@@ -521,10 +521,13 @@ final class OpenResponsesSSEWriter: @unchecked Sendable {
     func writeErrorFromThrown(_ error: Error, context: ChannelHandlerContext) {
         let response = OpenResponsesResponse(
             id: responseId, createdAt: createdAt, status: .failed, model: model, output: [], usage: nil)
+        // Privacy Filter errors keep their stable code (upstream).
+        let code =
+            (error as? PrivacyFilterPipelineError)?.httpErrorCode
+            ?? HTTPHandler.openResponsesErrorCode(for: error)
         let event = ResponseFailedEvent(
             sequenceNumber: nextSequenceNumber(), response: response,
-            error: OpenResponsesError(
-                code: HTTPHandler.openResponsesErrorCode(for: error), message: error.localizedDescription))
+            error: OpenResponsesError(code: code, message: error.localizedDescription))
         writeSSEEvent("response.failed", payload: event, context: context)
     }
 

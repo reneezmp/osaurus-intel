@@ -340,7 +340,7 @@ public enum AppleScriptLoop {
         // every helper step as Agent (see `ComputerUseLoop`).
         // Intel: one source (Agent) covers upstream's source + activity
         // source; Intel has no Privacy Filter to auto-scrub.
-        let engine: ChatEngine? = nextScript == nil ? ChatEngine(source: .agent) : nil
+        let engine: ChatEngine? = nextScript == nil ? ChatEngine(source: .agent, privacyReviewMode: .autoScrub) : nil
         // Default to the real in-process executor; tests inject their own. Kept
         // out of the (public) default argument because `AppleScriptExecutor` is
         // internal and a public default value can't reference an internal symbol.
