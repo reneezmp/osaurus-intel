@@ -5071,6 +5071,24 @@ Sparkle key `bYYJJqFx…`. Not launched on the build Mac (macOS 27.2 beta
 26B5086k). The public release needs build 67 or higher. Rosy steps: "Release
 candidate 1.0.62 (build 66)" in the Rosy retest checklist.
 
+### Rosy candidate 1.0.62 (build 72) — 2026-11-28
+
+Built from `4b99b2dbc` with `scripts/build/build_rosy.sh` (Debug, thin x86_64,
+macOS 13.0 minimum). Everything since build 71 (`94544e537`): harness runtimes
+stages 4–6 (complete), privacy filter stages 3–6 and `ForcedToolChoiceGate`
+(complete), Computer Use composer chip (complete), image/video subagent kinds
+(W-subagents complete), #2835 Apple app groups, `W-tool-list-growth`, the
+template setup wizard, and the first Rosy build with the `osaurus` CLI in
+`Contents/Helpers`. Full suite on the code tip (`939fcb7da`): 7,111 passed (6
+known issues). Archive `build/rosy-deploy/Osaurus-Intel-RC-1.0.62-72-2026-11-28.zip`
+in the main checkout (115,493,701 bytes, SHA-256 `b70dd6f6…6e43b46e46`); strict
+codesign before and after unpacking, 6 framework symlinks kept, app and CLI
+x86_64 with minos 13.0, canonical `~/.osaurus`, Sparkle key matches
+`App/osaurus/Info.plist`. Not launched on Ventura. Build 71 was never tested;
+this replaces it. Test from `ROSY_BUILD_72_SHORT_LIST.md` first. Next build
+number > 72; a public release needs >= 73 plus the signed plugin publish (now
+including `osaurus.xlsx` / `osaurus.pptx`).
+
 ### Rosy candidate 1.0.62 (build 71) — 2026-11-27
 
 Built from `94544e537` with `scripts/build/build_rosy.sh`: build 70 plus the
