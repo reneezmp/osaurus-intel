@@ -33,7 +33,37 @@ struct AgentSheetHeader: View {
     let icon: String
     let title: LocalizedStringKey
     let subtitle: LocalizedStringKey?
+    /// Verbatim (already-localized or user-provided) subtitle, for dynamic
+    /// text like an agent name that must not go through the catalog
+    /// (upstream #3172 setup wizard).
+    var subtitleText: String?
     let onClose: () -> Void
+
+    init(
+        icon: String,
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey?,
+        onClose: @escaping () -> Void
+    ) {
+        self.icon = icon
+        self.title = title
+        self.subtitle = subtitle
+        self.subtitleText = nil
+        self.onClose = onClose
+    }
+
+    init(
+        icon: String,
+        title: LocalizedStringKey,
+        subtitleText: String?,
+        onClose: @escaping () -> Void
+    ) {
+        self.icon = icon
+        self.title = title
+        self.subtitle = nil
+        self.subtitleText = subtitleText
+        self.onClose = onClose
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,6 +79,11 @@ struct AgentSheetHeader: View {
                         .foregroundColor(theme.primaryText)
                     if let subtitle {
                         Text(subtitle, bundle: .module)
+                            .font(.system(size: 12))
+                            .foregroundColor(theme.secondaryText)
+                            .lineLimit(2)
+                    } else if let subtitleText, !subtitleText.isEmpty {
+                        Text(subtitleText)
                             .font(.system(size: 12))
                             .foregroundColor(theme.secondaryText)
                             .lineLimit(2)
@@ -108,15 +143,21 @@ struct AgentSheetFooter: View {
     let primary: Action?
     let secondary: Action?
     let hint: LocalizedStringKey?
+    /// Verbatim (already localized) warning shown in the hint slot instead
+    /// of the shortcut hint, for "you still need to…" guidance that must
+    /// stay next to the button that triggered it (upstream #3172).
+    var warning: String? = nil
 
     init(
         primary: Action? = nil,
         secondary: Action? = nil,
-        hint: LocalizedStringKey? = nil
+        hint: LocalizedStringKey? = nil,
+        warning: String? = nil
     ) {
         self.primary = primary
         self.secondary = secondary
         self.hint = hint
+        self.warning = warning
     }
 
     var body: some View {
@@ -124,7 +165,19 @@ struct AgentSheetFooter: View {
             Divider().opacity(0.5)
 
             HStack(spacing: 10) {
-                if let hint {
+                if let warning {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .padding(.top, 1)
+                        Text(warning)
+                            .font(.system(size: 11, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundColor(theme.warningColor)
+                    .frame(maxWidth: 420, alignment: .leading)
+                    .transition(.opacity)
+                } else if let hint {
                     HStack(spacing: 4) {
                         Text("\u{2318}", bundle: .module)
                             .font(.system(size: 10, weight: .medium, design: .rounded))

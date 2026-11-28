@@ -384,9 +384,9 @@ enum ConfigApplier {
                     // that was fine a moment ago. Creation arms the setup
                     // marker through `AgentManager.add`; an edit has to arm it
                     // here, or the next spawn runs straight into the gap.
-                    // (Upstream also arms its `SetupStateStore` marker here;
-                    // Intel has no Needs Setup badge, so the result status
-                    // `needs_user_action` is the only signal.)
+                    if outcome.needsUserAction {
+                        SetupStateStore.shared.markNeedsSetup(agent.id)
+                    }
                     applyRelay(entry.capabilities?.relayEnabled, to: agent.id)
                     return ConfigApplyResult(
                         section: "agents", target: agent.name,

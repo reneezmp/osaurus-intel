@@ -37,6 +37,17 @@ public struct PendingKnowledgeCreateRequest: Equatable, Sendable {
     }
 }
 
+/// A parked setup wizard, by what it sets up (upstream #3172).
+enum PendingSetupSubject {
+    case agent(AgentSetupSubject)
+
+    var tab: ManagementTab {
+        switch self {
+        case .agent: return .agents
+        }
+    }
+}
+
 /// Manages the session state for the management interface.
 @MainActor
 public final class ManagementStateManager: ObservableObject {
@@ -178,6 +189,17 @@ public final class ManagementStateManager: ObservableObject {
     /// (`osaurus://themes-install?hash=<sha256>`). `ThemesView` observes
     /// this and resets it to nil after presenting the import sheet.
     @Published public var pendingThemeInstallHash: String?
+
+    /// One-shot request to open the Set Up Agent wizard for a saved agent,
+    /// e.g. from the first-open checklist alert in chat. `AgentsView`
+    /// observes this and resets it to nil after presenting (upstream #3172).
+    @Published public var pendingAgentSetupId: UUID?
+
+    /// A setup wizard that stepped aside so the user could visit another
+    /// tab (adding a tool, say). Carries the unsaved draft with it, so
+    /// nothing the user has filled in is lost. `AgentsView` reopens the
+    /// wizard from this and resets it to nil.
+    @Published var pendingSetupSubject: PendingSetupSubject?
 
     private init() {}
 }

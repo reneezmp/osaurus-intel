@@ -18,8 +18,8 @@
 //  `AgentSettings` has neither). Intel is
 //  not App-Sandboxed, so the working-folder check asks whether the path is a
 //  readable directory instead of resolving a security-scoped bookmark. The
-//  setup wizard and the import review that also consume the report stay
-//  unported (`W-agent-templates`).
+//  setup wizard (`AgentSetupWizardView`) consumes the report; the import
+//  review stays unported.
 //
 
 import Foundation
@@ -197,5 +197,24 @@ public enum SetupChecker {
         }
 
         return SetupReport(subjectId: agent.id, items: items)
+    }
+
+    /// The agent with every tool of its source template's MCP servers and
+    /// plugins that exist here now, for a group added after the agent was
+    /// drafted or created. Groups already partly selected are left alone so
+    /// a deliberate trim survives.
+    static func addingTemplateGroupTools(
+        to agent: Agent, groups: [PortableToolGroup], available: [PortableToolGroup: [String]]
+    ) -> Agent {
+        guard agent.toolSelectionMode == .manual else { return agent }
+        var names = agent.manualToolNames ?? []
+        var selected = Set(names)
+        for group in groups {
+            guard let tools = available[group], !tools.contains(where: selected.contains) else { continue }
+            for tool in tools where selected.insert(tool).inserted { names.append(tool) }
+        }
+        var copy = agent
+        copy.manualToolNames = names
+        return copy
     }
 }

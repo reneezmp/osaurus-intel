@@ -63,6 +63,12 @@ struct AgentsView: View {
     @State private var successMessage: String?
     @State private var sandboxCleanupNotice: SandboxCleanupNotice?
     @State private var consumedDeeplinkAgentId: UUID?
+    /// What the Set Up Agent wizard is working on: a saved agent (Run
+    /// Setup, first-open prompt) or a template draft (Use Template).
+    /// Upstream #3172.
+    @State private var setupSubject: AgentSetupSubject?
+    @ObservedObject private var setupState = SetupStateStore.shared
+    @ObservedObject private var managementState = ManagementStateManager.shared
 
     init(deeplinkAgentId: UUID? = nil) {
         self.deeplinkAgentId = deeplinkAgentId
@@ -165,7 +171,36 @@ struct AgentsView: View {
             )
         }
         .sheet(isPresented: $isShowingTemplates) {
-            AgentTemplatesGalleryView(onClose: { isShowingTemplates = false })
+            AgentTemplatesGalleryView(
+                onClose: { isShowingTemplates = false },
+                onUse: { template in
+                    // One sheet at a time: close the gallery, then open the
+                    // wizard on a draft (nothing is saved until Create Agent).
+                    isShowingTemplates = false
+                    DispatchQueue.main.async { useTemplate(template) }
+                }
+            )
+        }
+        .sheet(item: $setupSubject) { subject in
+            AgentSetupWizardView(
+                subject: subject,
+                onClose: { setupSubject = nil },
+                onFinished: { agent in
+                    if subject.isDraft {
+                        showSuccess("Created \"\(agent.name)\"")
+                    }
+                }
+            )
+            .environment(\.theme, themeManager.currentTheme)
+        }
+        .onReceive(managementState.$pendingAgentSetupId) { pending in
+            guard let pending else { return }
+            managementState.pendingAgentSetupId = nil
+            withAnimation(Self.navTransition) { selectedAgent = nil }
+            setupSubject = .saved(pending)
+        }
+        .onReceive(managementState.$pendingSetupSubject) { _ in
+            resumeParkedSetupIfNeeded()
         }
         .sheet(isPresented: $isShowingBundleImport) {
             BundleImportSheet(onClose: { isShowingBundleImport = false })
@@ -191,6 +226,10 @@ struct AgentsView: View {
                 hasAppeared = true
             }
             consumeDeeplinkIfPossible()
+            // The wizard parks itself here when it sends the user to another
+            // tab. Coming back rebuilds this view, so the publisher has
+            // already fired by now and the value has to be read directly.
+            resumeParkedSetupIfNeeded()
         }
         .onChange(of: agentManager.agents) { _ in
             // Agent list may load asynchronously after the view appears.
@@ -210,6 +249,42 @@ struct AgentsView: View {
                 selectedAgent = target
             }
         }
+    }
+
+    // MARK: - Setup wizard
+
+    /// Use Template: open the setup wizard on an UNSAVED draft. The agent is
+    /// created only when the wizard's Create Agent passes the readiness
+    /// check, so a template this Mac cannot honour never yields a broken
+    /// agent. The template's requested model stays on the draft even when it
+    /// is missing, so the Model step can show it instead of silently falling
+    /// back; a `preferred` policy makes that step advisory. Upstream #3172.
+    private func useTemplate(_ template: AgentTemplate) {
+        var entry = template.resolvedEntry()
+        if case .available = template.modelResolution() {} else if let requested = template.agent.model.valueOrNil {
+            entry.model = .value(requested)
+        }
+        var draft = ConfigApplier.draftAgent(from: entry).agent
+        // Keep the author's folder as a hint so the Working Folder step shows
+        // when this Mac cannot read it.
+        if let hint = entry.workingFolder.valueOrNil, draft.workingFolderPath == nil {
+            draft.workingFolderPath = (hint as NSString).expandingTildeInPath
+        }
+        if let actions = template.quickActions { draft.chatQuickActions = actions }
+        // Lets the setup check find the template's MCP servers and plugins,
+        // which add no tool names to the draft when missing here.
+        draft.sourceTemplateName = template.name
+        draft.sourceTemplateID = template.id
+        setupSubject = .draft(draft, template: template)
+    }
+
+    /// Reopen a wizard that stepped aside for another tab, with whatever
+    /// the user had already filled in.
+    private func resumeParkedSetupIfNeeded() {
+        guard case .agent(let parked)? = managementState.pendingSetupSubject else { return }
+        managementState.pendingSetupSubject = nil
+        withAnimation(Self.navTransition) { selectedAgent = nil }
+        setupSubject = parked
     }
 
     // MARK: - Grid Content
@@ -275,6 +350,8 @@ struct AgentsView: View {
                                     withAnimation(Self.navTransition) { selectedAgent = agent }
                                 },
                                 onDuplicate: { duplicateAgent(agent) },
+                                needsSetup: setupState.needsSetup(agent.id),
+                                onRunSetup: { setupSubject = .saved(agent.id) },
                                 onDelete: { deleteAgent(agent) }
                             )
                             .gridDiffCell()
@@ -456,6 +533,10 @@ private struct AgentCard: View {
     let hasAppeared: Bool
     let onSelect: () -> Void
     let onDuplicate: () -> Void
+    /// First-run setup still pending (`SetupStateStore`).
+    var needsSetup: Bool = false
+    /// Opens the Set Up Agent wizard for this agent.
+    var onRunSetup: () -> Void = {}
     let onDelete: () -> Void
 
     init(
@@ -465,8 +546,12 @@ private struct AgentCard: View {
         hasAppeared: Bool,
         onSelect: @escaping () -> Void,
         onDuplicate: @escaping () -> Void,
+        needsSetup: Bool = false,
+        onRunSetup: @escaping () -> Void = {},
         onDelete: @escaping () -> Void
     ) {
+        self.needsSetup = needsSetup
+        self.onRunSetup = onRunSetup
         self.agent = agent
         self.isActive = isActive
         self.animationDelay = animationDelay
@@ -528,6 +613,20 @@ private struct AgentCard: View {
                                             .fill(theme.successColor.opacity(0.12))
                                     )
                             }
+                            if needsSetup {
+                                Text("Needs setup", bundle: .module)
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(theme.warningColor)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        Capsule()
+                                            .fill(theme.warningColor.opacity(0.12))
+                                    )
+                                    .help(L("Run Setup from the card menu to finish configuring this agent"))
+                            }
                         }
 
                         // Always render the description line so card heights line
@@ -560,6 +659,13 @@ private struct AgentCard: View {
                                 Text("Duplicate", bundle: .module)
                             } icon: {
                                 Image(systemName: "doc.on.doc")
+                            }
+                        }
+                        Button(action: onRunSetup) {
+                            Label {
+                                Text("Run Setup", bundle: .module)
+                            } icon: {
+                                Image(systemName: "checklist")
                             }
                         }
                         Divider()
@@ -605,6 +711,25 @@ private struct AgentCard: View {
                 }
 
                 Spacer(minLength: 0)
+                // Provenance sits on its own line above the stats: that band
+                // is the same width on every card, so a long template name
+                // can neither crowd the agent name nor squeeze the stat chips.
+                if let source = agent.sourceTemplateName, !source.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.on.square.dashed")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(L("From the \(source) template"))
+                            .font(.system(size: 10, weight: .medium))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .foregroundColor(theme.infoColor)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(theme.infoColor.opacity(0.12)))
+                    .help(L("Created from the \(source) template"))
+                    .padding(.bottom, 6)
+                }
                 compactStats
             }
             .frame(maxWidth: .infinity, minHeight: 140, alignment: .top)
@@ -1647,13 +1772,22 @@ struct AgentDetailView: View {
     /// Compact identity bar: back, avatar + name + optional description, actions.
     /// Tapping the identity block opens the agent switcher popover; editing the
     /// name / description happens inside the Configure tab's Identity section.
-    /// Upstream's shared chrome (`AgentDetailChrome.swift`, #1656); Intel has
-    /// no agent templates yet, so the "From the … template" status is absent.
+    /// Upstream's shared chrome (`AgentDetailChrome.swift`, #1656).
     private var detailHeaderBar: some View {
         AgentDetailHeaderBar(
             onBack: onBack,
             identity: { identityButton },
             status: {
+                if saveIndicator == nil, let source = currentAgent.sourceTemplateName, !source.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.on.square.dashed")
+                            .font(.system(size: 10))
+                        Text(L("From the \(source) template"))
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(theme.tertiaryText)
+                    .help(L("Created from the \(source) template"))
+                }
                 if let indicator = saveIndicator {
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark.circle.fill")

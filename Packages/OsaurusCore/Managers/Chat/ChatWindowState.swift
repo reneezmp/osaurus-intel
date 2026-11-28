@@ -1101,6 +1101,10 @@ final class ChatWindowState: ObservableObject {
         agentId = newAgentId
         AgentManager.shared.setActiveAgent(newAgentId)
         refreshAgents()
+        // First-run readiness: a freshly created agent (any path) is checked
+        // the first time a window shows it. Clean agents clear silently.
+        // Upstream #3172.
+        AgentSetupPromptCoordinator.shared.agentShown(newAgentId, windowId: windowId)
     }
 
     /// An untouched chat: nothing sent, nothing running, nothing pending.

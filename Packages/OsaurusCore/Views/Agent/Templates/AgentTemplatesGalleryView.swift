@@ -5,23 +5,22 @@
 //  The Templates gallery for agents (W-agent-templates stage 4, after
 //  upstream Classic's Templates page): built-in and saved agent templates,
 //  Use Template, Export File, Import Template (Choose File), Save an Agent as
-//  a Template, rename-free library management and the "Show to Orchestrator"
-//  switch.
+//  a Template, library management (Rename, Delete) and the "Show to
+//  Orchestrator" switch, under the "What is a template?" explainer card.
 //
 //  Intel differences, on purpose:
 //   - A sheet from the Agents header rather than a pushed page (Intel's
 //     `AgentsView` is its own file), and plain controls that exist on
 //     macOS 13 (no `.segmented` / `.bordered` styles, one-value `onChange`).
-//   - Use Template does NOT write an agent straight away. It builds the
-//     one-agent document, runs it through `ConfigPlanner`, shows the plan
-//     (changes, risks, notes) and only the user's Create click runs
-//     `ConfigApplier`; the same planner and applier the Orchestrator's
-//     `osaurus_config` uses. Nothing is applied without that click.
+//   - Use Template does NOT write an agent straight away. It closes this
+//     sheet and opens the Set Up Agent wizard (`AgentSetupWizardView`, as
+//     upstream does) on an unsaved draft; the wizard shows the plan the
+//     Orchestrator's `osaurus_config` would show (changes, risks, notes) and
+//     only its Create Agent click saves anything.
 //   - Imported files are untrusted data: they are parsed and validated by the
 //     strict document decoder, shown for review (signature, requirements) and
 //     never executed. Only Choose File or a drop; no link, clipboard or
 //     network path.
-//   - The setup wizard / `SetupChecker` is not ported (stays Needs work).
 //
 
 import AppKit
@@ -34,8 +33,12 @@ struct AgentTemplatesGalleryView: View {
     @ObservedObject private var agentManager = AgentManager.shared
 
     let onClose: () -> Void
+    /// Use Template: the host closes this sheet and opens the setup wizard.
+    let onUse: (AgentTemplate) -> Void
 
-    @State private var using: AgentTemplate?
+    @State private var renaming: AgentTemplate?
+    /// The explainer card above the list stays until the user closes it.
+    @AppStorage("agentTemplatesIntroDismissed") private var introDismissed = false
     @State private var importText: String?
     @State private var showingSaveAgent = false
     @State private var message: String?
@@ -53,11 +56,19 @@ struct AgentTemplatesGalleryView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 12) {
+                        if !introDismissed {
+                            AgentTemplatesIntroCard(onDismiss: {
+                                withAnimation(.easeInOut(duration: 0.2)) { introDismissed = true }
+                            })
+                            .padding(.bottom, 8)
+                            .transition(.opacity)
+                        }
                         ForEach(templates) { template in
                             AgentTemplateRow(
                                 template: template,
                                 isBuiltIn: store.isBuiltIn(template),
-                                onUse: { using = template },
+                                onUse: { onUse(template) },
+                                onRename: { renaming = template },
                                 onExport: { TemplateFileExport.export(template) },
                                 onToggleOrchestrator: { toggleOrchestrator(template) },
                                 onSaveToLibrary: { saveToLibrary(template) },
@@ -85,13 +96,9 @@ struct AgentTemplatesGalleryView: View {
             TemplateFileExport.loadDroppedFile(
                 providers, onText: { importText = $0 }, onError: { message = $0 })
         }
-        .sheet(item: $using) { template in
-            UseTemplateSheet(
-                template: template,
-                onDone: { text in
-                    using = nil
-                    if let text { message = text }
-                })
+        .sheet(item: $renaming) { template in
+            RenameAgentTemplateSheet(template: template, onDone: { renaming = nil })
+                .environment(\.theme, theme)
         }
         .sheet(
             isPresented: Binding(get: { importText != nil }, set: { if !$0 { importText = nil } })
@@ -193,6 +200,7 @@ private struct AgentTemplateRow: View {
     let template: AgentTemplate
     let isBuiltIn: Bool
     let onUse: () -> Void
+    let onRename: () -> Void
     let onExport: () -> Void
     let onToggleOrchestrator: () -> Void
     let onSaveToLibrary: () -> Void
@@ -243,6 +251,7 @@ private struct AgentTemplateRow: View {
                     if isBuiltIn {
                         Button(L("Save to Library"), action: onSaveToLibrary)
                     } else {
+                        Button(L("Rename…"), action: onRename)
                         Button(L("Delete"), action: onDelete)
                     }
                 }
@@ -274,150 +283,6 @@ enum TemplateRequirementText {
             case .skill: return L("skill") + " " + item.value
             }
         }.joined(separator: ", ")
-    }
-}
-
-// MARK: - Use Template
-
-/// Builds the one-agent document, shows the plan, and applies it only on the
-/// user's Create click.
-private struct UseTemplateSheet: View {
-    @ObservedObject private var themeManager = ThemeManager.shared
-    private var theme: ThemeProtocol { themeManager.currentTheme }
-
-    let template: AgentTemplate
-    /// A message for the gallery's status line, or nil when cancelled.
-    let onDone: (String?) -> Void
-
-    @State private var name = ""
-    @State private var plan: ConfigPlan?
-    @State private var planError: String?
-    @State private var reviewedRisks = false
-    @State private var isApplying = false
-
-    private var overrides: AgentEntry { AgentEntry(name: name.trimmingCharacters(in: .whitespacesAndNewlines)) }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(L("Use Template") + ": " + template.name)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(theme.primaryText)
-            HStack {
-                Text(L("Agent name"))
-                    .font(.system(size: 12))
-                    .foregroundColor(theme.secondaryText)
-                TextField(L("Agent name"), text: $name)
-                    .textFieldStyle(.roundedBorder)
-            }
-            ScrollView {
-                Text(planText)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(theme.primaryText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-            .frame(minHeight: 140, maxHeight: 260)
-            .padding(8)
-            .background(RoundedRectangle(cornerRadius: 8).fill(theme.inputBackground))
-            if let plan, plan.hasHighRiskChanges {
-                Toggle(L("I reviewed the risks above"), isOn: $reviewedRisks)
-                    .font(.system(size: 12))
-            }
-            Text(L("Nothing is created until you click Create Agent."))
-                .font(.system(size: 11))
-                .foregroundColor(theme.tertiaryText)
-            HStack {
-                Spacer()
-                Button(L("Cancel")) { onDone(nil) }
-                    .keyboardShortcut(.cancelAction)
-                Button(L("Create Agent")) { create() }
-                    .disabled(!canCreate)
-            }
-        }
-        .padding(20)
-        .frame(width: 560)
-        .background(theme.primaryBackground)
-        .environment(\.theme, theme)
-        .onAppear {
-            let taken = Set(AgentManager.shared.agents.map { AgentTemplate.slug(for: $0.name) })
-            name = AgentTemplate.availableName(for: template.agent.name, takenSlugs: taken)
-            refreshPlan()
-        }
-        .onChange(of: name) { _ in refreshPlan() }
-    }
-
-    private var planText: String {
-        if let planError { return planError }
-        guard let plan else { return L("Planning…") }
-        return plan.summaryText()
-    }
-
-    private var canCreate: Bool {
-        guard let plan, !plan.isEmpty, !isApplying, planError == nil else { return false }
-        return !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (!plan.hasHighRiskChanges || reviewedRisks)
-    }
-
-    private func document() -> OsaurusConfigDocument {
-        var entry = template.resolvedEntry(overrides: overrides)
-        entry.sourceTemplate = template.name
-        var doc = OsaurusConfigDocument()
-        doc.version = 1
-        doc.agents = [entry]
-        return doc
-    }
-
-    private func refreshPlan() {
-        reviewedRisks = false
-        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            plan = nil
-            return
-        }
-        do {
-            var next = try ConfigPlanner.plan(document: document(), prune: false)
-            next.notes.insert(L("Based on template: \(template.name)"), at: 0)
-            plan = next
-            planError = nil
-        } catch let issues as ConfigPlanIssues {
-            plan = nil
-            planError = issues.issues.map { "• \($0)" }.joined(separator: "\n")
-        } catch {
-            plan = nil
-            planError = error.localizedDescription
-        }
-    }
-
-    private func create() {
-        guard canCreate else { return }
-        isApplying = true
-        let doc = document()
-        let agentName = doc.agents?.first?.name ?? name
-        Task { @MainActor in
-            let results = await ConfigApplier.apply(document: doc, prune: false)
-            if let actions = template.quickActions,
-                var agent = AgentManager.shared.agents.first(where: {
-                    $0.name.caseInsensitiveCompare(agentName) == .orderedSame && !$0.isBuiltIn
-                })
-            {
-                agent.chatQuickActions = actions
-                agent.sourceTemplateID = template.id
-                AgentManager.shared.update(agent)
-            } else if var agent = AgentManager.shared.agents.first(where: {
-                $0.name.caseInsensitiveCompare(agentName) == .orderedSame && !$0.isBuiltIn
-            }) {
-                agent.sourceTemplateID = template.id
-                AgentManager.shared.update(agent)
-            }
-            let failed = results.first { $0.status == .failed }
-            if let failed {
-                planError = failed.message ?? L("Could not create the agent.")
-                isApplying = false
-                return
-            }
-            let pending = results.compactMap { $0.status == .needsUserAction ? $0.message : nil }
-            let suffix = pending.isEmpty ? "" : " " + pending.joined(separator: " ")
-            onDone(L("Created \"\(agentName)\" from \(template.name).") + suffix)
-        }
     }
 }
 

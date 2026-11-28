@@ -202,4 +202,100 @@ struct AgentSetupWiringGuardTests {
         #expect(tool.contains("Self.setupRefusal(agentID: agentID, tool: name)"))
         #expect(tool.contains("IntelSpawnAdmission.liveFacts(launcherID: launcher).pool.contains(agentID)"))
     }
+
+    @Test
+    func chatAdoption_promptsForSetup() throws {
+        // Intel's `ChatWindowState` is the second class in the file, after
+        // the `#else`; the call must sit in that one.
+        let state = try source("Managers/Chat/ChatWindowState.swift")
+        let intelHalf = try #require(state.range(of: "#else")).upperBound
+        #expect(
+            state[intelHalf...].contains("AgentSetupPromptCoordinator.shared.agentShown(newAgentId, windowId: windowId)"))
+    }
+
+    @Test
+    func agentsView_presentsTheWizard_andTheGalleryHandsOffToIt() throws {
+        let agents = try source("Views/Agent/AgentsView.swift")
+        #expect(agents.contains("AgentSetupWizardView("))
+        #expect(agents.contains("setupSubject = .draft(draft, template: template)"))
+        #expect(agents.contains("onRunSetup: { setupSubject = .saved(agent.id) }"))
+        let gallery = try source("Views/Agent/Templates/AgentTemplatesGalleryView.swift")
+        // The gallery must not create agents itself any more: Use Template
+        // goes through the wizard's plan and Create Agent click.
+        #expect(gallery.contains("onUse: { onUse(template) }"))
+        #expect(!gallery.contains("ConfigApplier.apply"))
+    }
+
+    @Test
+    func wizardCreate_requiresReviewedRisks_beforeAddingTheAgent() throws {
+        let wizard = try source("Views/Agent/Setup/AgentSetupWizardView.swift")
+        let gate = try #require(wizard.range(of: "if planHasHighRisk, !reviewedRisks"))
+        let add = try #require(wizard.range(of: "AgentManager.shared.add(final)"))
+        #expect(gate.lowerBound < add.lowerBound)
+    }
+}
+
+struct AgentSetupTemplateGroupTests {
+
+    @Test
+    func addingTemplateGroupTools_addsAvailableGroupOnly() {
+        var agent = Agent(name: "Plato")
+        agent.toolSelectionMode = .manual
+        agent.manualToolNames = ["web_search"]
+        let updated = SetupChecker.addingTemplateGroupTools(
+            to: agent,
+            groups: [.mcpServer("Underwriting"), .plugin("osaurus.vision")],
+            available: [.mcpServer("Underwriting"): ["uw_case_get", "uw_apps_list"]])
+        #expect(updated.manualToolNames == ["web_search", "uw_case_get", "uw_apps_list"])
+    }
+
+    @Test
+    func addingTemplateGroupTools_keepsDeliberateTrim() {
+        var agent = Agent(name: "Plato")
+        agent.toolSelectionMode = .manual
+        agent.manualToolNames = ["uw_case_get"]
+        let updated = SetupChecker.addingTemplateGroupTools(
+            to: agent, groups: [.mcpServer("Underwriting")],
+            available: [.mcpServer("Underwriting"): ["uw_case_get", "uw_apps_list"]])
+        #expect(updated.manualToolNames == ["uw_case_get"])
+    }
+}
+
+/// Intel adaptation: steps upstream offers that Intel cannot (knowledge
+/// grants) are shown dimmed with a reason, never dropped.
+struct AgentSetupWizardIntelStepTests {
+
+    private func report(_ items: [SetupItem] = []) -> SetupReport {
+        SetupReport(subjectId: UUID(), items: items)
+    }
+
+    @Test
+    func knowledgeStep_isAddedDimmed_whenTheTemplateAsksForKnowledge() {
+        let steps = AgentSetupWizardView.Step.steps(for: report(), needsKnowledge: true)
+        #expect(steps == [.knowledge, .review])
+        #expect(AgentSetupWizardView.Step.knowledge.isUnavailableOnIntel)
+        #expect(!AgentSetupWizardView.Step.knowledge.unavailableReason.isEmpty)
+    }
+
+    @Test
+    func knowledgeStep_isAbsent_whenNothingAsksForKnowledge() {
+        #expect(AgentSetupWizardView.Step.steps(for: report()) == [.review])
+    }
+
+    @Test
+    func otherSteps_areNotDimmed() {
+        for step in [AgentSetupWizardView.Step.model, .folder, .tools, .permissions, .review] {
+            #expect(!step.isUnavailableOnIntel)
+        }
+    }
+
+    @Test
+    func stepsFollowTheReport_andKeepTheDimmedKnowledgeStepInOrder() {
+        let model = SetupItem(
+            kind: .model, severity: .blocking, title: "Model", detail: "x", value: "m")
+        let tool = SetupItem(
+            kind: .mcpServer, severity: .advisory, title: "Tools", detail: "x", value: "t")
+        let steps = AgentSetupWizardView.Step.steps(for: report([model, tool]), needsKnowledge: true)
+        #expect(steps == [.model, .knowledge, .tools, .review])
+    }
 }
