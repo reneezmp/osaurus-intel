@@ -4148,6 +4148,16 @@ final class ChatSession: ObservableObject {
                         .reduce(0) { $0 + ContextBudgetManager.estimateTokens(for: $1.content) }
                         - currentInjectedTokens
                     budgetTracker.updateConversation(tokens: max(0, convTokens), finishedOutputTurn: assistantTurn)
+                    // Upstream resolves the choice from the user's own words
+                    // (`ChatToolChoicePolicy.resolve`, #3203): a redaction request
+                    // forces `redact_file` when it is offered. App-authored
+                    // sends (`hostAuthored`) and a regenerate (no text) keep
+                    // `auto`; no match is `auto` (nil without tools), as before.
+                    let requestedToolChoice = ChatToolChoicePolicy.resolve(
+                        tools: toolSpecs,
+                        taskIntent: hostAuthored ? .hostContinuation : ChatTaskIntent(userText: trimmed),
+                        attempt: attempts
+                    )
                     var req = ChatCompletionRequest(
                         model: selectedModel ?? "default",
                         messages: msgs,
@@ -4160,9 +4170,13 @@ final class ChatSession: ObservableObject {
                         stop: nil,
                         n: nil,
                         tools: toolSpecs.isEmpty ? nil : toolSpecs,
-                        tool_choice: toolSpecs.isEmpty ? nil : .auto,
+                        tool_choice: requestedToolChoice,
                         session_id: sessionId?.uuidString
                     )
+                    // Upstream `ForcedToolChoiceGate` (#3203): a forced choice
+                    // is for the first round only; the engine returns to `auto`
+                    // after it and refuses a call that ignored the choice.
+                    req.toolChoiceFirstRoundOnly = true
                     req.samplingParametersAreImplicit = true
                     turnGenerationControls.apply(to: &req)
                     req.ttftTrace = ttftTrace

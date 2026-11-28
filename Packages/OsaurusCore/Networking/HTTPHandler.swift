@@ -213,6 +213,12 @@ struct ChatCompletionRequest: Codable, Sendable {
     /// terminal recovery stays off and a blank reply gets the chat's own
     /// limit text. Not encoded.
     var isToolFreeWrapUp: Bool = false
+    /// Intel (upstream `ForcedToolChoiceGate`, #3203): the chat's resolved
+    /// `tool_choice` applies to the engine's first round only. Later rounds go
+    /// out as `auto`, and a call that ignores a forced function is refused
+    /// instead of run. `false` keeps an API caller's choice for every round.
+    /// Not encoded.
+    var toolChoiceFirstRoundOnly: Bool = false
     /// Stable per-logical-step idempotency token (upstream Classic
     /// `inferenceContext.idempotencyKey`). Set by the chat surface; the engine
     /// appends the round and a body fingerprint, and sends the result to the

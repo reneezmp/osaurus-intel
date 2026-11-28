@@ -4,7 +4,83 @@
 
 import Foundation
 
+/// The original task supplied by the caller, before the app adds delivery or
+/// execution instructions (upstream `ChatTaskIntent`, `DispatchRequest.swift`).
+/// Host-only provenance: never decoded from model or API output.
+enum ChatTaskIntent: Sendable, Equatable {
+    case userRequest(String)
+    /// App-authored context or report delivery with no new user task: the
+    /// message stays model-visible and tools stay available under `auto`.
+    case hostContinuation
+
+    init(userText: String) { self = .userRequest(userText) }
+
+    var userText: String? {
+        if case .userRequest(let text) = self { return text }
+        return nil
+    }
+}
+
+/// Execution-side enforcement for a forced `tool_choice` (upstream #3203,
+/// `ChatToolChoicePolicy.swift`). A provider that ignores the forced function
+/// leaves the model free to emit another tool, so the gate is armed per model
+/// step and consulted before each execution: a mismatched call is refused with
+/// a corrective envelope instead of running, and the gate disarms after one
+/// wave so follow-up steps (which return to `.auto`) run unimpeded. It only
+/// refuses; the forced tool itself still goes through the engine's own
+/// permission and approval gate.
+final class ForcedToolChoiceGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var forcedName: String?
+
+    /// Arm (or disarm) from the tool choice the request was built with.
+    func arm(_ choice: ToolChoiceOption?) {
+        let name: String?
+        if case .function(let target) = choice {
+            name = target.function.name
+        } else {
+            name = nil
+        }
+        lock.withLock { forcedName = name }
+    }
+
+    /// Nil when the call may execute. Non-nil is the refusal envelope for a
+    /// call that ignored the forced choice. A matching call disarms the gate;
+    /// a mismatch keeps it armed so every stray call in the same wave is
+    /// refused (the next model step re-arms or clears it anyway).
+    func violationEnvelope(calledTool: String) -> String? {
+        let forced: String? = lock.withLock {
+            if forcedName == calledTool { forcedName = nil }
+            return forcedName
+        }
+        guard let forced, forced != calledTool else { return nil }
+        return ToolEnvelope.failure(
+            kind: .invalidArgs,
+            message:
+                "This request requires calling `\(forced)`; `\(calledTool)` was not offered for "
+                + "this step. Call `\(forced)` with the appropriate arguments instead.",
+            tool: calledTool,
+            retryable: true
+        )
+    }
+}
+
 enum ChatToolChoicePolicy {
+    /// Resolve only from the actual task. App-added delivery instructions may
+    /// name tools without the caller requesting any tool invocation.
+    static func resolve(
+        tools: [Tool],
+        taskIntent: ChatTaskIntent,
+        attempt: Int
+    ) -> ToolChoiceOption? {
+        switch taskIntent {
+        case .userRequest(let text):
+            return resolve(tools: tools, userText: text, attempt: attempt)
+        case .hostContinuation:
+            return tools.isEmpty ? nil : .auto
+        }
+    }
+
     static func resolve(
         tools: [Tool],
         userText: String,
@@ -81,7 +157,12 @@ enum ChatToolChoicePolicy {
 
     private static func containsCallableName(_ name: String, in text: String) -> Bool {
         guard !name.isEmpty else { return false }
-        return text.contains(name)
+        // Tool names are identifiers, not word fragments: "completed" must not
+        // require the `complete` tool (upstream #2815). Punctuation around
+        // explicit calls and backticked names stays valid.
+        let escapedName = NSRegularExpression.escapedPattern(for: name)
+        let pattern = #"(?<![\p{L}\p{N}_-])"# + escapedName + #"(?![\p{L}\p{N}_-])"#
+        return text.range(of: pattern, options: .regularExpression) != nil
     }
 
     private static func containsNegatedToolIntent(_ text: String) -> Bool {

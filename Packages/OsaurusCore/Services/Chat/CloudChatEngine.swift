@@ -1731,6 +1731,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     var codexReplayItems: [[String: Any]] = []
                     let maxToolRounds = request.maxToolRounds ?? 12
                     var round = 0
+                    // Upstream `ForcedToolChoiceGate` (#3203): the chat's forced
+                    // choice rides the first round only and is enforced at the
+                    // execution boundary. Armed per round from what went on the wire.
+                    let forcedToolGate = ForcedToolChoiceGate()
                     var totalChunks = 0
                     // Router idempotency (upstream Classic): the surface's per-run
                     // key, or a synthesized one; `recoveryOrdinal` bumps on the
@@ -2031,7 +2035,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // The caller's choice (an API client's
                             // `required` / `none` / named function, upstream);
                             // "auto" when unset, as before.
-                            body["tool_choice"] = Self.wireToolChoice(request.tool_choice)
+                            let roundToolChoice =
+                                request.toolChoiceFirstRoundOnly && round > 1 ? ToolChoiceOption.auto : request.tool_choice
+                            body["tool_choice"] = Self.wireToolChoice(roundToolChoice)
+                            forcedToolGate.arm(request.toolChoiceFirstRoundOnly ? roundToolChoice : nil)
                         }
                         if endpoint.usesResponsesWire {
                             if let effort = Self.codexReasoningEffort(
@@ -2116,15 +2123,17 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             if body["tool_choice"] != nil {
                                 let thinkingDisabled =
                                     (body["thinking"] as? [String: Any])?["type"] as? String == "disabled"
-                                body["tool_choice"] = Self.wireToolChoice(
-                                    Self.sanitizedToolChoice(
-                                        request.tool_choice,
-                                        providerType: endpoint.provider?.providerType,
-                                        host: URL(string: endpoint.url)?.host ?? "",
-                                        model: endpoint.modelId,
-                                        thinkingDisabled: thinkingDisabled
-                                    )
+                                let sentToolChoice = Self.sanitizedToolChoice(
+                                    request.toolChoiceFirstRoundOnly && round > 1 ? ToolChoiceOption.auto : request.tool_choice,
+                                    providerType: endpoint.provider?.providerType,
+                                    host: URL(string: endpoint.url)?.host ?? "",
+                                    model: endpoint.modelId,
+                                    thinkingDisabled: thinkingDisabled
                                 )
+                                body["tool_choice"] = Self.wireToolChoice(sentToolChoice)
+                                // A choice the provider rejects went out as `auto`:
+                                // the gate must not enforce what was never asked.
+                                forcedToolGate.arm(request.toolChoiceFirstRoundOnly ? sentToolChoice : nil)
                             }
                             Self.applyVeniceParameters(
                                 request.modelOptions, host: URL(string: endpoint.url)?.host ?? "", into: &body)
@@ -2665,6 +2674,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                             forUnofferedCall: call.name, offered: offered,
                                             agentId: ChatExecutionContext.currentAgentId)
                                     }
+                                } else if let violation = forcedToolGate.violationEnvelope(calledTool: call.name) {
+                                    result = violation
                                 } else if let harness = Self.harnessOutcome(
                                     taskState, name: call.name, arguments: call.arguments,
                                     notices: &pendingHarnessNotices)
@@ -3431,6 +3442,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         forUnofferedCall: call.name, offered: offered,
                                         agentId: ChatExecutionContext.currentAgentId)
                                 }
+                            } else if let violation = forcedToolGate.violationEnvelope(calledTool: call.name) {
+                                result = violation
                             } else if let harness = Self.harnessOutcome(
                                 taskState, name: call.name, arguments: call.arguments,
                                 notices: &pendingHarnessNotices)
