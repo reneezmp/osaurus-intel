@@ -422,6 +422,14 @@ mdat and live-folder checks).
   asks to read a file now sends `required` on its first round.
   `containsCallableName` is now a word-boundary match (#2815). Full suite 7,102
   passed.
+- **Rosy builds ship the CLI (2026-11-28).** `scripts/build/build_rosy.sh`
+  now builds the `osaurus-cli` scheme (x86_64, same derived data) and copies it
+  to `osaurus.app/Contents/Helpers/osaurus` before the `--deep` re-sign, as
+  upstream's `build_arm64.sh` and the repo `Makefile` do; Settings → Command
+  Line Tool links to that path. Checked with a CLI-only build: `Mach-O 64-bit
+  executable x86_64`, `minos 13.0`, `osaurus-cli version` runs. Unlike the
+  plugin host helper, a missing CLI stops the build. Closes the `W-cli-build`
+  follow-up; first in the build after 71.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

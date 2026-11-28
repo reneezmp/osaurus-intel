@@ -3608,7 +3608,7 @@ Declarative config stage 3 and `W-cov-reaudit` 5c slice 6 (rows 11–12). Not in
 
 ## Command-line tool builds again (2026-11-19)
 
-`W-cli-build`. Not in candidate 68. **Rosy builds do not ship the `osaurus` command yet** (`build_rosy.sh` never builds the `osaurus-cli` scheme; `build_arm64.sh` does). Skip these until `W-cli-build`'s packaging follow-up lands.
+`W-cli-build`. Not in candidate 68. **Rosy builds up to 71 do not ship the `osaurus` command.** Since 2026-11-28 `build_rosy.sh` embeds it (`Contents/Helpers/osaurus`): run these from the first build after 71. First press Settings → Developer Tools → Server → Command Line Tool → Install CLI.
 
 - [ ] `osaurus version` and `osaurus doctor` run and describe this Intel install.
 - [ ] With the app quit, `osaurus serve` starts the Intel app (not anything from Homebrew).

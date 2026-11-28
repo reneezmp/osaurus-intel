@@ -80,6 +80,29 @@ else
   echo "⚠ plugin host helper not built; plugins stay in-process (the default)."
 fi
 
+# The `osaurus` command-line tool, embedded as Contents/Helpers/osaurus the way
+# upstream's build_arm64.sh does (Settings → Server → Command Line Tool links
+# to it). Rosy builds up to 71 shipped without it (`W-cli-build` follow-up).
+# A failure stops the build, as upstream: a missing CLI was the original bug.
+# Must run before the re-sign below (`--deep` signs it).
+echo "→ Building command-line tool (osaurus-cli)…"
+CLI_SRC="$DERIVED/Build/Products/$CONFIG/osaurus-cli"
+xcodebuild \
+  -workspace osaurus.xcworkspace \
+  -scheme osaurus-cli \
+  -configuration "$CONFIG" \
+  -arch x86_64 \
+  -skipPackagePluginValidation \
+  -skipMacroValidation \
+  -derivedDataPath "$DERIVED" \
+  ONLY_ACTIVE_ARCH=NO \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  build | tail -3
+[ -x "$CLI_SRC" ] || { echo "✗ CLI binary not found at $CLI_SRC"; exit 1; }
+mkdir -p "$APP/Contents/Helpers"
+cp "$CLI_SRC" "$APP/Contents/Helpers/osaurus"
+chmod +x "$APP/Contents/Helpers/osaurus"
+
 echo "→ Baking OsaurusCanonicalData = true (use ~/.osaurus on Rosy)…"
 /usr/libexec/PlistBuddy -c "Set :OsaurusCanonicalData true" "$PLIST" 2>/dev/null \
   || /usr/libexec/PlistBuddy -c "Add :OsaurusCanonicalData bool true" "$PLIST"
@@ -100,7 +123,8 @@ echo "✅ Rosy deploy build ready:"
 echo "   $APP"
 echo "   arch:      $(file "$APP/Contents/MacOS/osaurus" | sed 's/.*: //')"
 echo "   helper:    $( [ -x "$APP/Contents/Helpers/osaurus-plugin-host" ] && file "$APP/Contents/Helpers/osaurus-plugin-host" | sed 's/.*: //' || echo "not embedded")"
-echo "   canonical: $(/usr/libexec/PlistBuddy -c 'Print :OsaurusCanonicalData' "$PLIST")"
+echo "   cli:       $(file "$APP/Contents/Helpers/osaurus" | sed 's/.*: //')"
+echo "   canonical:$(/usr/libexec/PlistBuddy -c 'Print :OsaurusCanonicalData' "$PLIST")"
 echo ""
 echo "Next: copy osaurus.app to Rosy's /Applications and launch it."
 echo "On first run it will create + own ~/.osaurus (look for the log line:"
