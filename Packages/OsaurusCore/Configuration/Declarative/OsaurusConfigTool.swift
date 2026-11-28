@@ -710,8 +710,9 @@ public final class OsaurusConfigTool: OsaurusTool, PermissionedTool, @unchecked 
                 + "overrides: {name: \"...\", system_prompt: \"...\"}} then apply. The template fixes "
                 + "model, tools, MCP servers, sandbox and subagent settings; only override what the "
                 + "user asked to change. Opt-in tools are off by default: put "
-                + "`capabilities: {calculator_enabled: true}` (math) in `overrides` when the "
-                + "agent's job needs it."
+                + "`capabilities: {calculator_enabled: true}` (math) or "
+                + "`{redaction_tools_enabled: true}` (PII detection/redaction) in `overrides` when the "
+                + "agent's job needs them."
         }
         return ToolEnvelope.success(tool: name, result: result)
     }

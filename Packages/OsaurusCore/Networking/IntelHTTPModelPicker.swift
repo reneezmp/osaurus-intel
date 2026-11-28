@@ -83,8 +83,10 @@ extension HTTPHandler {
         /// offers and its starting price, for the phone's controls and its
         /// spend confirmation (upstream MOBILE_PROTOCOL §12.5).
         let cloud: PickerCloudImageDTO?
-        /// How the Privacy Filter treats a run on this model. Nil until
-        /// `W-privacy-filter`.
+        /// For a cloud chat model the Privacy Filter runs for: `review` (asks
+        /// before sending) or `auto` (Always Approve redacts unasked); nil when
+        /// it doesn't run, local models included. A voice call reads it to ask
+        /// the user first (upstream MOBILE_PROTOCOL §6.5, #3135).
         let privacy: String?
 
         enum CodingKeys: String, CodingKey {
@@ -176,7 +178,10 @@ extension HTTPHandler {
 
     /// The picker's chat models and available cloud image models, in its
     /// tabs (upstream's mapping). Video models aren't listed (upstream).
-    static func pickerModels(from allItems: [ModelPickerItem]) -> [PickerModelDTO] {
+    static func pickerModels(
+        from allItems: [ModelPickerItem],
+        privacyConfig: PrivacyFilterConfiguration = PrivacyFilterStore.snapshot()
+    ) -> [PickerModelDTO] {
         let items = allItems.filter {
             ($0.isLikelyChatCapable && $0.mediaModel == nil) || PickerCloudImageDTO($0) != nil
         }
@@ -190,6 +195,10 @@ extension HTTPHandler {
             case .remote: source = "remote"
             }
             let cloud = PickerCloudImageDTO(item)
+            var privacy: String?
+            if case .remote(_, let providerId) = item.source, privacyConfig.isEnabled(forProviderId: providerId) {
+                privacy = privacyConfig.alwaysApproveByDefault ? "auto" : "review"
+            }
             return PickerModelDTO(
                 id: item.id,
                 name: item.displayName,
@@ -214,7 +223,7 @@ extension HTTPHandler {
                 // Cloud models can't edit over HTTP (upstream).
                 edits: false,
                 cloud: cloud,
-                privacy: nil
+                privacy: privacy
             )
         }
     }

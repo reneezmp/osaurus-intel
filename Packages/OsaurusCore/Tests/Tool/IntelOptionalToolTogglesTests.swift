@@ -4,7 +4,8 @@
 //
 //  Upstream #3307 on Intel: Calculator is a per-agent opt-in (default off);
 //  Task Checklist, Clarify and Artifacts are per-agent switches (default on).
-//  Redaction Tools are not on Intel.
+//  Redaction Tools (also a per-agent opt-in, default off) are covered by
+//  `IntelRedactionToolExposureTests`.
 //
 
 import Foundation

@@ -5724,6 +5724,11 @@ enum FolderToolFactory {
             FileUndoTool(rootPath: rootPath),
             FileCopyTool(rootPath: rootPath),
             FileSearchTool(rootPath: rootPath),
+            // Unconditional by design (upstream): the tool LIST never changes;
+            // which agent is offered them is the per-agent "Redaction Tools"
+            // opt-in, applied where the schema is composed. Rule engine only.
+            DetectPIITool(rootPath: rootPath),
+            RedactFileTool(rootPath: rootPath),
             ShellRunTool(rootPath: rootPath),
         ]
     }

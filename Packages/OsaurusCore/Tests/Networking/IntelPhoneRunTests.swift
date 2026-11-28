@@ -102,6 +102,52 @@ struct IntelPhoneRunTests {
         #expect(lastUser.hasSuffix("[/Voice call]"))
     }
 
+    /// W-privacy-filter stage 5 (upstream #3135, §6.5): the owner's phone call
+    /// may set the Privacy Filter for its own turns, `auto` or `off`; any other
+    /// value leaves it alone, and the field works with or without
+    /// `osaurus_voice_call`. Nothing is stored: a run without it sees nil.
+    @Test func phoneCall_privacyChoiceReachesTheRunOnlyFromThePhone() async throws {
+        for (value, voiceCall, expected) in [
+            ("auto", true, VoiceCallPrivacy.auto), ("off", true, .off), ("off", false, .off),
+            ("auto", false, .auto), ("bogus", true, nil), ("", true, nil),
+        ] as [(String, Bool, VoiceCallPrivacy?)] {
+            let engine = PhoneRunEngine(early: ["ok"])
+            let server = try await startPhoneRunServer(engine: engine)
+            defer { Task { await server.shutdown() } }
+            let phone = try PhoneChannel()
+            let (call, seq) = try phone.seal(
+                .run(runId: nil, voiceCall: voiceCall, extra: [#""osaurus_privacy":"\#(value)""#]))
+            let (data, _) = try await URLSession.shared.data(for: server.secureCall(call, accept: "text/event-stream"))
+            #expect(try phone.openStream(data, requestSeq: seq).contains("ok"))
+            #expect(await engine.lastVoiceCallPrivacy == expected, "osaurus_privacy=\(value) voice=\(voiceCall)")
+        }
+        // The next turn without the field is back to the settings.
+        let engine = PhoneRunEngine(early: ["ok"])
+        let server = try await startPhoneRunServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+        let phone = try PhoneChannel()
+        let (call, seq) = try phone.seal(.run(runId: nil, voiceCall: true))
+        let (data, _) = try await URLSession.shared.data(for: server.secureCall(call, accept: "text/event-stream"))
+        #expect(try phone.openStream(data, requestSeq: seq).contains("ok"))
+        #expect(await engine.lastVoiceCallPrivacy == nil)
+    }
+
+    /// A local script (loopback, no Secure Channel master key) may not switch
+    /// the filter off, whatever it sends.
+    @Test func loopbackScript_cannotSetThePrivacyChoice() async throws {
+        let engine = PhoneRunEngine(early: ["ok"])
+        let server = try await startPhoneRunServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/agents/default/run")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(
+            PhoneChannel.runBody(runId: nil, voiceCall: true, extra: [#""osaurus_privacy":"off""#]).utf8)
+        let (data, _) = try await URLSession.shared.data(for: request)
+        #expect(String(decoding: data, as: UTF8.self).contains("ok"))
+        #expect(await engine.lastVoiceCallPrivacy == nil)
+    }
+
     /// Only the phone's runs detach: a loopback script's run id is ignored,
     /// and its run still ends with its connection.
     @Test func loopbackRunId_isNotDetached() async throws {
@@ -261,8 +307,9 @@ struct IntelPhoneRunTests {
 
     @Test func phoneFields_areDecodedButNeverEncoded() throws {
         let json =
-            #"{"model":"m","messages":[],"osaurus_session_id":"s","osaurus_create_session":true,"osaurus_voice_call":true}"#
+            #"{"model":"m","messages":[],"osaurus_session_id":"s","osaurus_create_session":true,"osaurus_voice_call":true,"osaurus_privacy":"off"}"#
         let request = try JSONDecoder().decode(ChatCompletionRequest.self, from: Data(json.utf8))
+        #expect(request.osaurus_privacy == "off")
         #expect(request.osaurus_session_id == "s")
         #expect(request.osaurus_create_session == true)
         #expect(request.osaurus_voice_call == true)
@@ -390,6 +437,9 @@ private actor PhoneRunEngine: ChatEngineProtocol {
     let late: [String]
     let gate: PhoneRunGate?
     private(set) var lastRequest: ChatCompletionRequest?
+    /// What the engine's task saw in `ChatExecutionContext.voiceCallPrivacy`
+    /// (W-privacy-filter stage 5): what the Privacy Filter would act on.
+    private(set) var lastVoiceCallPrivacy: VoiceCallPrivacy?
 
     init(early: [String], late: [String] = [], gate: PhoneRunGate? = nil) {
         self.early = early
@@ -399,6 +449,7 @@ private actor PhoneRunEngine: ChatEngineProtocol {
 
     func streamChat(request: ChatCompletionRequest) async throws -> AsyncThrowingStream<String, Error> {
         lastRequest = request
+        lastVoiceCallPrivacy = ChatExecutionContext.voiceCallPrivacy
         let early = early
         let late = late
         let gate = gate

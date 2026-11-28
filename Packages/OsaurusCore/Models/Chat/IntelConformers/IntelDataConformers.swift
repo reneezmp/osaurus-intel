@@ -3728,6 +3728,13 @@ struct IntelAgentConfigSnapshot: @unchecked Sendable {
         if id != Agent.defaultId, let settings {
             disabledOptional = ToolRegistry.disabledOptionalToolNames(settings)
         }
+        // Redaction Tools (upstream #3307): `detect_pii` / `redact_file` are
+        // offered only when the agent's switch is on, the Orchestrator
+        // included (its switch is off). Kept here, beside the other opt-ins,
+        // so `ToolRegistry.disabledOptionalToolNames` stays untouched.
+        if !(settings?.redactionToolsEnabled ?? false) {
+            disabledOptional.formUnion(ToolRegistry.redactionToolNames)
+        }
         // The agent's own knowledge grants plus the project's, deduplicated,
         // so the `## Knowledge` section and the tool gate cannot disagree.
         var collections = manager.effectiveKnowledgeCollections(for: id)

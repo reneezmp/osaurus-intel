@@ -247,6 +247,9 @@ public enum ConfigManifest {
                                 comment: "exact arithmetic tool; enable for agents that work with numbers",
                                 moreComments: ["(finance, budgets, invoices, data analysis, unit conversions)"]),
                             ConfigKeySpec(
+                                "redaction_tools_enabled", .scalar(.boolean, example: "false"),
+                                comment: "detect_pii + redact_file in host-folder chats (PII scrubbing)"),
+                            ConfigKeySpec(
                                 "task_checklist_enabled", .scalar(.boolean, example: "true"),
                                 comment: "todo checklist + complete; default on"),
                             ConfigKeySpec(

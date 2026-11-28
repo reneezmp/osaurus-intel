@@ -114,6 +114,7 @@ extension Template {
         if let v = over.speakEnabled { out.speakEnabled = v }
         if let v = over.renderChartEnabled { out.renderChartEnabled = v }
         if let v = over.calculatorEnabled { out.calculatorEnabled = v }
+        if let v = over.redactionToolsEnabled { out.redactionToolsEnabled = v }
         if let v = over.taskChecklistEnabled { out.taskChecklistEnabled = v }
         if let v = over.clarifyEnabled { out.clarifyEnabled = v }
         if let v = over.artifactsEnabled { out.artifactsEnabled = v }

@@ -355,6 +355,12 @@ extension HTTPHandler {
         // A turn of the owner's phone call: ask for a short, spoken reply,
         // after the conversation so the prompt keeps its cache (§6.5).
         let voiceCall = includeToolDetail && req.osaurus_voice_call == true
+        // The call's Privacy Filter choice (`auto` / `off`), from the owner's paired
+        // phone only: with or without `osaurus_voice_call`, and a bare loopback
+        // script that opens its own Secure Channel session doesn't qualify
+        // (`remoteReviewer`). Never saved: the next call asks again.
+        let callPrivacy: VoiceCallPrivacy? =
+            remoteReviewer ? req.osaurus_privacy.flatMap(VoiceCallPrivacy.init(rawValue:)) : nil
         // Read now: the connection's attribution is reset for its next request.
         let callerKeyNonce = inboundConnectionInfo()?.accessKeyId
         // Stable identity of an authenticated remote caller, for the debounced
@@ -583,6 +589,11 @@ extension HTTPHandler {
                     // tools are refused rather than shown as a card, unless
                     // the owner's paired phone can answer it.
                     let stream = try await ChatExecutionContext.$isExternalSurface.withValue(true) {
+                        // The owner's phone call may turn the Privacy Filter off, or its
+                        // review to auto-accept, for its own turns (upstream #3135, §6.5).
+                        // `callPrivacy` is nil unless `remoteReviewer` (master key over the
+                        // Secure Channel), so no other caller can switch the filter off.
+                        try await ChatExecutionContext.$voiceCallPrivacy.withValue(callPrivacy) {
                         try await ChatExecutionContext.$hasRemoteReviewer.withValue(remoteReviewer) {
                         try await ChatExecutionContext.$currentAgentId.withValue(agentId) {
                             try await ChatExecutionContext.$currentSessionId.withValue(sessionKey) {
@@ -596,6 +607,7 @@ extension HTTPHandler {
                                     }
                                 }
                             }
+                        }
                         }
                         }
                     }

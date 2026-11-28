@@ -785,6 +785,10 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     /// agents whose job involves numbers (finance, budgets, data analysis)
     /// enable it.
     public var calculatorEnabled: Bool
+    /// `detect_pii` / `redact_file` in host-folder chats: per-agent opt-in
+    /// (upstream #3307, "Redaction Tools"). Default off. They run the rule
+    /// engine on this Mac only; nothing is sent anywhere.
+    public var redactionToolsEnabled: Bool
     /// Per-agent gate for the `todo` checklist and its `complete` closer
     /// (upstream #3307). Default on.
     public var taskChecklistEnabled: Bool
@@ -866,6 +870,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         renderChartEnabled: Bool = false,
         searchMemoryEnabled: Bool = false,
         calculatorEnabled: Bool = false,
+        redactionToolsEnabled: Bool = false,
         taskChecklistEnabled: Bool = true,
         clarifyEnabled: Bool = true,
         artifactsEnabled: Bool = true,
@@ -914,6 +919,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         self.renderChartEnabled = renderChartEnabled
         self.searchMemoryEnabled = searchMemoryEnabled
         self.calculatorEnabled = calculatorEnabled
+        self.redactionToolsEnabled = redactionToolsEnabled
         self.taskChecklistEnabled = taskChecklistEnabled
         self.clarifyEnabled = clarifyEnabled
         self.artifactsEnabled = artifactsEnabled
@@ -940,6 +946,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         // Agents written before the toggles existed: the specialist tool
         // decodes to off, the agent-loop tools keep their always-on past.
         calculatorEnabled = try c.decodeIfPresent(Bool.self, forKey: .calculatorEnabled) ?? false
+        redactionToolsEnabled = try c.decodeIfPresent(Bool.self, forKey: .redactionToolsEnabled) ?? false
         taskChecklistEnabled = try c.decodeIfPresent(Bool.self, forKey: .taskChecklistEnabled) ?? true
         clarifyEnabled = try c.decodeIfPresent(Bool.self, forKey: .clarifyEnabled) ?? true
         artifactsEnabled = try c.decodeIfPresent(Bool.self, forKey: .artifactsEnabled) ?? true
@@ -986,6 +993,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         case renderChartEnabled
         case searchMemoryEnabled
         case calculatorEnabled
+        case redactionToolsEnabled
         case taskChecklistEnabled
         case clarifyEnabled
         case artifactsEnabled
@@ -1024,6 +1032,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         try c.encode(renderChartEnabled, forKey: .renderChartEnabled)
         try c.encode(searchMemoryEnabled, forKey: .searchMemoryEnabled)
         try c.encode(calculatorEnabled, forKey: .calculatorEnabled)
+        try c.encode(redactionToolsEnabled, forKey: .redactionToolsEnabled)
         try c.encode(taskChecklistEnabled, forKey: .taskChecklistEnabled)
         try c.encode(clarifyEnabled, forKey: .clarifyEnabled)
         try c.encode(artifactsEnabled, forKey: .artifactsEnabled)

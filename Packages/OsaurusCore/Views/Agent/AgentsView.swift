@@ -1870,6 +1870,7 @@ struct AgentDetailView: View {
                 settings.taskChecklistEnabled,
                 settings.clarifyEnabled,
                 settings.calculatorEnabled,
+                settings.redactionToolsEnabled,
                 settings.searchMemoryEnabled,
                 settings.selfSchedulingEnabled,
                 dbEnabled,
@@ -2327,7 +2328,7 @@ struct AgentDetailView: View {
         )
 
         // Per-agent built-in tool switches (upstream #3307): a lean surface
-        // by default, specialist tools opt in. Redaction Tools are not on Intel.
+        // by default, specialist tools opt in.
         if agent.id != Agent.defaultId {
             AgentDetailSection(title: L("Built-in Tools"), icon: "wrench.and.screwdriver") {
                 abilityToggleRow(
@@ -2337,6 +2338,16 @@ struct AgentDetailView: View {
                     isOn: Binding(
                         get: { currentAgent.settings.calculatorEnabled },
                         set: { enabled in setAgentToolSetting(\.calculatorEnabled, enabled) }
+                    ),
+                    destination: nil
+                )
+                abilityToggleRow(
+                    title: "Redaction Tools",
+                    description: "Find and mask names, emails, phone numbers, and other personal data in files of the working folder.",
+                    icon: "eye.slash",
+                    isOn: Binding(
+                        get: { currentAgent.settings.redactionToolsEnabled },
+                        set: { enabled in setAgentToolSetting(\.redactionToolsEnabled, enabled) }
                     ),
                     destination: nil
                 )
@@ -5916,6 +5927,7 @@ struct AgentDetailView: View {
                 searchMemoryEnabled: current.settings.searchMemoryEnabled,
                 // Written directly by the Built-in Tools switches (#3307).
                 calculatorEnabled: current.settings.calculatorEnabled,
+                redactionToolsEnabled: current.settings.redactionToolsEnabled,
                 taskChecklistEnabled: current.settings.taskChecklistEnabled,
                 clarifyEnabled: current.settings.clarifyEnabled,
                 artifactsEnabled: current.settings.artifactsEnabled

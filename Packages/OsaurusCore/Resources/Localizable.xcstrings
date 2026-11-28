@@ -21915,6 +21915,34 @@
         }
       }
     },
+    "Find and mask names, emails, phone numbers, and other personal data in files of the working folder." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Findet und maskiert Namen, E-Mail-Adressen, Telefonnummern und andere persönliche Daten in Dateien des Arbeitsordners."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查找并遮盖工作文件夹中文件里的姓名、电子邮件、电话号码和其他个人数据。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "작업 폴더 안 파일에서 이름, 이메일, 전화번호 등 개인 정보를 찾아 가려요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Находит и маскирует имена, адреса почты, номера телефонов и другие личные данные в файлах рабочей папки."
+          }
+        }
+      }
+    },
     "Find and read documents in NetDocuments" : {
       "localizations" : {
         "de" : {
@@ -41747,6 +41775,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已脫敏"
+          }
+        }
+      }
+    },
+    "Redaction Tools" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schwärzungswerkzeuge"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "脱敏工具"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "가림 도구"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Инструменты скрытия данных"
           }
         }
       }

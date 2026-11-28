@@ -19,8 +19,11 @@
 //  chat; see `usesLeanPath`.
 //
 //  Not here: Secret handling, Self-improvement and the sandbox discovery
-//  ladder are sandbox-only (no containers on Intel); Bulk edits names
-//  `redact_file` / `detect_pii` and lands with `W-privacy-filter`. Intel
+//  ladder are sandbox-only (no containers on Intel). Bulk edits (upstream
+//  `bulkEditGuidance`) is not rendered: upstream's final Classic appends it
+//  only in a branch no chat reaches (a folder chat takes the lean path), and
+//  its redaction steering is `SystemPromptTemplates.folderRedactionLine`,
+//  shown when `redact_file` is callable (W-privacy-filter stage 5). Intel
 //  doesn't size models by context class, so the compact variants (upstream:
 //  small local windows) are never chosen.
 //

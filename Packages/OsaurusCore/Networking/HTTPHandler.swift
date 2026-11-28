@@ -240,8 +240,13 @@ struct ChatCompletionRequest: Codable, Sendable {
     /// reply is spoken, so the run asks the model for a short, plain answer,
     /// placed after the conversation and never saved with it (§6.5).
     var osaurus_voice_call: Bool? = nil
-    // Upstream's `osaurus_privacy` (a call's Privacy Filter choice) comes
-    // with `W-privacy-filter`.
+    /// Osaurus Connect: the owner's choice for the Privacy Filter on this turn
+    /// of a voice call, `auto` (every detection redacted, no review) or `off`
+    /// (sent as written), made on the phone as the call starts. Honoured only
+    /// from the owner's paired phone (master key over the Secure Channel);
+    /// anything else, or any other value, leaves the filter as configured
+    /// (upstream #3135, §6.5).
+    var osaurus_privacy: String? = nil
 
     private enum CodingKeys: String, CodingKey {
         case model, messages, stream, temperature, max_tokens, top_p
@@ -252,7 +257,7 @@ struct ChatCompletionRequest: Codable, Sendable {
 
     /// Decoded only (upstream): the phone's fields never reach a provider.
     private enum OsaurusCodingKeys: String, CodingKey {
-        case osaurus_session_id, osaurus_create_session, osaurus_run_id, osaurus_voice_call
+        case osaurus_session_id, osaurus_create_session, osaurus_run_id, osaurus_voice_call, osaurus_privacy
     }
 
     var ttftTrace: TTFTTrace? = nil
@@ -282,6 +287,7 @@ extension ChatCompletionRequest {
         osaurus_create_session = try osaurus.decodeIfPresent(Bool.self, forKey: .osaurus_create_session)
         osaurus_run_id = try osaurus.decodeIfPresent(String.self, forKey: .osaurus_run_id)
         osaurus_voice_call = try osaurus.decodeIfPresent(Bool.self, forKey: .osaurus_voice_call)
+        osaurus_privacy = try osaurus.decodeIfPresent(String.self, forKey: .osaurus_privacy)
     }
 }
 

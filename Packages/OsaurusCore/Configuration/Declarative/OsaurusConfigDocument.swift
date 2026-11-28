@@ -345,6 +345,7 @@ public struct AgentCapabilitiesEntry: Codable, Equatable, Sendable {
     /// `calculate` (exact arithmetic) on this agent.
     public var calculatorEnabled: Bool?
     /// `detect_pii` / `redact_file` in this agent's host-folder chats.
+    public var redactionToolsEnabled: Bool?
     /// `todo` + `complete` on this agent.
     public var taskChecklistEnabled: Bool?
     /// `clarify` on this agent.
@@ -370,6 +371,7 @@ public struct AgentCapabilitiesEntry: Codable, Equatable, Sendable {
         case relayEnabled = "relay_enabled"
         case appleApps = "apple_apps"
         case calculatorEnabled = "calculator_enabled"
+        case redactionToolsEnabled = "redaction_tools_enabled"
         case taskChecklistEnabled = "task_checklist_enabled"
         case clarifyEnabled = "clarify_enabled"
         case artifactsEnabled = "artifacts_enabled"

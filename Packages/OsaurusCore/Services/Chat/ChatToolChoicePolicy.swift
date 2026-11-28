@@ -13,7 +13,56 @@ enum ChatToolChoicePolicy {
         guard !tools.isEmpty else { return nil }
         guard attempt == 1 else { return .auto }
 
+        // Deterministic redaction routing (upstream #2474): prose steering alone
+        // does not reliably move small models off the read-then-script reflex
+        // (observed live upstream: a 9B model ignored `redact_file` twice and
+        // hand-rolled a catastrophic name regex). When the request pairs a
+        // redaction verb with a PII noun and `redact_file` is offered, force it
+        // for the first call; the loop returns to `.auto` on the next attempt.
+        // `redact_file` is offered only to an agent with Redaction Tools on.
+        if containsRedactionIntent(text: userText.lowercased()),
+            !containsNegatedToolIntent(userText.lowercased()),
+            tools.contains(where: { $0.function.name == "redact_file" })
+        {
+            return .function(
+                .init(type: "function", function: .init(name: "redact_file"))
+            )
+        }
+
         return requiresToolCall(tools: tools, userText: userText) ? .required : .auto
+    }
+
+    /// A redaction-shaped request, two-tier to keep false positives from
+    /// mutating files (a forced `redact_file` WRITES on a wrong guess; upstream
+    /// observed "replace the column names ... with lowercase" forcing the tool):
+    ///  - strong verbs (redact / mask / anonymize / scrub) pair with any
+    ///    PII noun,
+    ///  - weak verbs (replace / remove) need an unambiguous PII noun, or
+    ///    an ambiguous one ("names", "addresses": also everyday
+    ///    code/data vocabulary) PLUS an explicit redaction signal such as
+    ///    a "[redacted..." placeholder or the word "placeholder".
+    static func containsRedactionIntent(text: String) -> Bool {
+        let strongVerbs = ["redact", "mask", "anonymize", "anonymise", "scrub"]
+        let weakVerbs = ["replace", "remove"]
+        let strongNouns = [
+            "emails", "e-mails", "email address", "email addresses", "phone number",
+            "phone numbers", "pii", "personal information", "personal info", "personal data",
+            "account number", "account numbers", "sensitive data", "sensitive information",
+            "sensitive values",
+        ]
+        let ambiguousNouns = ["names", "addresses"]
+        let redactionSignals = ["[redacted", "placeholder"]
+
+        let hasStrongNoun = strongNouns.contains(where: { text.contains($0) })
+        let hasAmbiguousNoun = ambiguousNouns.contains(where: { text.contains($0) })
+        guard hasStrongNoun || hasAmbiguousNoun else { return false }
+
+        if strongVerbs.contains(where: { text.contains($0) }) {
+            return true
+        }
+        guard weakVerbs.contains(where: { text.contains($0) }) else { return false }
+        if hasStrongNoun { return true }
+        return redactionSignals.contains(where: { text.contains($0) })
     }
 
     private static func requiresToolCall(tools: [Tool], userText: String) -> Bool {
@@ -46,6 +95,15 @@ enum ChatToolChoicePolicy {
             "do not call",
             "don't call",
             "dont call",
+            "without calling",
+            "do not run",
+            "don't run",
+            "dont run",
+            "without running",
+            "do not invoke",
+            "don't invoke",
+            "dont invoke",
+            "without invoking",
         ].contains { text.contains($0) }
     }
 

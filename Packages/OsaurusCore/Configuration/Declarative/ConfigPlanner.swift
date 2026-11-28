@@ -1368,6 +1368,9 @@ enum ConfigPlanner {
             "calculator_enabled", desired: caps.calculatorEnabled,
             current: agent.settings.calculatorEnabled, into: &changes)
         diff(
+            "redaction_tools_enabled", desired: caps.redactionToolsEnabled,
+            current: agent.settings.redactionToolsEnabled, into: &changes)
+        diff(
             "task_checklist_enabled", desired: caps.taskChecklistEnabled,
             current: agent.settings.taskChecklistEnabled, into: &changes)
         diff(
