@@ -3930,3 +3930,13 @@ Image / video subagent kinds (`c3c401633`). Not in candidate 71. **Costs money:*
 - [ ] "Replace the column names in data.csv with lowercase" and "Explain how to redact emails without running any tool": not forced.
 - [ ] DeepSeek or a Claude 5.x model with the redaction prompt: no 400 error.
 - [ ] "Read notes.txt" in a folder chat: a tool is called first (upstream's `required` rule); a plain "hello" is normal.
+
+## Spreadsheet and slide plugins (2026-11-28)
+
+`osaurus.xlsx` / `osaurus.pptx` for Intel (`5d6890b14`). Not in candidate 71; needs the signed plugin publish first (`INTEL_PLUGIN_PUBLISHING.md`). Any build with the signed installer.
+
+- [ ] Settings → Tools & MCP → Plugins lists XLSX and PPTX; both install with no load error on Ventura.
+- [ ] Chat with the Document Builder skill available: "Make a spreadsheet of three fruits and prices": the file card appears and the .xlsx opens in Numbers.
+- [ ] "Make a three-slide deck about cats": the .pptx opens in Keynote with three slides.
+- [ ] "Change the price of apples to 2 in that spreadsheet": the existing file is edited in place (formatting kept), not replaced by `save_xlsx`.
+

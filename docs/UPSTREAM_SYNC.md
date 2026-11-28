@@ -430,6 +430,23 @@ mdat and live-folder checks).
   executable x86_64`, `minos 13.0`, `osaurus-cli version` runs. Unlike the
   plugin host helper, a missing CLI stops the build. Closes the `W-cli-build`
   follow-up; first in the build after 71.
+- **Document Builder plugins (2026-11-28, `5d6890b14`).** Upstream's built-in
+  Document Builder skill (on Intel unchanged since #2050) sends the model to the
+  `osaurus.xlsx` and `osaurus.pptx` plugins, which Intel's plugin repo lacked.
+  Both are now vendored with the plugin SDK under `intel-plugins/xlsx`,
+  `intel-plugins/pptx`, `intel-plugins/swift-sdk` (upstream SHAs and every
+  change in each `INTEL.md`). Found: `.macOS(.v15)` is only a declaration (no
+  14/15 API use), the SDK ABI is version 6 like Intel's host, but each dylib's
+  embedded manifest said `min_macos` 15.0, which Intel's `PluginManager` would
+  refuse on Ventura: changed to 13.0. Builds x86_64, minos 13.0, system-only
+  linkage; upstream tests pass on arm64 (xlsx 101, pptx 82, SDK 24; the x86_64
+  test helper can't run); a Rosetta C driver loaded both dylibs and ran
+  `create_xlsx` / `create_presentation`. `publish-signed.sh` builds SwiftPM
+  plugin folders, adds `SKILL.md` to the zip, creates a first spec, and has a
+  key-free `BUILD_ONLY=1` dry run; xlsx and pptx are in its default list. New
+  plugins get no `plugins.json` raw entry (builds up to 1.0.62 can't install
+  them). Needs Renée's signed publish, then a Rosy install
+  (`INTEL_PLUGIN_PUBLISHING.md`). No app code changed, so no gate run.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
