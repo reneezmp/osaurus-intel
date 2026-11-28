@@ -3892,3 +3892,12 @@ Upstream #2835 picker part (`8cab57439`). Not in candidate 71.
 - [ ] A custom agent with a working folder: no `detect_pii` / `redact_file` until Agents → Built-in Tools → "Redaction Tools" is on. The Default agent never has them.
 - [ ] "Redact the emails in note.txt": the file gets placeholders; `file_undo` restores it. A path like `../x` is refused.
 - [ ] Paired iPhone, filter on, cloud model: the call offers review / auto / off; the choice applies to that call only and the next call asks again.
+
+## Screen context chip in the composer (2026-11-27)
+
+Computer Use composer chip (`f0a49c7c4`). Not in candidate 71.
+
+- [ ] Agent with Computer Use and "Share screen context" on, Accessibility granted: a new chat shows a small viewfinder line with the app you were last using; it follows when you switch apps.
+- [ ] After the first message it disappears. With the option off, Computer Use off or Accessibility revoked: no chip and no macOS prompt.
+- [ ] The chip doesn't shift the composer row (sidebar open, and with voice input active it hides).
+- [ ] Settings → Computer Use → Screen context preview with the Privacy Filter on: Refresh on a window with a made-up email shows "~N items would be masked".

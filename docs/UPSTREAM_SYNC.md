@@ -375,6 +375,15 @@ mdat and live-folder checks).
   over the Secure Channel; nothing is saved. Bulk edits section and spoken
   numbers (#3135) were already Covered. Full suite on the rebased tree 7,029
   passed.
+- **Computer Use composer chip merged, 2026-11-27** (`f0a49c7c4`): "Screen context
+  from <app>" chip above the composer controls on an empty chat, only when the
+  agent has Computer Use and its screen-context option on and Accessibility is
+  already granted; read-only, reads `FrontmostAppTracker` and the cached
+  permission state (source guard: no capture, no request). Upstream's Mode 2
+  check left out (Intel has none). The preview regained upstream's "~N items
+  would be masked" line (rule layer). Intel already passed `isEmptyChat`, so
+  the stage 6 note that it lacked the signal was wrong. Full suite 7,033
+  passed. **Computer Use row complete.**
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

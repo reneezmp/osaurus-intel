@@ -331,7 +331,7 @@ Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
     `latestUserTurnSegments()` does and restore the note upstream shows.
   - **Intel adaptations.** (a) `ScreenContextPreview` drops the Privacy Filter
     note and masked-count code. (b) The per-agent option lives in the Abilities
-    tab (Intel has no Subagents tab), not `AgentsView`. (c) No composer
+    tab (Intel has no Subagents tab), not `AgentsView`. (c) (Done 2026-11-27, `f0a49c7c4`: chip ported; Intel already passed `isEmptyChat`, so the reason below was wrong.) No composer
     "Screen context from <app>" chip: `FloatingInputCard` has no empty-chat
     signal on Intel and the chip would need a `ChatContentView` change; the
     budget row and the preview cover it. (d) Not ported on purpose:
