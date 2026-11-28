@@ -408,6 +408,20 @@ mdat and live-folder checks).
   video Deny now refuses before asking for a quote. Local MLX parts (native
   image jobs, step/ETA, editing, Wan) Incompatible: a dimmed "On-device image
   model" row. Full suite 7,071 passed on `842bb53e6`. `W-subagents` complete.
+- **Forced tool choice merged, 2026-11-27** (`42088324c`, #3203, #2815):
+  `ForcedToolChoiceGate`, `ChatTaskIntent` and `ChatToolChoicePolicy.resolve`
+  on Intel's `ChatView` loop. **Found:** Intel's chat always sent
+  `tool_choice: auto` and never consulted the policy, so stage 5's redaction
+  forcing was unreachable; and `CloudChatEngine` runs the tool rounds itself and
+  re-sent the same `tool_choice` every round, so a new request flag
+  `toolChoiceFirstRoundOnly` (chat only, off for API callers) sends the choice
+  on round 1, then `auto`. The gate refuses other tools in that round; the
+  forced tool still goes through its approval. Providers that reject forced
+  choices (Claude 5.x, DeepSeek) get `auto` and no gate. **Visible change
+  (upstream's final behaviour):** a chat request that names an offered tool or
+  asks to read a file now sends `required` on its first round.
+  `containsCallableName` is now a word-boundary match (#2815). Full suite 7,102
+  passed.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

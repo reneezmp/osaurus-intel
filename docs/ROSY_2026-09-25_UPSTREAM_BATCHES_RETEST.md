@@ -3920,3 +3920,13 @@ Image / video subagent kinds (`c3c401633`). Not in candidate 71. **Costs money:*
 - [ ] A 5 s video: quote card; Approve shows a feed row with queue state and ETA; Stop mid-wait ends the row without error.
 - [ ] An unsupported duration: a clear error and no quote.
 - [ ] Abilities → Images & Video: "On-device image model" is dimmed with "requires Apple Silicon".
+
+## Forced first tool for redaction and named tools (2026-11-27)
+
+`ForcedToolChoiceGate` (`42088324c`). Not in candidate 71. Made-up data only.
+
+- [ ] Redaction Tools on, cloud model: "Redact the emails and phone numbers in note.txt": the first tool card is `redact_file`; later rounds use other tools freely. Ask/Deny on `redact_file` still shows its card.
+- [ ] Redaction Tools off, same prompt: no forcing.
+- [ ] "Replace the column names in data.csv with lowercase" and "Explain how to redact emails without running any tool": not forced.
+- [ ] DeepSeek or a Claude 5.x model with the redaction prompt: no 400 error.
+- [ ] "Read notes.txt" in a folder chat: a tool is called first (upstream's `required` rule); a plain "hello" is normal.

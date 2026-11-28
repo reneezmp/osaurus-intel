@@ -136,7 +136,7 @@ free-form secrets. The UI and manual say so.
   only builds it on a path no chat reaches (folder chats take the lean path);
   `folderRedactionLine` is the live steering.
 - 2026-11-27: stage 6 done (`127dd9f11`, see `UPSTREAM_SYNC.md`). All six stages
-  shipped. Open: `ForcedToolChoiceGate` (wire forced tool choice into Intel's
+  shipped. `ForcedToolChoiceGate` done (`42088324c`). Was open: `ForcedToolChoiceGate` (wire forced tool choice into Intel's
   `ChatView` tool loop, which always sends `auto`; check whether stage 5's
   `ChatToolChoicePolicy` forcing is reached at all), Rosy QA. Blocked-send
   wording vs toggle title: upstream doesn't align them either; left.
