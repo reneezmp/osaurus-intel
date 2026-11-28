@@ -6,7 +6,9 @@
 # dylib and install it into the Intel fork's isolated Tools dir
 # (~/.osaurus-intel/Tools/<plugin_id>/). Re-run after editing any plugin.
 #
-# A plugin dir qualifies if it has a manifest.json + exactly one *.c file.
+# A plugin dir qualifies if it has a manifest.json + exactly one *.c file, or
+# a manifest.json + Package.swift (xlsx, pptx: built with SwiftPM for x86_64,
+# macOS 13.0, against the vendored swift-sdk/; also installs SKILL.md).
 
 set -euo pipefail
 
@@ -17,6 +19,26 @@ for dir in "$HERE"/*/; do
     name="$(basename "$dir")"
     manifest="$dir/manifest.json"
     [ -f "$manifest" ] || continue
+
+    if [ -f "$dir/Package.swift" ]; then
+        plugin_id="$(/usr/bin/python3 -c "import json;print(json.load(open('$manifest'))['plugin_id'])")"
+        install_dir="$HOME/.osaurus-intel/Tools/$plugin_id"
+        echo "→ $name → $plugin_id (swift)"
+        swift_args=(build -c release --arch x86_64 --package-path "$dir"
+            -Xswiftc -target -Xswiftc x86_64-apple-macosx13.0)
+        arch -x86_64 /usr/bin/swift "${swift_args[@]}"
+        bin_path="$(arch -x86_64 /usr/bin/swift "${swift_args[@]}" --show-bin-path | tail -1)"
+        built=("$bin_path"/lib*.dylib)
+        [ "${#built[@]}" = "1" ] || { echo "   ✗ expected one dylib in $bin_path"; exit 1; }
+        cp "${built[0]}" "$dir/plugin.dylib"
+        codesign -s - -f "$dir/plugin.dylib"
+        mkdir -p "$install_dir"
+        cp "$dir/plugin.dylib" "$install_dir/plugin.dylib"
+        cp "$manifest" "$install_dir/manifest.json"
+        [ -f "$dir/SKILL.md" ] && cp "$dir/SKILL.md" "$install_dir/SKILL.md"
+        echo "   ✅ $(file "$install_dir/plugin.dylib" | sed 's/.*: //')"
+        continue
+    fi
 
     # shellcheck disable=SC2086
     src=$(ls "$dir"*.c 2>/dev/null || true)

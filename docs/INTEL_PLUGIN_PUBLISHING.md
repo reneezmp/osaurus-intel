@@ -41,12 +41,15 @@ Builds up to 1.0.62 keep installing from `plugins.json`.
 intel-plugins/publish-signed.sh ~/path/to/osaurus-intel-plugins
 ```
 
-Per plugin (`time`, `hello`, `fetch`, `memo` by default; `PLUGINS="..."` to
-choose) the script:
+Per plugin (`time`, `hello`, `fetch`, `memo`, `xlsx`, `pptx` by default;
+`PLUGINS="..."` to choose) the script:
 
 1. builds the dylib from `intel-plugins/<name>/` for **x86_64 with a macOS
-   13.0 minimum**, checks both, and ad-hoc signs it;
-2. zips it as `dist/<name>/<plugin_id>-<version>.zip`;
+   13.0 minimum**, checks both, and ad-hoc signs it (C plugins with clang,
+   `xlsx` and `pptx` with SwiftPM, see below);
+2. zips it as `dist/<name>/<plugin_id>-<version>.zip` (with `README.md`,
+   `CHANGELOG.md` and `SKILL.md` when the folder has them; the host loads a
+   plugin's `SKILL.md` from its install folder);
 3. signs the zip with minisign (legacy Ed25519, which is what Osaurus
    verifies; it asks for the key's password once per plugin) and verifies
    the signature with the public key;
@@ -58,6 +61,20 @@ choose) the script:
 
 Then review (`git -C <repo> diff`), commit and push the plugin repo.
 
+A plugin published for the first time (`xlsx`, `pptx`) has no
+`plugins/<name>.json` yet: the script writes one from the plugin's
+`manifest.json` (id, name, description, licence, tool summaries) and then adds
+the signed version entry as usual. It does not add them to `plugins.json`
+(the raw index only serves builds up to 1.0.62, which never knew these
+plugins).
+
+### Build only (dry run)
+
+`BUILD_ONLY=1 PLUGINS="xlsx pptx" intel-plugins/publish-signed.sh` builds,
+runs the arch / minos / dependency checks and leaves unsigned zips in
+`$OUT_DIR` (default `$TMPDIR/osaurus-intel-plugins-dryrun`). It needs no key
+and no plugin repo, and it touches nothing outside the scratch build dir.
+
 - **Don't run the plugin repo's `generate-index.sh` any more.** It rebuilds
   `plugins.json` from the spec's artifact URL, which is now the zip, and
   would point older builds at a file they can't load.
@@ -68,6 +85,54 @@ Then review (`git -C <repo> diff`), commit and push the plugin repo.
   it); its old spec entry stays unsigned, so the new installer refuses it.
 - Options: `MINISIGN_KEY`, `MINISIGN_PUB`, `RAW_BASE`, `PLUGINS`,
   `MIN_MACOS` (see the script header).
+
+## The document plugins `osaurus.xlsx` and `osaurus.pptx` (2026-11-28)
+
+Upstream's built-in Document Builder skill (and `FolderPluginHints`) send the
+model to these two first-party plugins, so Intel publishes them. They are
+Swift packages, vendored (not rewritten) from upstream:
+
+| Folder | Upstream | Commit |
+|---|---|---|
+| `intel-plugins/xlsx/` | `osaurus-ai/osaurus-xlsx` | `f69c93410ac3fa286cf35b1b04c1f859b9202323` |
+| `intel-plugins/pptx/` | `osaurus-ai/osaurus-pptx` | `399b57ee4eef0c96f500730e5b84b53bc15aab04` |
+| `intel-plugins/swift-sdk/` | `osaurus-ai/osaurus-plugin-sdk` 1.0.0 | `f5fac88621aa174531c0aac3c1d1dbbbd8142522` |
+
+Each folder's `INTEL.md` lists every Intel change. Short version: the package
+platform `.macOS(.v15)` -> `.v13` (a declaration only; no macOS 14/15 API is
+used), the SDK dependency becomes the vendored path package, and the embedded
+manifest's `min_macos` `15.0` -> `13.0`. The last one matters: the Intel host
+refuses a plugin whose manifest needs a newer macOS than the running one, so
+an unmodified upstream build would show a load error on Ventura even if the
+dylib itself loaded. Why they work on Intel: the SDK's C ABI is the same
+version 6 `osaurus_plugin.h` the Intel host ships, both entry symbols are
+exported, and the dylib links only `/usr/lib/swift` and system frameworks
+(no back-deploy libraries to ship; the one weak reference to
+`swift_coroFrameAlloc` is guarded by a null check that falls back to `malloc`).
+
+How the script builds them: `arch -x86_64 /usr/bin/swift build -c release
+--arch x86_64 -Xswiftc -target -Xswiftc x86_64-apple-macosx13.0` in a scratch
+dir, then checks `lipo` = x86_64, `vtool` minos = 13.0, that exactly one
+`lib*.dylib` exists, that it links only `/usr/lib/` and `/System/Library/`
+libraries, and that `manifest.json`'s version and `min_macos` appear in the
+manifest string compiled into the dylib. Checked 2026-11-28 on the build Mac
+(Xcode 27.2): both build, `file` says x86_64, `minos 13.0`, and the x86_64
+dylibs loaded under Rosetta through a small C driver that calls
+`osaurus_plugin_entry_v2` / `osaurus_plugin_entry`, `get_manifest` and `invoke`
+(`create_xlsx`, `list_sheets`, `xlsx_to_csv`, `create_presentation` returned
+correct JSON). Package tests (xlsx 101, pptx 82, SDK 24) pass natively on the
+build Mac; the Xcode 27 test helper is arm64 only
+(`docs/TEST_STORAGE_SAFETY.md`), so they do not run as x86_64. Not yet tested:
+an install on Rosy (Ventura). Do that after publishing: install `XLSX` and
+`PPTX` from the Plugins tab, ask for a spreadsheet and a deck, and confirm the
+files open.
+
+What Renée must do: run the publish script with the default list (or
+`PLUGINS="xlsx pptx"`), review `git diff` in the plugin repo (two new
+`plugins/*.json` and `dist/*` folders), commit and push. Later releases: bump
+`version` in `intel-plugins/<name>/manifest.json` **and** in the manifest
+string in `Sources/osaurus_<name>/Plugin.swift` (the script refuses a
+mismatch).
 
 ## Why the rebuild matters now (found 2026-11-06)
 
