@@ -135,7 +135,11 @@ free-form secrets. The UI and manual say so.
   `ForcedToolChoiceGate` (CloudChatEngine hook). Bulk edits section: upstream
   only builds it on a path no chat reaches (folder chats take the lean path);
   `folderRedactionLine` is the live steering.
-- Next: stage 6 (`FrameScrubber` `.pii` hook, Insights Privacy wording, manual).
+- 2026-11-27: stage 6 done (`127dd9f11`, see `UPSTREAM_SYNC.md`). All six stages
+  shipped. Open: `ForcedToolChoiceGate` (wire forced tool choice into Intel's
+  `ChatView` tool loop, which always sends `auto`; check whether stage 5's
+  `ChatToolChoicePolicy` forcing is reached at all), Rosy QA. Blocked-send
+  wording vs toggle title: upstream doesn't align them either; left.
 
 ## Waiting consumer (2026-11-27)
 

@@ -384,6 +384,20 @@ mdat and live-folder checks).
   would be masked" line (rule layer). Intel already passed `isEmptyChat`, so
   the stage 6 note that it lacked the signal was wrong. Full suite 7,033
   passed. **Computer Use row complete.**
+- **Privacy filter stage 6 merged, 2026-11-27** (`127dd9f11`): Computer Use's
+  `FrameScrubber` `.pii` branch on the rule-only engine (detected sub-boxes;
+  whole line when Vision gives no sub-range geometry; fail closed; the
+  model pass finds nothing on Intel, so names, addresses and dates stay
+  readable and the new toggle caption says so). "Mask only detected sensitive
+  text" toggle back in Cloud vision (off; default stays mask-all-text);
+  Permission Doctor shows "attention" for it, as upstream. Highlights in
+  thinking panes and activity groups. Phone `GET`/`POST /privacy/reviews`
+  (owner over the Secure Channel only; plaintext 426). Insights wording kept
+  (Intel's switch lives in Data & Storage). **Needs work:** `ForcedToolChoiceGate`
+  (Intel's `ChatView` loop always sends `tool_choice: auto` and never calls
+  `ChatToolChoicePolicy.resolve`, so stage 5's forced `redact_file` only
+  applies where that policy is consulted). Full suite 7,046 passed.
+  **W-privacy-filter complete** except that gate and Rosy QA.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

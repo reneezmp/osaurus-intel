@@ -3901,3 +3901,12 @@ Computer Use composer chip (`f0a49c7c4`). Not in candidate 71.
 - [ ] After the first message it disappears. With the option off, Computer Use off or Accessibility revoked: no chip and no macOS prompt.
 - [ ] The chip doesn't shift the composer row (sidebar open, and with voice input active it hides).
 - [ ] Settings → Computer Use → Screen context preview with the Privacy Filter on: Refresh on a window with a made-up email shows "~N items would be masked".
+
+## Privacy filter: Computer Use masking, highlights, phone reviews (2026-11-27)
+
+`W-privacy-filter` stage 6 (`127dd9f11`). Not in candidate 71.
+
+- [ ] Settings → Computer Use → Cloud vision: "Mask only detected sensitive text" is off; turning it on changes the caption and the diagnostics row to "attention".
+- [ ] Toggle on, cloud vision allowed: a Computer Use task on a window with a made-up email covers only the email; the feed says "masked N sensitive region(s)". Toggle off: all text is covered.
+- [ ] Filter on: a reply that restores an email shows highlights in the reply, in an expanded thinking block and inside an activity group.
+- [ ] Paired iPhone: a privacy review can be answered from the phone (cancel one, redact one).
