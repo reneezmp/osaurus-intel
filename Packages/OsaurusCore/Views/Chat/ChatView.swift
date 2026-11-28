@@ -1665,31 +1665,7 @@ final class ChatSession: ObservableObject {
         let titleModel =
             ChatConfiguration.shared.coreModelName ?? auxiliaryChatModel ?? "deepseek-flash"
         let engine = chatEngineFactory()
-        let sys = ChatMessage(
-            role: "system",
-            content:
-                "You write very short chat titles. Reply with ONLY a 3–6 word title in Title "
-                + "Case — no quotes, no trailing punctuation, no preamble.")
-        let usr = ChatMessage(
-            role: "user",
-            content:
-                "First user message:\n\(userText)\n\nAssistant reply:\n"
-                + "\(String(assistantText.prefix(800)))\n\nTitle:")
-        let req = ChatCompletionRequest(
-            model: titleModel,
-            messages: [sys, usr],
-            temperature: 0.3,
-            max_tokens: 24,
-            stream: false,
-            top_p: nil,
-            frequency_penalty: nil,
-            presence_penalty: nil,
-            stop: nil,
-            n: nil,
-            tools: nil,
-            tool_choice: nil,
-            session_id: nil
-        )
+        let req = Self.titleRequest(model: titleModel, userText: userText, assistantText: assistantText)
         print("[ChatSession] generating title via core model '\(titleModel)' for session \(sessionId)")
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1742,31 +1718,8 @@ final class ChatSession: ObservableObject {
 
         let titleModel = ChatConfiguration.shared.coreModelName ?? auxiliaryChatModel ?? "deepseek-flash"
         let engine = chatEngineFactory()
-        let sys = ChatMessage(
-            role: "system",
-            content:
-                "You write very short chat titles. Reply with ONLY a 3–6 word title in Title "
-                + "Case — no quotes, no trailing punctuation, no preamble.")
-        let usr = ChatMessage(
-            role: "user",
-            content:
-                "First user message:\n\(userTurn.content)\n\nAssistant reply:\n"
-                + "\(String(assistantText.prefix(800)))\n\nTitle:")
-        let req = ChatCompletionRequest(
-            model: titleModel,
-            messages: [sys, usr],
-            temperature: 0.3,
-            max_tokens: 24,
-            stream: false,
-            top_p: nil,
-            frequency_penalty: nil,
-            presence_penalty: nil,
-            stop: nil,
-            n: nil,
-            tools: nil,
-            tool_choice: nil,
-            session_id: nil
-        )
+        let req = Self.titleRequest(
+            model: titleModel, userText: userTurn.content, assistantText: assistantText)
         // Loading toast while the model thinks, updated in place to the
         // success/error outcome.
         let toastId = ToastManager.shared.loadingLocalized("Generating Title…")
@@ -1805,6 +1758,47 @@ final class ChatSession: ObservableObject {
                 )
             }
         }
+    }
+
+    /// Upstream `ChatTitleService.maxTokens`: a title is a handful of words,
+    /// but the budget must survive a thinking model that reasons before
+    /// answering (upstream saw 24 tokens come back empty).
+    static let titleMaxTokens = 96
+
+    /// The one-shot title request, shared by the automatic path and `/title`.
+    /// Thinking is switched off for models that have the option, as upstream.
+    static func titleRequest(model: String, userText: String, assistantText: String)
+        -> ChatCompletionRequest
+    {
+        let sys = ChatMessage(
+            role: "system",
+            content:
+                "You write very short chat titles. Reply with ONLY a 3–6 word title in Title "
+                + "Case — no quotes, no trailing punctuation, no preamble.")
+        let usr = ChatMessage(
+            role: "user",
+            content:
+                "First user message:\n\(userText)\n\nAssistant reply:\n"
+                + "\(String(assistantText.prefix(800)))\n\nTitle:")
+        var request = ChatCompletionRequest(
+            model: model,
+            messages: [sys, usr],
+            temperature: 0.3,
+            max_tokens: titleMaxTokens,
+            stream: false,
+            top_p: nil,
+            frequency_penalty: nil,
+            presence_penalty: nil,
+            stop: nil,
+            n: nil,
+            tools: nil,
+            tool_choice: nil,
+            session_id: nil
+        )
+        if let stored = ModelProfileRegistry.thinkingStoredOption(for: model, enabled: false) {
+            request.modelOptions = [stored.id: stored.value]
+        }
+        return request
     }
 
     /// Normalize a model-returned title: strip quotes/newlines, trim, cap length.

@@ -460,6 +460,20 @@ mdat and live-folder checks).
   `needsSetup` when an applied edit opens a gap, as upstream. The
   `.symbolEffect` icon transition (macOS 14) is dropped. Full suite 7111,
   mdat unchanged, no live hits. Not seen on screen.
+- **Rosy build 72, round 1 (2026-11-28).** Passed: opens with data intact,
+  network exposure and relay off, chat streams, Stop keeps the partial text.
+  Keychain asks once per item for about five items (the owner: long-standing
+  behaviour). Codex not testable (no access). `file_write` is not listed under
+  Tools & MCP → All Tools without a folder chat; its policy is Settings → Chat
+  → Folder Tool Permissions → Write Files. Two defects, fixed after 72:
+  (1) Tools & MCP filter and policy pills had white text on white (Paper
+  theme): Ventura ignores a custom `ButtonStyle` on `.menuStyle(.button)`, so
+  `MenuPill` now draws the capsule in its label with a `.plain` menu, and
+  `IntelVenturaControlGuardTests` bans that menu style. (2) A chat kept its
+  first message as title: Intel's title request allowed 24 tokens, which
+  upstream found empty with thinking models; `ChatSession.titleRequest` now
+  sends upstream's 96 and switches thinking off where the model has the option.
+  The cause on Rosy is inferred, not observed (model unknown). Full suite 7114.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

@@ -3952,3 +3952,10 @@ Image / video subagent kinds (`c3c401633`). Not in candidate 71. **Costs money:*
 - [ ] A library template's More menu → Rename… renames it; built-in templates have no Rename.
 - [ ] Settings → Server: Expose to Network and the relay are still off after creating an agent from any template.
 
+## Build 72 round 1 fixes (2026-11-28)
+
+Not in candidate 72.
+
+- [ ] Paper theme, Tools & MCP → All Tools: "All Sources", "All Statuses" and each row's "Allowed" pill have readable text, and each opens its menu. Same for the two filters under Advanced diagnostics.
+- [ ] New chat with the model that kept the first message as title: a short generated title appears after the first reply.
+

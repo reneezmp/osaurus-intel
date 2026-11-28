@@ -53,27 +53,14 @@ enum ToolPolicyStyle {
 
 // MARK: - Menu Pill
 
-/// Button style that wraps a menu label in a capsule without touching the
-/// label's own layout. A custom `ButtonStyle` passes `configuration.label`
-/// through verbatim, so the label's spacing/padding survive — unlike
-/// `.bordered`, which re-lays out the label and ignores its `HStack` spacing.
-private struct PillButtonStyle: ButtonStyle {
-    let fill: Color
-    let stroke: Color
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(Capsule().fill(fill))
-            .overlay(Capsule().stroke(stroke, lineWidth: 1))
-            .contentShape(Capsule())
-            .opacity(configuration.isPressed ? 0.65 : 1)
-    }
-}
-
 /// A pill-shaped dropdown whose visible chrome is a fully custom `label`. It is
-/// a real `Menu` (so clicking works) rendered as a button with `PillButtonStyle`
-/// and the system menu indicator hidden — the label owns all spacing, padding,
-/// background, and colors.
+/// a real `Menu` (so clicking works) with the system menu indicator hidden; the
+/// label owns all spacing, padding and colors.
+///
+/// Intel: upstream draws the capsule from a custom `ButtonStyle` on
+/// `.menuStyle(.button)`. Ventura ignores that style on a `Menu` and drew a
+/// native white button with white text (Rosy, build 72), so the capsule is part
+/// of the label and the menu is `.plain`, as `ThemedMenuPicker` does.
 struct MenuPill<MenuContent: View, Label: View>: View {
     let fill: Color
     let stroke: Color
@@ -97,9 +84,11 @@ struct MenuPill<MenuContent: View, Label: View>: View {
             menuContent()
         } label: {
             label()
+                .background(Capsule().fill(fill))
+                .overlay(Capsule().stroke(stroke, lineWidth: 1))
+                .contentShape(Capsule())
         }
-        .menuStyle(.button)
-        .buttonStyle(PillButtonStyle(fill: fill, stroke: stroke))
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
     }
 }

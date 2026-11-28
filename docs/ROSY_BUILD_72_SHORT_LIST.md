@@ -47,7 +47,8 @@ new one in).
 
 - [ ] New chat on a Router model: after the title appears, Settings → Credits
       shows the title request and the balance moves.
-- [ ] Set `file_write` to Ask, then ask for two files at once ("create a.txt
+- [ ] Settings → Chat → Folder Tool Permissions → **Write Files** → Ask. Then,
+      in a chat with a working folder, ask for two files at once ("create a.txt
       and b.txt"). Deny the first card: no second card appears and nothing is
       written.
 

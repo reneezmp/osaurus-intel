@@ -68,6 +68,20 @@ struct IntelVenturaControlGuardTests {
         #expect(offenders.isEmpty, "use ThemedSegmentedPicker / ThemedBorderedButtonStyle: \(offenders)")
     }
 
+    @Test("Compiled views don't use the button menu style")
+    func noButtonMenuStyle() throws {
+        // Ventura ignores a custom button style under `.menuStyle(.button)` and
+        // draws white text on a white button (Rosy, build 72).
+        let offenders = try Self.compiledSources()
+            .filter { source in
+                source.text.split(separator: "\n").contains {
+                    $0.trimmingCharacters(in: .whitespaces).hasPrefix(".menuStyle(.button)")
+                }
+            }
+            .map(\.path)
+        #expect(offenders.isEmpty, "use a `.plain` Menu with the chrome in its label: \(offenders)")
+    }
+
     @Test("Compiled SF Symbol names exist on macOS 13")
     func symbolsExistOnVentura() throws {
         let tablePath =
