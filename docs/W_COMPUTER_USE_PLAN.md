@@ -321,7 +321,8 @@ Evals (`Packages/OsaurusEvals`) are not part of Intel's package; skipped.
     permission request exists in the distiller, the freeze or the preview (source
     guards). The global Settings card's preview captures only on Refresh
     (`autoCaptureOnAppear: false`); the per-agent popover captures when opened.
-  - **What Intel cannot do.** The text block is **not scrubbed**: upstream runs
+  - **Update 2026-11-27:** since `W-privacy-filter` stage 3 (`914bd0a55`) the block rides the user turn and is scrubbed with it when the filter is on; the preview note says so. The paragraph below is the stage 6 state.
+  - **What Intel could not do (stage 6).** The text block was **not scrubbed**: upstream runs
     it through the Privacy Filter before a cloud send, and Intel has none
     (`W-privacy-filter`). `CloudVisionConsent` and `FrameScrubber` guard
     screenshots only; screen context has no image, so they do not apply, and the
