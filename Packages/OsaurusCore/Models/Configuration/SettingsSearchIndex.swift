@@ -219,6 +219,148 @@ public enum SettingsSearchIndex {
             id: "privacy.activityLog.openInsights", tab: .settings, section: "Advanced",
             title: "Review Activity in Insights",
             keywords: ["open insights", "review activity", "audit", "export log", "verify chain"]),
+        // MARK: Privacy (W-privacy-filter stage 4; Activity Log entries above stay under General)
+        .init(
+            id: "privacy.tab",
+            tab: .privacy,
+            title: "Privacy",
+            keywords: ["redaction", "filter", "scrub", "mask", "sensitive data", "custom rules", "pii"]
+        ),
+        .init(
+            id: "privacy.filter.enabled",
+            tab: .privacy,
+            section: "Filter",
+            title: "Scrub PII before sending to cloud providers",
+            keywords: ["privacy filter", "scrub", "redact", "pii", "cloud", "enable filter"],
+            subTab: "overview"
+        ),
+        .init(
+            id: "privacy.filter.aiDetection",
+            tab: .privacy,
+            section: "Filter",
+            title: "AI detection (on-device model)",
+            keywords: ["ai detection", "on-device model", "names", "addresses", "secrets"],
+            disambiguation: "Shown as incompatible on this Mac (needs Apple Silicon); pattern rules still work.",
+            subTab: "overview"
+        ),
+        .init(
+            id: "privacy.filter.skipCode",
+            tab: .privacy,
+            section: "Filter",
+            title: "Skip Code Blocks",
+            keywords: ["code blocks", "skip code", "fenced code", "inline code"],
+            subTab: "overview"
+        ),
+        .init(
+            id: "privacy.filter.alwaysApprove",
+            tab: .privacy,
+            section: "Filter",
+            title: "Always Approve by Default",
+            keywords: ["always approve", "review sheet", "skip review", "auto approve redaction"],
+            subTab: "overview"
+        ),
+        .init(
+            id: "privacy.filter.providers",
+            tab: .privacy,
+            section: "Per-Provider",
+            title: "Per-Provider",
+            keywords: ["per provider", "provider override", "filter per provider", "exempt provider"],
+            subTab: "overview"
+        ),
+        .init(
+            id: "privacy.filter.forget",
+            tab: .privacy,
+            section: "Conversation Privacy",
+            title: "Forget Redactions in Every Conversation",
+            keywords: ["forget redactions", "clear placeholders", "reset redactions"],
+            subTab: "overview"
+        ),
+        .init(
+            id: "privacy.filter.nonInteractive",
+            tab: .privacy,
+            section: "Advanced",
+            title: "Require Review for Background Requests",
+            keywords: [
+                "non-interactive", "background requests", "http api review", "schedules review",
+                "silent approve",
+            ],
+            subTab: "overview"
+        ),
+        .init(
+            id: "privacy.rules.detectionPatterns",
+            tab: .privacy,
+            section: "Rules",
+            title: "Detection Patterns",
+            keywords: [
+                "detection patterns", "built-in patterns", "phone numbers", "international phone", "email addresses",
+                "urls", "account numbers", "credit card", "luhn", "regex layer",
+            ],
+            disambiguation:
+                "Privacy → Rules → Detection Patterns. Per-category switches for the built-in regex detectors (phone, email, URL, card numbers). National ID formats such as SSN, NINO or Aadhaar live under Preset Rules, not here.",
+            subTab: "rules"
+        ),
+        .init(
+            id: "privacy.rules.regions",
+            tab: .privacy,
+            section: "Rules",
+            title: "My Regions",
+            keywords: [
+                "my regions", "region", "country", "locale", "home region", "add region", "remove region",
+                "detected region", "which country", "international", "country presets",
+            ],
+            disambiguation:
+                "Privacy → Rules → My Regions. The countries whose ID / tax / health / bank number presets are on by default. Adding a region enables its presets; removing one never disables anything. Not the Preset Rules list itself and not the app language.",
+            subTab: "rules"
+        ),
+        .init(
+            id: "privacy.rules.presets",
+            tab: .privacy,
+            section: "Rules",
+            title: "Preset Rules",
+            keywords: [
+                "preset rules", "presets", "country", "national id", "passport", "ssn", "social security",
+                "nino", "aadhaar", "iban", "tax id", "vat", "driver's licence", "health number", "bank account",
+                "api key", "secret", "aws key", "github token", "enable all", "disable all", "ip address",
+                "bitcoin", "ethereum",
+            ],
+            disambiguation:
+                "Privacy → Rules → Preset Rules. Ready-made patterns grouped My regions → Global → Other regions, each with Enable all / Disable all and a per-row switch. Not My Regions (which picks the countries) and not Custom Rules (which you write yourself).",
+            subTab: "rules"
+        ),
+        .init(
+            id: "privacy.rules.custom",
+            tab: .privacy,
+            section: "Rules",
+            title: "Custom Rules",
+            keywords: [
+                "custom rules", "add rule", "regex", "pattern", "placeholder", "codename", "customer id",
+                "rule builder", "my own pattern",
+            ],
+            disambiguation:
+                "Privacy → Rules → Custom Rules. User-written patterns (regex or builder) with their own placeholder label. Not Preset Rules (ready-made, per country).",
+            subTab: "rules"
+        ),
+        .init(
+            id: "privacy.rules.test",
+            tab: .privacy,
+            section: "Rules",
+            title: "Test Your Rules",
+            keywords: [
+                "test rules", "dry run", "preview redaction", "try sample", "what gets redacted", "tester",
+            ],
+            subTab: "rules"
+        ),
+        .init(
+            id: "privacy.models",
+            tab: .privacy,
+            section: "Models",
+            title: "Detection Model",
+            keywords: ["privacy model", "pii model", "rampart", "install detection model", "on-device detector"],
+            disambiguation:
+                "Privacy → Models. Both on-device detectors need an Apple Silicon Mac and show as incompatible on this Mac; pattern rules still work.",
+            subTab: "model"
+        ),
+
         .init(
             id: "settings.general.maintenance", tab: .settings, section: "Reset",
             title: "Factory Reset", keywords: ["factory reset", "reset", "wipe", "erase", "maintenance"]),

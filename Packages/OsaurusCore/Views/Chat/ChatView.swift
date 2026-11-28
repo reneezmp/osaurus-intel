@@ -4774,8 +4774,8 @@ final class ChatSession: ObservableObject {
                 // the run (the user turn stays, the empty placeholder is
                 // trimmed); writing "Error: cancelled" here showed a failure
                 // on a reply the user ended on purpose. (Upstream's other
-                // cancel source, the privacy review sheet, does not exist on
-                // Intel.)
+                // cancel source, the privacy review sheet, arrived with
+                // `W-privacy-filter` stage 4.)
                 lastStreamError = nil
             } catch let pfError as PrivacyFilterPipelineError {
                 // Upstream: the Privacy Filter blocked the send (a detection
@@ -4920,6 +4920,13 @@ struct ChatView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var focusTrigger: Int = 0
+    /// Privacy-filter review sheet payload. Set by the `PrivacyReviewService`
+    /// presenter registered in `.task` below, presented via `.sheet(item:)`
+    /// (`W-privacy-filter` stage 4, upstream's `ChatView`).
+    @State private var pendingRedactionReview: RedactionReviewState? = nil
+    /// This window's presenter registration; handed back at teardown so
+    /// another window's registration is not clobbered.
+    @State private var privacyPresenterToken: PresenterToken? = nil
     @State private var isPinnedToBottom: Bool = true
     @State private var scrollToBottomTrigger: Int = 0
     @State private var keyMonitor: Any?
@@ -5067,6 +5074,7 @@ struct ChatView: View {
                 case .openSandboxSettings: showMgmtWindow(.sandbox)
                 case .openAPIKeysSettings: showMgmtWindow(.server)
                 case .openSecurityDoc(let url): NSWorkspace.shared.open(url)
+                case .openPrivacySettings: showMgmtWindow(.privacy)
                 case .openStorageSettings, .exportPlaintextBackup:
                     // Storage lives in General → Advanced → Data & Storage
                     // (upstream #2950); the landing opens the disclosure.
@@ -5148,6 +5156,26 @@ struct ChatView: View {
                 // #1468).
                 if newValue == nil {
                     focusTrigger &+= 1
+                }
+            }
+            // Privacy-filter redaction review (upstream). The pipeline
+            // suspends on a continuation in `RedactionReviewState`; the sheet's
+            // Approve / Cancel resolve it (Escape resolves as Cancel through
+            // `sheetDismissed()`), and we only clear our payload.
+            .sheet(item: $pendingRedactionReview) { state in
+                RedactionReviewSheet(state: state)
+                    .environment(\.theme, windowState.theme)
+                    .onDisappear { pendingRedactionReview = nil }
+            }
+            .task {
+                privacyPresenterToken = PrivacyReviewService.shared.registerPresenter { state in
+                    pendingRedactionReview = state
+                }
+            }
+            .onDisappear {
+                if let token = privacyPresenterToken {
+                    PrivacyReviewService.shared.unregisterPresenter(token)
+                    privacyPresenterToken = nil
                 }
             }
 #else

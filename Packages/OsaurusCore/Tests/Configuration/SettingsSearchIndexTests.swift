@@ -21,16 +21,24 @@ struct SettingsSearchIndexTests {
         .deletingLastPathComponent()  // OsaurusCore
         .appendingPathComponent("Views")
 
+    /// Views plus the Privacy tab's views (`PrivacyFilter/Views`, stage 4).
+    private static let viewRoots: [URL] = [
+        viewsRoot,
+        viewsRoot.deletingLastPathComponent().appendingPathComponent("PrivacyFilter/Views"),
+    ]
+
     /// Every string literal in the compiled view sources.
     private static let viewLiterals: Set<String> = {
         var literals = Set<String>()
         let regex = try! NSRegularExpression(pattern: #""((?:[^"\\]|\\.)*)""#)
-        let enumerator = FileManager.default.enumerator(at: viewsRoot, includingPropertiesForKeys: nil)
-        while let url = enumerator?.nextObject() as? URL {
-            guard url.pathExtension == "swift", let text = try? String(contentsOf: url, encoding: .utf8)
-            else { continue }
-            for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-                if let r = Range(match.range(at: 1), in: text) { literals.insert(String(text[r])) }
+        for root in viewRoots {
+            let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
+            while let url = enumerator?.nextObject() as? URL {
+                guard url.pathExtension == "swift", let text = try? String(contentsOf: url, encoding: .utf8)
+                else { continue }
+                for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                    if let r = Range(match.range(at: 1), in: text) { literals.insert(String(text[r])) }
+                }
             }
         }
         return literals
@@ -138,15 +146,17 @@ struct SettingsSearchIndexTests {
         let regex = try NSRegularExpression(
             pattern: #"(?:settingsLandingAnchor\(|anchorId: )"([^"]+)""#)
         let ids = Set(SettingsSearchIndex.entries.map(\.id))
-        let enumerator = FileManager.default.enumerator(at: Self.viewsRoot, includingPropertiesForKeys: nil)
         var missing: [String] = []
-        while let url = enumerator?.nextObject() as? URL {
-            guard url.pathExtension == "swift", let text = try? String(contentsOf: url, encoding: .utf8)
-            else { continue }
-            for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-                guard let r = Range(match.range(at: 1), in: text) else { continue }
-                let id = String(text[r])
-                if !ids.contains(id), !coveredByTab.contains(id) { missing.append(id) }
+        for root in Self.viewRoots {
+            let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil)
+            while let url = enumerator?.nextObject() as? URL {
+                guard url.pathExtension == "swift", let text = try? String(contentsOf: url, encoding: .utf8)
+                else { continue }
+                for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                    guard let r = Range(match.range(at: 1), in: text) else { continue }
+                    let id = String(text[r])
+                    if !ids.contains(id), !coveredByTab.contains(id) { missing.append(id) }
+                }
             }
         }
         #expect(missing.isEmpty, "anchors without a search entry: \(Set(missing).sorted())")

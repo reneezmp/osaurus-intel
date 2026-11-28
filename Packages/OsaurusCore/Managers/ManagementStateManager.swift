@@ -100,6 +100,11 @@ public final class ManagementStateManager: ObservableObject {
     /// observes this and resets it to nil after applying.
     @Published public var computerUseSubTabRequest: String?
 
+    /// One-shot request to focus a specific sub-tab inside `PrivacyView`
+    /// (raw value of `PrivacyTab`, e.g. "rules"). `PrivacyView` observes this
+    /// and resets it to nil after applying.
+    @Published public var privacySubTabRequest: String?
+
     /// One-shot request to open a specific section inside the Server → Settings
     /// pane (raw value of `ServerSettingsSection`). `ServerView` switches to its
     /// Settings tab and `ServerSettingsTabContent` scrolls to + glows it, then

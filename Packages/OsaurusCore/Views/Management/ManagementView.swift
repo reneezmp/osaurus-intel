@@ -174,6 +174,9 @@ private extension ManagementView {
         if entry.tab == .voice, let subTab = entry.subTab {
             stateManager.voiceSubTabRequest = subTab
         }
+        if entry.tab == .privacy, let subTab = entry.subTab {
+            stateManager.privacySubTabRequest = subTab
+        }
         if entry.tab == .tools, let subTab = entry.subTab {
             stateManager.pendingToolsSubTab = subTab
         }
@@ -261,6 +264,8 @@ private extension ManagementView {
             ServerView()
         case .permissions:
             PermissionsView()
+        case .privacy:
+            PrivacyView()
         case .identity:
             IdentityView()
         case .storage, .settings:

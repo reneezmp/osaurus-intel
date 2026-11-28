@@ -48,7 +48,7 @@ public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
         // deep links and routes to General).
         // `.connect` (Mobile) sits after Credits as upstream orders it
         // (`W-identity-mobile`, 2026-11-02).
-        case .general: [.settings, .chat, .voice, .themes, .credits, .connect, .identity, .permissions]
+        case .general: [.settings, .chat, .voice, .themes, .credits, .connect, .identity, .permissions, .privacy]
         case .models: [.providers]
         case .agents: [.orchestrator, .agents, .agentRuntimes]
         case .capabilities: [.search, .knowledge, .memory, .tools, .skills, .commands, .plugins]
@@ -88,6 +88,8 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     case permissions
     case identity
     case storage
+    /// Upstream's Privacy tab (`W-privacy-filter` stage 4): the redaction filter.
+    case privacy
     case settings
     /// Upstream #2950 "Conversation": how chats look and behave.
     case chat
@@ -134,6 +136,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .permissions: "lock.shield.fill"
         case .identity: "person.badge.key.fill"
         case .storage: "externaldrive.fill.badge.checkmark"
+        case .privacy: "hand.raised.fill"
         case .settings: "gearshape.fill"
         case .chat: "text.bubble.fill"
         case .browser: "globe"
@@ -167,6 +170,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .permissions: L("Permissions")
         case .identity: L("Identity")
         case .storage: L("Storage")
+        case .privacy: L("Privacy")
         case .settings: L("General")
         case .chat: L("Conversation")
         case .browser: L("Browser Use")

@@ -22,6 +22,8 @@ public enum WhatsNewAction: Hashable, Sendable {
     case openStorageSettings
     /// Trigger a one-shot plaintext export of conversation/memory data.
     case exportPlaintextBackup
+    /// Open Settings → Privacy (Privacy Filter master switch + custom rules).
+    case openPrivacySettings
 }
 
 public struct WhatsNewPage: Identifiable, Hashable, Sendable {
