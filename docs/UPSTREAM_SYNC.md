@@ -343,6 +343,16 @@ mdat and live-folder checks).
   only from the toggle or the badge. The rest of #2835 was already on Intel.
   Not ported: #2306's selection callback and counter, the search landing.
   Full suite 6,982 passed.
+- **Privacy filter stage 4 merged, 2026-11-27** (`8694699c1`): Settings →
+  General → Privacy (Filter, Rules, Models tabs; master switch off; both AI
+  detectors shown "Incompatible: needs an Apple Silicon Mac", toggle disabled),
+  custom rule editor, presets, tester, 14 search entries, and the chat review
+  sheet registered by `ChatView` (Approve sends the scrubbed text, Cancel sends
+  nothing). **Upstream bug fixed on Intel:** `PrivacyViewSaveDebouncer.flush()`
+  cancelled its work item then called `perform()`, so a flush dropped the
+  pending write; Intel runs the block directly (test pins it). Activity Log
+  settings stay under General → Data & Storage (not duplicated). 63 catalog
+  keys (60 from `upstream/classic`). Full suite 6,988 passed.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent

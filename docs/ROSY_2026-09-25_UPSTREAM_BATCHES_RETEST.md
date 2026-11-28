@@ -3864,3 +3864,14 @@ Upstream #2835 picker part (`8cab57439`). Not in candidate 71.
 - [ ] Turn Calendar on: macOS asks for access. After a denial, "Permission needed" opens System Settings.
 - [ ] The built-in agent's Tools tab shows no Apple groups.
 - [ ] Create Agent → Customize…: turn Notes on and save; the summary lists it and the new agent has Notes on.
+
+## Privacy settings and review window (2026-11-27)
+
+`W-privacy-filter` stage 4 (`8694699c1`). Not in candidate 71. Use synthetic data only (a made-up email such as alice@example.com).
+
+- [ ] Settings → General → Privacy exists; the filter is off on your profile.
+- [ ] Models tab: both detectors say "Incompatible: needs an Apple Silicon Mac", no Install button; the AI toggle on the Filter tab is greyed and off.
+- [ ] Rules tab: toggle a pattern, leave and come back: it stayed. Add a custom rule; "Test Your Rules" finds a made-up email and phone number.
+- [ ] Turn the filter on, send a made-up email to a cloud model: the review window appears and is readable. Approve: Insights shows `[EMAIL_1]`, the chat shows the real address underlined. Cancel (or Esc): nothing is sent, no error.
+- [ ] Turn the filter off again: sends go out unchanged, no window.
+- [ ] Search "custom rules": opens Privacy on the Rules tab.

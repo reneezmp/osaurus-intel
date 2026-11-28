@@ -122,7 +122,17 @@ free-form secrets. The UI and manual say so.
   highlights in thinking panes and activity groups, phone `/privacy/reviews`
   routes, `FrameScrubber` (stage 6). Tests: `IntelPrivacyWireTests` (13),
   including off-means-unchanged for streaming and one-shot.
-- Next: stage 4 (UI: Privacy settings, review sheet and presenter).
+- 2026-11-27: stage 4 done (`8694699c1`). Privacy tab after Permissions in
+  the General sidebar group; Providers folded into the Filter tab as upstream's
+  final Classic; Models tab lists both detectors Incompatible with no install.
+  Review sheet + presenter in `ChatView` (dropped on disappear); Esc = Cancel.
+  Not ported: Data Collection toggles (Intel keeps them in Data & Storage),
+  the composer `isPrivacyReviewSheetVisible` flag (sheet is modal). The stage-3
+  blocked message names "Require review for non-interactive requests" while
+  the toggle says "Background Requests" (upstream wording, left). Debouncer
+  flush bug fixed (see `UPSTREAM_SYNC.md`). Tests: `IntelPrivacyUITests`.
+- Next: stage 5 (folder tools `detect_pii` / `redact_file`, Bulk edits prompt
+  section, `osaurus_privacy` phone setting, spoken numbers in voice).
 
 ## Waiting consumer (2026-11-27)
 
