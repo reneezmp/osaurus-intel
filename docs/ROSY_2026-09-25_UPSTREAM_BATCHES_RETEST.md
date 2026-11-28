@@ -3940,3 +3940,15 @@ Image / video subagent kinds (`c3c401633`). Not in candidate 71. **Costs money:*
 - [ ] "Make a three-slide deck about cats": the .pptx opens in Keynote with three slides.
 - [ ] "Change the price of apples to 2 in that spreadsheet": the existing file is edited in place (formatting kept), not replaced by `save_xlsx`.
 
+## Agent setup wizard (2026-11-28)
+
+`W-agent-templates` setup wizard (`939fcb7da`). Not in candidate 71. Throwaway agents only.
+
+- [ ] Agents → Templates: the "What is a template?" card shows; closing it keeps it closed after reopening.
+- [ ] Use Template on Local Agent: the Set Up Agent wizard opens; Cancel creates nothing. Finish it: Create Agent adds the agent, and its card says "From the Local Agent template".
+- [ ] A template that asks for knowledge shows a dimmed Knowledge step with a reason; the model step shows a dimmed "Download a model" note.
+- [ ] Remove the model from a template-made agent: the card shows "Needs setup"; opening its chat shows "Finish setting up …"; Set Up Now opens the wizard, Later dismisses it.
+- [ ] Open MCP Servers from the Tools step, then go back to Agents: the wizard comes back with your draft.
+- [ ] A library template's More menu → Rename… renames it; built-in templates have no Rename.
+- [ ] Settings → Server: Expose to Network and the relay are still off after creating an agent from any template.
+

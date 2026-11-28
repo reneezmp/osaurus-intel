@@ -183,7 +183,7 @@ mdat and live-folder checks).
   `clamp_to_balance: false`, in-stream error frames and Anthropic refusals fail
   the turn instead of being retried and billed.
 - **Agent templates** (`W-agent-templates`, 2026-11-19): template gallery,
-  import and export, and `osaurus_config` templates; the setup wizard is left.
+  import and export, and `osaurus_config` templates; the setup wizard followed on 2026-11-28 (`939fcb7da`).
 - **Bundles** (`W-osaurus-bundles`, 2026-11-19): Agents → Bundles,
   `/admin/import/*`, `osaurus import`. Found on the way: the CLI package does
   not build (`W-cli-build`).
@@ -447,6 +447,19 @@ mdat and live-folder checks).
   plugins get no `plugins.json` raw entry (builds up to 1.0.62 can't install
   them). Needs Renée's signed publish, then a Rosy install
   (`INTEL_PLUGIN_PUBLISHING.md`). No app code changed, so no gate run.
+- **Template setup wizard (2026-11-28, `939fcb7da`, #3172).** Upstream's Set Up
+  Agent wizard (`Views/Agent/Setup/AgentSetupWizardView.swift`,
+  `Views/Template/SetupWizardParts.swift`), `AgentSetupPromptCoordinator`,
+  `AgentSetupChecklistView`, the Templates intro card, setup badges and Rename.
+  Use Template now opens the wizard (Intel's old plan sheet is gone); the
+  Review step shows the `ConfigPlanner` plan and needs a tick for high-risk
+  changes; Create saves with `AgentManager.add` like upstream, so template
+  `relayEnabled` is no longer applied and the agent isn't added to the
+  Orchestrator allowlist. Intel gaps stay visible: Knowledge step dimmed,
+  "Download a model" dimmed, no skill step. `ConfigApplier` now marks
+  `needsSetup` when an applied edit opens a gap, as upstream. The
+  `.symbolEffect` icon transition (macOS 14) is dropped. Full suite 7111,
+  mdat unchanged, no live hits. Not seen on screen.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
