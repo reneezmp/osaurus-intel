@@ -176,3 +176,13 @@ see recent video jobs (upstream shows them in its Images panel).
 `allow_remote_media_spend: true`; video queueing needs a single-use quote
 token from `/videos/quote` (`MediaQuoteStore`). A video job queued over HTTP
 is the same durable job the chat queues, recovered after a restart.
+
+## Subagent kinds (2026-11-27)
+
+Since `c3c401633` the `image` and `video` tools run as upstream's subagent kinds
+(`Subagent/Kinds/ImageSubagentKind.swift`, `VideoSubagentKind.swift`, services
+in `IntelMediaKindServices.swift`): live feed row with Stop, quote line, queue
+state, video ETA. Spend gates unchanged from the tools (see `UPSTREAM_SYNC.md`).
+Local image generation (native jobs, editing, step/ETA) stays Incompatible and
+shows as a dimmed "On-device image model" row in Abilities → Images & Video.
+

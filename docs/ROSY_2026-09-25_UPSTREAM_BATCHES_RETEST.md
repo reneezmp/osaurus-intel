@@ -3910,3 +3910,13 @@ Computer Use composer chip (`f0a49c7c4`). Not in candidate 71.
 - [ ] Toggle on, cloud vision allowed: a Computer Use task on a window with a made-up email covers only the email; the feed says "masked N sensitive region(s)". Toggle off: all text is covered.
 - [ ] Filter on: a reply that restores an email shows highlights in the reply, in an expanded thinking block and inside an activity group.
 - [ ] Paired iPhone: a privacy review can be answered from the phone (cancel one, redact one).
+
+## Image and video as subagents (2026-11-27)
+
+Image / video subagent kinds (`c3c401633`). Not in candidate 71. **Costs money:** use the cheapest model and decline when you only check the card.
+
+- [ ] Agent with Images on and a Venice or Osaurus Cloud model: ask for an image. The billing card appears; Decline spends nothing; Approve shows a feed row, then the image card.
+- [ ] Image permission Deny: refused with no card.
+- [ ] A 5 s video: quote card; Approve shows a feed row with queue state and ETA; Stop mid-wait ends the row without error.
+- [ ] An unsupported duration: a clear error and no quote.
+- [ ] Abilities → Images & Video: "On-device image model" is dimmed with "requires Apple Silicon".

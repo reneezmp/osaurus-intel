@@ -398,6 +398,16 @@ mdat and live-folder checks).
   `ChatToolChoicePolicy.resolve`, so stage 5's forced `redact_file` only
   applies where that policy is consulted). Full suite 7,046 passed.
   **W-privacy-filter complete** except that gate and Rosy QA.
+- **Image / video subagent kinds merged, 2026-11-27** (`c3c401633`, #1753/#1682
+  cloud branch): `ImageSubagentKind` / `VideoSubagentKind` run upstream's cloud
+  branches on Intel's `MediaGenerationCoordinator`; `image` / `video` tools hand
+  off to `SubagentSession.run` (feed row with Stop, quote, queue state, video
+  ETA, elapsed). Same spend gates as before (agent switch, no fallback model,
+  Deny refuses, image billing card always shown, video quote on Ask and
+  re-quote at queue time); upstream's `autoApproveToolPrompts` skip not copied;
+  video Deny now refuses before asking for a quote. Local MLX parts (native
+  image jobs, step/ETA, editing, Wan) Incompatible: a dimmed "On-device image
+  model" row. Full suite 7,071 passed on `842bb53e6`. `W-subagents` complete.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
