@@ -3884,3 +3884,11 @@ Upstream #2835 picker part (`8cab57439`). Not in candidate 71.
 - [ ] Switch one of those tools off on that agent, quit and reopen: it stays off.
 - [ ] A Manual-mode agent's tool list does not change when you install something.
 - [ ] A newly created agent lists your plugin and MCP tools (before, it started with none).
+
+## Redaction tools and phone privacy choice (2026-11-27)
+
+`W-privacy-filter` stage 5 (`046f1ea54`). Not in candidate 71. Use a throwaway folder with made-up data.
+
+- [ ] A custom agent with a working folder: no `detect_pii` / `redact_file` until Agents → Built-in Tools → "Redaction Tools" is on. The Default agent never has them.
+- [ ] "Redact the emails in note.txt": the file gets placeholders; `file_undo` restores it. A path like `../x` is refused.
+- [ ] Paired iPhone, filter on, cloud model: the call offers review / auto / off; the choice applies to that call only and the next call asks again.

@@ -131,8 +131,11 @@ free-form secrets. The UI and manual say so.
   blocked message names "Require review for non-interactive requests" while
   the toggle says "Background Requests" (upstream wording, left). Debouncer
   flush bug fixed (see `UPSTREAM_SYNC.md`). Tests: `IntelPrivacyUITests`.
-- Next: stage 5 (folder tools `detect_pii` / `redact_file`, Bulk edits prompt
-  section, `osaurus_privacy` phone setting, spoken numbers in voice).
+- 2026-11-27: stage 5 done (`046f1ea54`, see `UPSTREAM_SYNC.md`). Needs work:
+  `ForcedToolChoiceGate` (CloudChatEngine hook). Bulk edits section: upstream
+  only builds it on a path no chat reaches (folder chats take the lean path);
+  `folderRedactionLine` is the live steering.
+- Next: stage 6 (`FrameScrubber` `.pii` hook, Insights Privacy wording, manual).
 
 ## Waiting consumer (2026-11-27)
 

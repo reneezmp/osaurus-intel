@@ -363,6 +363,18 @@ mdat and live-folder checks).
   the session that first creates the snapshot never grows (upstream could
   re-add a switched-off tool that registered late on the first launch).
   `AgentCapabilitySnapshotTests` no longer excluded. Full suite 6,997 passed.
+- **Privacy filter stage 5 merged, 2026-11-27** (`046f1ea54`): folder tools
+  `detect_pii` / `redact_file` (rule engine only, no model or network; every
+  result says names and street addresses are not detected; writes stay in the
+  chosen folder, `.auto` like `file_edit`, undoable, external surfaces denied)
+  behind the per-agent "Redaction Tools" switch (#3307, off; Default agent
+  never), also in config documents. A redaction request forces `redact_file`
+  via `ChatToolChoicePolicy` when offered (upstream's `ForcedToolChoiceGate`
+  not ported: needs a `CloudChatEngine` hook). `osaurus_privacy`: the paired
+  phone's per-call choice binds `voiceCallPrivacy` only for the owner's phone
+  over the Secure Channel; nothing is saved. Bulk edits section and spoken
+  numbers (#3135) were already Covered. Full suite on the rebased tree 7,029
+  passed.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
