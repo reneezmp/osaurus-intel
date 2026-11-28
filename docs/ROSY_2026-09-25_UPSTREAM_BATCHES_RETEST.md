@@ -3875,3 +3875,12 @@ Upstream #2835 picker part (`8cab57439`). Not in candidate 71.
 - [ ] Turn the filter on, send a made-up email to a cloud model: the review window appears and is readable. Approve: Insights shows `[EMAIL_1]`, the chat shows the real address underlined. Cancel (or Esc): nothing is sent, no error.
 - [ ] Turn the filter off again: sends go out unchanged, no window.
 - [ ] Search "custom rules": opens Privacy on the Rules tab.
+
+## New plugin and MCP tools reach existing agents (2026-11-27)
+
+`W-tool-list-growth` (`4894bde89`). Not in candidate 71. The first launch after updating only records the tools that exist; growth starts from the second launch.
+
+- [ ] After a relaunch, install a plugin or connect an MCP server: its tools appear on an existing Auto-mode agent's Tools tab and work in chat.
+- [ ] Switch one of those tools off on that agent, quit and reopen: it stays off.
+- [ ] A Manual-mode agent's tool list does not change when you install something.
+- [ ] A newly created agent lists your plugin and MCP tools (before, it started with none).

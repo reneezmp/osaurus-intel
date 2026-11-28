@@ -353,6 +353,16 @@ mdat and live-folder checks).
   pending write; Intel runs the block directly (test pins it). Activity Log
   settings stay under General → Data & Storage (not duplicated). 63 catalog
   keys (60 from `upstream/classic`). Full suite 6,988 passed.
+- **W-tool-list-growth merged, 2026-11-27** (`4894bde89`): Intel's
+  `AgentManager` grows seeded Auto agents' (and the Default agent's, in
+  `ChatConfigurationStore`) tool lists on `.toolsListChanged` with names new
+  since the `AgentManager.knownToolNames.v1` snapshot, as upstream; manual
+  agents untouched. **Found:** Intel's `listDynamicTools()` was a stub returning
+  `[]`, so new agents in `AgentsView` were seeded with no plugin/MCP tools; it
+  now lists enabled plugin, MCP and sandbox-plugin tools. **Intel divergence:**
+  the session that first creates the snapshot never grows (upstream could
+  re-add a switched-off tool that registered late on the first launch).
+  `AgentCapabilitySnapshotTests` no longer excluded. Full suite 6,997 passed.
 - **Never run two test suites at once** (see `TEST_STORAGE_SAFETY.md`,
   2026-11-18): the gate now takes a machine-wide `lockf` lock.
 - Lesson: the plain gate stalled at 0% CPU in a full run while another agent
