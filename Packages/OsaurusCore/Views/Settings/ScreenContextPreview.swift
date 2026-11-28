@@ -37,6 +37,9 @@ struct ScreenContextPreview: View {
 
     @State private var snapshot: ScreenContextSnapshot?
     @State private var isLoading = false
+    /// Number of spans the Privacy Filter's rule layer would mask in the
+    /// snapshot, when the filter is on. nil = not computed.
+    @State private var maskedCount: Int?
     private var theme: ThemeProtocol { themeManager.currentTheme }
 
     private var isAccessibilityGranted: Bool {
@@ -132,10 +135,17 @@ struct ScreenContextPreview: View {
                     .font(.system(size: 11))
                     .foregroundColor(theme.successColor)
                     .padding(.top, 1)
-                Text(L("The Privacy Filter scrubs this before it reaches a cloud model."))
-                    .font(.system(size: 11))
-                    .foregroundColor(theme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("The Privacy Filter scrubs this before it reaches a cloud model."))
+                        .font(.system(size: 11))
+                        .foregroundColor(theme.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let count = maskedCount, count > 0 {
+                        Text(maskedCountText(count))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(theme.warningColor)
+                    }
+                }
             }
         } else {
             unscrubbedNote
@@ -178,13 +188,42 @@ struct ScreenContextPreview: View {
     private func refresh() {
         guard isAccessibilityGranted else {
             snapshot = nil
+            maskedCount = nil
             return
         }
         isLoading = true
+        maskedCount = nil
         Task { @MainActor in
             let captured = await ScreenContextDistiller.captureForChat()
             snapshot = captured
             isLoading = false
+            await computeMaskedCount(for: captured.render())
         }
+    }
+
+    private func maskedCountText(_ count: Int) -> String {
+        count == 1
+            ? L("~1 item would be masked before cloud send.")
+            : String(format: L("~%d items would be masked before cloud send."), count)
+    }
+
+    /// Best-effort count of spans the Privacy Filter would mask, so the user can
+    /// gauge exposure (upstream shows it only with the model loaded; Intel has
+    /// no model, so it counts what the rule layer finds, with the same ruleset
+    /// the send pipeline uses). Runs only when the filter is on.
+    private func computeMaskedCount(for text: String) async {
+        let config = PrivacyFilterStore.snapshot()
+        guard config.enabled, !text.isEmpty else {
+            maskedCount = nil
+            return
+        }
+        let detected = try? await PrivacyFilterEngine.shared.detect(
+            in: text,
+            map: RedactionMap(conversationID: UUID()),
+            skipCodeBlocks: config.skipCodeBlocks,
+            ruleset: RegexEntityDetector.EffectiveRuleSet.build(from: config),
+            useModel: false
+        )
+        maskedCount = detected?.count
     }
 }

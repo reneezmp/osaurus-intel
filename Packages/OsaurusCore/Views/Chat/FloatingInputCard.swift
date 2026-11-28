@@ -507,7 +507,17 @@ struct FloatingInputCard: View {
                 || (appConfig.chatConfig.enableClipboardMonitoring && clipboardService.hasNewContent))
                 && !showVoiceOverlay
             {
-                selectorRow
+                VStack(alignment: .trailing, spacing: 7) {
+                    if screenContextMayShow {
+                        ScreenContextIndicator()
+                    }
+                    selectorRow
+                }
+                .padding(.top, 8)
+                .padding(.horizontal, 20)
+            } else if screenContextMayShow && !showVoiceOverlay {
+                ScreenContextIndicator()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.top, 8)
                     .padding(.horizontal, 20)
             }
@@ -1952,6 +1962,58 @@ extension FloatingInputCard {
             return options.filter { $0.id != "reasoningEffort" }
         }
         return options
+    }
+
+    /// Cheap, card-level half of the screen-context chip gate (upstream
+    /// Classic): this agent shares screen context (Computer Use on and its own
+    /// option on; off by default on Intel) and the chat is still empty. The
+    /// observed half (Accessibility granted, a known frontmost app) lives in
+    /// `ScreenContextIndicator`. Intel has no Mode 2 remote-agent chats.
+    private var screenContextMayShow: Bool {
+        Self.screenContextChipMayShow(
+            isEmptyChat: isEmptyChat,
+            screenContextEnabled: agentManager.effectiveScreenContextEnabled(for: effectiveAgentId)
+        )
+    }
+
+    /// Pure gate (testable): the chip shows only before the first send, and
+    /// only for an agent that shares screen context.
+    nonisolated static func screenContextChipMayShow(isEmptyChat: Bool, screenContextEnabled: Bool) -> Bool {
+        isEmptyChat && screenContextEnabled
+    }
+
+    /// Read-only indicator of the app the frozen screen-context snapshot will be
+    /// about (the app focused just before Osaurus): a viewfinder glyph plus the
+    /// app name in muted text. It never captures and never requests a
+    /// permission: it only reads the cached Accessibility state and the
+    /// `FrontmostAppTracker` name, and renders nothing until both exist.
+    struct ScreenContextIndicator: View {
+        @Environment(\.theme) private var theme
+        @ObservedObject private var frontmostApp = FrontmostAppTracker.shared
+        @ObservedObject private var permissionService = SystemPermissionService.shared
+
+        var body: some View {
+            let granted = permissionService.permissionStates[.accessibility] ?? false
+            if granted, let app = frontmostApp.lastNonSelfAppName {
+                HStack(spacing: 5) {
+                    Image(systemName: "viewfinder")
+                        .font(.system(size: CGFloat(theme.captionSize) - 1, weight: .medium))
+                        .foregroundColor(theme.accentColor.opacity(0.85))
+
+                    Text(app)
+                        .font(theme.font(size: CGFloat(theme.captionSize) - 1, weight: .medium))
+                        .foregroundColor(theme.tertiaryText)
+                        .lineLimit(1)
+                }
+                .help(
+                    Text(
+                        "A read-only snapshot of \(app) is shared with this chat when you send. Manage it in Computer Use settings.",
+                        bundle: .module
+                    )
+                )
+                .accessibilityLabel(Text("Screen context from \(app)", bundle: .module))
+            }
+        }
     }
 
     private var selectorRow: some View {
