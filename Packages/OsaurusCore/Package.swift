@@ -326,7 +326,6 @@ let package = Package(
                 "Chat/ChatSessionQueuedSendTests.swift",
                 "Chat/ChatSessionResetForAgentTests.swift",
                 "Chat/ChatSessionStopTests.swift",
-                "Agent/AgentCapabilitySnapshotTests.swift",
                 "Agent/AgentReorderPersistenceTests.swift",
                 "Chat/ChatAttachmentSecurityTests.swift",
                 "Chat/ChatConfigurationDefaultsTests.swift",

@@ -144,6 +144,20 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
     private var lastStorageWarningAt: [UUID: Date] = [:]
     private static let storageWarningCooldown: TimeInterval = 24 * 60 * 60
 
+    /// `UserDefaults` key for the persisted snapshot of every dynamic tool name
+    /// the registry has ever reported via `.toolsListChanged` (upstream's key).
+    /// Tells brand-new tools apart from ones the user explicitly disabled.
+    static let knownToolNamesKey = "AgentManager.knownToolNames.v1"
+
+    /// True when no tool snapshot was stored at launch, so this session creates
+    /// it. Intel divergence from upstream (W-tool-list-growth): during that
+    /// session the snapshot only collects names and no agent grows, because
+    /// plugins register in waves and a partial first snapshot would make the
+    /// later waves look new and re-enable tools the user switched off. Growth
+    /// starts from the next launch.
+    private let snapshotCreatedThisSession: Bool =
+        UserDefaults.standard.array(forKey: AgentManager.knownToolNamesKey) == nil
+
     private init() {
         reload()
         loadKnowledgeGrants()
@@ -151,6 +165,26 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         // that read `AgentManager.shared`, which is still initializing here.
         Task { @MainActor [weak self] in
             self?.migrateClaudeCodeModelsToHarness()
+        }
+        // Auto-grow seeded tool lists when new tools register (upstream
+        // #966 / #2647; W-tool-list-growth). Only names new relative to the
+        // persisted registry snapshot are grown, so a tool the user switched
+        // off never comes back; the first observation just seeds the snapshot.
+        NotificationCenter.default.addObserver(
+            forName: .toolsListChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.growNewlyDiscoveredCapabilities(
+                    live: Set(ToolRegistry.shared.listDynamicTools().map(\.name)),
+                    key: Self.knownToolNamesKey,
+                    defaults: .standard,
+                    snapshotCreatedThisSession: self.snapshotCreatedThisSession,
+                    grow: self.growEnabledToolNames
+                )
+            }
         }
         // The database layer edge-triggers from its own queue; copy the
         // payload into primitives before hopping to the main actor.
@@ -1311,6 +1345,103 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
         agent.toolSelectionMode = mode
         update(agent)
+    }
+
+    /// The seeded tool list after auto-growing with newly registered tools, or
+    /// nil when nothing should change (upstream #2647). MANUAL mode is the user
+    /// saying "only what I ticked": a plugin install or MCP connect must never
+    /// append its tools to that list. Auto agents keep growing so a fresh
+    /// plugin's tools are not silently disabled by the seeded picker.
+    static func grownManualToolNames(
+        current: [String]?,
+        mode: ToolSelectionMode?,
+        live liveNames: Set<String>
+    ) -> [String]? {
+        guard var current, mode != .manual else { return nil }
+        let before = current.count
+        for name in liveNames.sorted() where !current.contains(name) { current.append(name) }
+        return current.count != before ? current : nil
+    }
+
+    /// Additively insert newly-discovered tool names into every agent that has
+    /// already been seeded (`manualToolNames != nil`) and is not in Manual mode.
+    /// Un-seeded agents are skipped (they already see the whole registry).
+    /// Intel keeps the Default agent's list in `ChatConfiguration` (the same
+    /// place `effectiveEnabledToolNames` reads), so that is where it grows.
+    /// Tool permission policies are never touched.
+    func growEnabledToolNames(_ liveNames: Set<String>) {
+        let config = ChatConfigurationStore.load()
+        if let grown = Self.grownManualToolNames(
+            current: config.defaultManualToolNames,
+            mode: config.defaultToolSelectionMode as? ToolSelectionMode,
+            live: liveNames)
+        {
+            config.defaultManualToolNames = grown
+            ChatConfigurationStore.save(config)
+            bumpCapabilityRevision()
+            NotificationCenter.default.post(name: .agentUpdated, object: Agent.defaultId)
+        }
+
+        var changedIds: [UUID] = []
+        for agent in agents where !agent.isBuiltIn {
+            guard
+                let grown = Self.grownManualToolNames(
+                    current: agent.manualToolNames, mode: agent.toolSelectionMode, live: liveNames)
+            else { continue }
+            var updated = agent
+            updated.manualToolNames = grown
+            updated.updatedAt = Date()
+            persist(updated)
+            changedIds.append(updated.id)
+        }
+        if !changedIds.isEmpty {
+            reload()
+            bumpCapabilityRevision()
+            for id in changedIds { NotificationCenter.default.post(name: .agentUpdated, object: id) }
+        }
+    }
+
+    // MARK: Known tool registry snapshot
+
+    /// Diff `live` against the persisted snapshot at `key`; newly discovered
+    /// names go to `grow`, then the snapshot advances per `diffKnownCapabilities`.
+    /// Intel: in the session that creates the snapshot, names are only unioned
+    /// in and `grow` is never called (see `snapshotCreatedThisSession`).
+    func growNewlyDiscoveredCapabilities(
+        live: Set<String>,
+        key: String,
+        defaults: UserDefaults,
+        snapshotCreatedThisSession: Bool,
+        grow: (Set<String>) -> Void
+    ) {
+        let known = Self.loadKnownNames(forKey: key, defaults: defaults)
+        let result = Self.diffKnownCapabilities(known: known, live: live)
+        if !result.toGrow.isEmpty, !snapshotCreatedThisSession { grow(result.toGrow) }
+        Self.saveKnownNames(result.merged, forKey: key, defaults: defaults)
+    }
+
+    /// Pure transform behind `growNewlyDiscoveredCapabilities` (upstream). A
+    /// missing snapshot seeds without growing (protects already-disabled tools
+    /// on the upgrade path). The merged snapshot is a union, never a
+    /// replacement: at startup plugins register incrementally and each event
+    /// carries only a partial `live` set, so replacing would make the
+    /// not-yet-loaded tools look new and re-enable them on agents where the
+    /// user had turned them off.
+    static func diffKnownCapabilities(
+        known: Set<String>?,
+        live: Set<String>
+    ) -> (toGrow: Set<String>, merged: Set<String>) {
+        guard let known else { return (toGrow: [], merged: live) }
+        return (toGrow: live.subtracting(known), merged: known.union(live))
+    }
+
+    private static func loadKnownNames(forKey key: String, defaults: UserDefaults) -> Set<String>? {
+        guard let arr = defaults.array(forKey: key) as? [String] else { return nil }
+        return Set(arr)
+    }
+
+    private static func saveKnownNames(_ names: Set<String>, forKey key: String, defaults: UserDefaults) {
+        defaults.set(names.sorted(), forKey: key)
     }
 
     /// Writer for the Phase 3 distillation opt-in (see

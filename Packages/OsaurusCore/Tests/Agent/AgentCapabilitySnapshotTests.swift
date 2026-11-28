@@ -97,4 +97,90 @@ struct AgentCapabilitySnapshotTests {
         #expect(result.toGrow == ["newplugin_a", "newplugin_b"])
         #expect(result.merged == ["browser_a", "calendar_a", "newplugin_a", "newplugin_b"])
     }
+
+    // MARK: - Growth rule (upstream #2647; W-tool-list-growth)
+
+    @Test("auto agent with a seeded list grows with new names, existing order kept")
+    func autoAgentGrows() {
+        let grown = AgentManager.grownManualToolNames(
+            current: ["b", "a"], mode: .auto, live: ["c", "a", "d"])
+        #expect(grown == ["b", "a", "c", "d"])
+        #expect(
+            AgentManager.grownManualToolNames(current: ["b"], mode: nil, live: ["x"]) == ["b", "x"])
+    }
+
+    @Test("manual agents and un-seeded agents never grow")
+    func manualAndUnseededUntouched() {
+        #expect(AgentManager.grownManualToolNames(current: ["a"], mode: .manual, live: ["z"]) == nil)
+        #expect(AgentManager.grownManualToolNames(current: nil, mode: .auto, live: ["z"]) == nil)
+        #expect(AgentManager.grownManualToolNames(current: ["a", "z"], mode: .auto, live: ["z"]) == nil)
+    }
+
+    @Test("growEnabledToolNames grows auto agents only and persists")
+    func growEnabledToolNamesEndToEnd() async throws {
+        try await ChatHistoryTestStorage.run {
+            let auto = Agent(
+                name: "GrowAuto-\(UUID().uuidString.prefix(6))", systemPrompt: "x",
+                agentAddress: "test-grow-\(UUID().uuidString)",
+                toolSelectionMode: .auto, manualToolNames: ["keep_a"])
+            let manual = Agent(
+                name: "GrowManual-\(UUID().uuidString.prefix(6))", systemPrompt: "x",
+                agentAddress: "test-grow-\(UUID().uuidString)",
+                toolSelectionMode: .manual, manualToolNames: ["keep_a"])
+            AgentManager.shared.add(auto)
+            AgentManager.shared.add(manual)
+
+            AgentManager.shared.growEnabledToolNames(["keep_a", "new_tool"])
+
+            #expect(AgentManager.shared.effectiveEnabledToolNames(for: auto.id) == ["keep_a", "new_tool"])
+            #expect(AgentManager.shared.effectiveEnabledToolNames(for: manual.id) == ["keep_a"])
+
+            // A reload from disk still has the grown list.
+            AgentManager.shared.refresh()
+            #expect(AgentManager.shared.effectiveEnabledToolNames(for: auto.id) == ["keep_a", "new_tool"])
+
+            // A tool the user turned off is already known, so it never returns.
+            AgentManager.shared.updateEnabledToolNames(["keep_a"], for: auto.id)
+            let diff = AgentManager.diffKnownCapabilities(
+                known: ["keep_a", "new_tool"], live: ["keep_a", "new_tool"])
+            #expect(diff.toGrow.isEmpty)
+
+            _ = await AgentManager.shared.delete(id: auto.id)
+            _ = await AgentManager.shared.delete(id: manual.id)
+        }
+    }
+
+    @Test("first session only collects names; growth starts the next launch")
+    func firstSessionNeverGrows() async throws {
+        try await ChatHistoryTestStorage.run {
+            let suite = "osaurus-grow-test-\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let key = AgentManager.knownToolNamesKey
+            let agent = Agent(
+                name: "GrowSession-\(UUID().uuidString.prefix(6))", systemPrompt: "x",
+                agentAddress: "test-grow-\(UUID().uuidString)",
+                toolSelectionMode: .auto, manualToolNames: ["keep_a"])
+            AgentManager.shared.add(agent)
+            let m = AgentManager.shared
+
+            // Session 1: no stored snapshot, two waves of registration.
+            #expect(defaults.array(forKey: key) == nil)
+            for wave: Set<String> in [["wave1_a"], ["wave1_a", "wave2_b"]] {
+                m.growNewlyDiscoveredCapabilities(
+                    live: wave, key: key, defaults: defaults, snapshotCreatedThisSession: true,
+                    grow: m.growEnabledToolNames)
+            }
+            #expect(m.effectiveEnabledToolNames(for: agent.id) == ["keep_a"])
+            #expect(Set(defaults.array(forKey: key) as? [String] ?? []) == ["wave1_a", "wave2_b"])
+
+            // Session 2: snapshot stored, a new name grows; known names do not.
+            m.growNewlyDiscoveredCapabilities(
+                live: ["wave1_a", "wave2_b", "new_c"], key: key, defaults: defaults,
+                snapshotCreatedThisSession: false, grow: m.growEnabledToolNames)
+            #expect(m.effectiveEnabledToolNames(for: agent.id) == ["keep_a", "new_c"])
+
+            _ = await m.delete(id: agent.id)
+        }
+    }
 }

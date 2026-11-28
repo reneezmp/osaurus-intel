@@ -2467,12 +2467,16 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// AgentDetailView lists per-agent dynamic (plugin-registered) tools
-    /// and reads each entry's `.name`. Dynamic tools come from the
-    /// sandbox plugin runtime which is amputated on Intel, so the list
-    /// is always empty.
-    struct DynamicToolRef: Sendable { let name: String }
-    func listDynamicTools() -> [DynamicToolRef] { [] }
+    /// Dynamic tools eligible for on-demand loading: enabled plugin, MCP and
+    /// sandbox-plugin tools (upstream `listDynamicTools`). This used to return
+    /// an empty list on the belief that Intel has no dynamic tools; native
+    /// plugins and MCP providers register them, so capability seeding and
+    /// `AgentManager.growEnabledToolNames` read the real set
+    /// (W-tool-list-growth). Main actor: it reads the folder tools.
+    @MainActor
+    func listDynamicTools() -> [ToolEntry] {
+        listTools().filter { $0.enabled && isLoadableDynamicTool($0.name) }
+    }
 
     // MARK: - ToolsManagerView surface (M11 Phase 11.B.2)
 
