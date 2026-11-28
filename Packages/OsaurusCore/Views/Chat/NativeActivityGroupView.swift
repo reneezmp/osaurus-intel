@@ -16,8 +16,9 @@
 //  - Intel records no per-step durations (upstream's thinking `duration` and
 //    `ToolCallItem.duration`), so the finished title is "Worked"; the reply's
 //    own "Worked for" chip (generation stats) still shows the total.
-//  - Intel's NativeThinkingView / NativeToolCallGroupView take no duration,
-//    session redactions or streaming flag.
+//  - Intel's NativeThinkingView / NativeToolCallGroupView take no duration or
+//    streaming flag. Session redactions are passed down as upstream does
+//    (W-privacy-filter stage 6), so thinking children get inbound highlights.
 //  - Step glyphs come from `ToolCategory` only (no subagent registry icons).
 //  - Plain alpha fade instead of `ExpandFade`.
 //
@@ -103,6 +104,7 @@ final class NativeActivityGroupView: NSView {
         theme: any ThemeProtocol,
         isStreaming: Bool,
         blockId: String,
+        sessionRedactions: [String: String] = [:],
         onToggleChild: @escaping (String) -> Void,
         onToggle: @escaping () -> Void,
         onHeightChanged: @escaping () -> Void
@@ -199,6 +201,7 @@ final class NativeActivityGroupView: NSView {
                 expandedIds: expandedIds,
                 theme: theme,
                 isStreaming: isStreaming,
+                sessionRedactions: sessionRedactions,
                 onToggleChild: onToggleChild
             )
         } else {
@@ -248,6 +251,7 @@ final class NativeActivityGroupView: NSView {
         expandedIds: Set<String>,
         theme: any ThemeProtocol,
         isStreaming: Bool,
+        sessionRedactions: [String: String],
         onToggleChild: @escaping (String) -> Void
     ) {
         let childWidth = max(currentWidth - 28, 100)
@@ -293,6 +297,7 @@ final class NativeActivityGroupView: NSView {
                     isExpanded: expandedIds.contains(child.id),
                     theme: theme,
                     blockId: child.id,
+                    sessionRedactions: sessionRedactions,
                     onToggle: { onToggleChild(child.id) },
                     onHeightChanged: { [weak self] in self?.applyHeight() }
                 )

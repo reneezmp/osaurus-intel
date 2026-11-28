@@ -210,10 +210,7 @@ enum ComputerUsePermissionDoctor {
             title: "Cloud vision",
             value: "On (\(scope))",
             detail: "Scrub mode: \(scrubModeLabel(cloudVision.scrubMode)).",
-            // Intel: both modes mask every recognized text region (the Privacy
-            // Filter is not on this Mac, see FrameScrubber), so neither is a
-            // reduced-privacy state.
-            severity: .ready
+            severity: cloudVision.scrubMode == .allText ? .ready : .attention
         )
     }
 
@@ -318,7 +315,7 @@ enum ComputerUsePermissionDoctor {
         case .allText:
             return "mask all recognized text"
         case .pii:
-            return "mask all recognized text (Privacy Filter not available on this Mac)"
+            return "mask only detected sensitive text"
         }
     }
 }

@@ -121,6 +121,7 @@ final class NativeThinkingView: NSView {
         duration: TimeInterval? = nil,
         theme: any ThemeProtocol,
         blockId: String,
+        sessionRedactions: [String: String] = [:],
         onToggle: @escaping () -> Void,
         onHeightChanged: @escaping () -> Void
     ) {
@@ -167,6 +168,15 @@ final class NativeThinkingView: NSView {
                 theme: theme,
                 cacheKey: "\(blockId)-thinking",
                 isStreaming: isStreaming
+            )
+            // Reasoning text is assistant-side restored content (the unscrubber
+            // rewrote any placeholders before it reached this view), so the
+            // direction is always `.inbound`. Empty `sessionRedactions`
+            // short-circuits, so chats without the Privacy Filter stay
+            // allocation-free (upstream Classic final).
+            mdv.setRedactionHighlights(
+                RedactionHighlight.buildDictionary(from: sessionRedactions, direction: .inbound),
+                theme: theme
             )
             mdv.onHeightChanged = { [weak self] in self?.applyHeight() }
         }

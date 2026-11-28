@@ -2032,8 +2032,8 @@ public enum ComputerUseLoop {
                 + "locate the element, then address it by `describe`."
         case .pii:
             return
-                "Screenshot of the current view. Detected sensitive text (names, contacts, account "
-                + "numbers, secrets) was masked on-device before it left the machine; other on-screen "
+                "Screenshot of the current view. Detected sensitive text (contacts, account "
+                + "numbers, secrets matched by the Privacy Filter rules) was masked on-device before it left the machine; other on-screen "
                 + "text is still visible. Use it to locate the element, then address it by `describe`."
         }
     }

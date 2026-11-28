@@ -186,6 +186,132 @@ struct IntelHTTPApprovalsTests {
         #expect(after.body == #"{"prompts":[]}"#)
     }
 
+    // MARK: - /privacy/reviews (W-privacy-filter stage 6)
+
+    private static func privacyDetection(_ name: String, session: String) async -> DetectedEntity {
+        let map = RedactionMap(conversationID: UUID())
+        let placeholder = await map.intern(name, as: .person)
+        return DetectedEntity(
+            category: .person,
+            original: name,
+            range: name.startIndex ..< name.endIndex,
+            placeholder: placeholder,
+            approved: true
+        )
+    }
+
+    @Test func privacyReviews_emptyListAndValidation() async throws {
+        let server = try await startApprovalsTestServer()
+        defer { Task { await server.shutdown() } }
+        let list = try await server.send("GET", "/privacy/reviews")
+        #expect(list.status == 200)
+        #expect(list.body == #"{"reviews":[]}"#)
+        let badId = try await server.send("POST", "/privacy/reviews/nope", json: #"{"decision":"cancel"}"#)
+        #expect(badId.status == 400)
+        #expect(badId.body.contains("invalid_review_id"))
+        let id = UUID().uuidString
+        let badDecision = try await server.send("POST", "/privacy/reviews/\(id)", json: #"{"decision":"allow"}"#)
+        #expect(badDecision.status == 400)
+        let gone = try await server.send("POST", "/privacy/reviews/\(id)", json: #"{"decision":"cancel"}"#)
+        #expect(gone.status == 404)
+        #expect(gone.body.contains("review_not_pending"))
+    }
+
+    /// The list carries the detected text, so it is owner-only: an agent key is
+    /// refused and a remote owner key without the Secure Channel gets 426.
+    @Test func privacyReviews_ownerOnlyAndSecureChannelOnly() async throws {
+        let agent = try AgentKey.deriveAddress(masterKey: TestKeys.alicePrivateKey, index: 3)
+        let agentKey = AgentKey.derive(masterKey: TestKeys.alicePrivateKey, index: 3)
+        let validator = APIKeyValidator(
+            agentAddresses: [agent],
+            masterAddress: TestKeys.aliceAddress,
+            effectiveWhitelist: [TestKeys.aliceAddress.lowercased(), agent.lowercased()],
+            revocationSnapshot: RevocationSnapshot(revokedKeys: [], counterThresholds: [:]),
+            hasKeys: true
+        )
+        let server = try await startApprovalsTestServer(validator: validator)
+        defer { Task { await server.shutdown() } }
+        let relay = [HTTPHandler.relayOriginHeaderName: "1"]
+        let agentToken = try TokenBuilder.build(privateKey: agentKey, iss: agent, aud: agent)
+        let refused = try await server.send("GET", "/privacy/reviews", token: agentToken, headers: relay)
+        #expect(refused.status == 403, "\(refused.body)")
+        let ownerToken = try TokenBuilder.build(
+            privateKey: TestKeys.alicePrivateKey, iss: TestKeys.aliceAddress, aud: TestKeys.aliceAddress)
+        let list = try await server.send("GET", "/privacy/reviews", token: ownerToken, headers: relay)
+        #expect(list.status == 426, "\(list.body)")
+        let answer = try await server.send(
+            "POST", "/privacy/reviews/\(UUID().uuidString)", json: #"{"decision":"cancel"}"#,
+            token: ownerToken, headers: relay)
+        #expect(answer.status == 426, "\(answer.body)")
+    }
+
+    @Test func privacyReview_fromAPhoneRun_isListedAndRedactedByDefault() async throws {
+        let server = try await startApprovalsTestServer()
+        defer { Task { await server.shutdown() } }
+        let detection = await Self.privacyDetection("Margaret Synthetic", session: "s1")
+        let run = Task { @MainActor in
+            await PrivacyReviewService.shared.review(
+                detections: [detection], sessionId: "phone-review-\(UUID().uuidString)",
+                allowInteractive: false, allowRemote: true)
+        }
+        let reviewId = try await waitFor { await MainActor.run { PrivacyReviewService.shared.remoteReviews.first?.id } }
+
+        let list = try await server.send("GET", "/privacy/reviews")
+        let rows = try #require(try list.object()["reviews"] as? [[String: Any]])
+        #expect(rows.count == 1)
+        let items = try #require(rows.first?["items"] as? [[String: Any]])
+        #expect(items.first?["original"] as? String == "Margaret Synthetic")
+        #expect(items.first?["category"] as? String == "person")
+
+        // No `redact` list means redact everything.
+        let answer = try await server.send(
+            "POST", "/privacy/reviews/\(reviewId.uuidString)", json: #"{"decision":"redact"}"#)
+        #expect(answer.status == 200)
+        guard case .approved(let approved) = await run.value else {
+            Issue.record("expected an approved outcome"); return
+        }
+        #expect(approved.count == 1)
+        #expect(approved.first?.approved == true)
+        let again = try await server.send(
+            "POST", "/privacy/reviews/\(reviewId.uuidString)", json: #"{"decision":"redact"}"#)
+        #expect(again.status == 404)
+    }
+
+    @Test func privacyReview_phoneCancelAbortsTheSend() async throws {
+        let server = try await startApprovalsTestServer()
+        defer { Task { await server.shutdown() } }
+        let detection = await Self.privacyDetection("Jordan Synthetic", session: "s2")
+        let run = Task { @MainActor in
+            await PrivacyReviewService.shared.review(
+                detections: [detection], sessionId: "phone-cancel-\(UUID().uuidString)",
+                allowInteractive: false, allowRemote: true)
+        }
+        let reviewId = try await waitFor { await MainActor.run { PrivacyReviewService.shared.remoteReviews.first?.id } }
+        let answer = try await server.send(
+            "POST", "/privacy/reviews/\(reviewId.uuidString)", json: #"{"decision":"cancel"}"#)
+        #expect(answer.status == 200)
+        guard case .canceled = await run.value else {
+            Issue.record("expected a canceled outcome"); return
+        }
+    }
+
+    /// A non-phone background request never reaches the list: it is blocked
+    /// (fail closed), not parked.
+    @Test func privacyReview_backgroundRequestIsNotListed() async throws {
+        let server = try await startApprovalsTestServer()
+        defer { Task { await server.shutdown() } }
+        let detection = await Self.privacyDetection("Casey Synthetic", session: "s3")
+        let outcome = await PrivacyReviewService.shared.review(
+            detections: [detection], sessionId: "bg-\(UUID().uuidString)",
+            allowInteractive: false, allowRemote: false)
+        if case .approved = outcome {
+            // The default config requires review for non-interactive sends.
+            Issue.record("a background request must not be auto-approved by default")
+        }
+        let list = try await server.send("GET", "/privacy/reviews")
+        #expect(list.body == #"{"reviews":[]}"#)
+    }
+
     @Test func secretPrompt_cancelSendsNoValue() async throws {
         let server = try await startApprovalsTestServer()
         defer { Task { await server.shutdown() } }

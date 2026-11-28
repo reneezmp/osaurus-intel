@@ -4,9 +4,10 @@
 //
 //  Ported from upstream Classic (W-computer-use stage 5). Intel changes: no
 //  Models sub-tab (on-device AppleScript models need MLX), no Screen context
-//  card (stage 6), no "mask only detected text" toggle (no Privacy Filter on
-//  Intel; the scrubber masks all text either way), and permissions are
-//  requested only by the Grant buttons below, never on appear.
+//  card (stage 6), and permissions are requested only by the Grant buttons
+//  below, never on appear. The "mask only detected text" toggle is back
+//  (W-privacy-filter stage 6) on the rule-only Privacy Filter: its text says
+//  names, addresses and dates are not detected on this Mac.
 //
 //  Settings panel for the Computer Use feature. Organized top-down so a
 //  first-time user can follow it: what the feature is, whether it's set up
@@ -519,7 +520,7 @@ struct ComputerUseSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle(L("Cloud vision"))
             hintText(
-                "Perception stays on this Mac by default. If an agent uses a cloud model, you can let it send screenshots for the rare cases on-screen text isn't enough — but only after all text is masked on-device first."
+                "Perception stays on this Mac by default. If an agent uses a cloud model, you can let it send screenshots for the rare cases on-screen text isn't enough — but only after sensitive text is masked on-device first."
             )
 
             SettingsToggle(
@@ -531,8 +532,22 @@ struct ComputerUseSettingsView: View {
                 )
             )
 
+            // Redaction mode: mask everything (default, safest) vs. mask only
+            // detected PII (less strict — leaves non-sensitive text readable).
+            // Intel: rule layer only, so the description and hint say what is
+            // and is not detected (names, addresses and dates have no pattern).
+            SettingsToggle(
+                title: L("Mask only detected sensitive text"),
+                description:
+                    "Off (recommended): mask ALL on-screen text before sending. On: send a screenshot where only text matching your Privacy Filter rules (emails, phone numbers, card and ID numbers, keys) is masked. Other text, including names and addresses, stays readable to the model.",
+                isOn: Binding(
+                    get: { cloudVisionConsent.masksOnlyDetectedPII },
+                    set: { cloudVisionConsent.setMasksOnlyDetectedPII($0) }
+                )
+            )
+
             hintText(
-                "Masking runs on-device using text recognition: every recognized text region is covered before a screenshot leaves this Mac. If masking fails, nothing is sent. Screenshots also require Screen Recording permission; without it the agent stays on accessibility text only."
+                "Masking runs on-device using text recognition. By default every recognized text region is covered before a screenshot leaves this Mac. Names, addresses and dates have no pattern, and the on-device model that finds them needs an Apple Silicon Mac, so \"mask only sensitive text\" leaves them readable. If masking fails, nothing is sent. Screenshots also require Screen Recording permission; without it the agent stays on accessibility text only."
             )
         }
     }

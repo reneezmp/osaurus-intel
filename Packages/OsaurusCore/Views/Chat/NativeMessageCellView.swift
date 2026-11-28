@@ -2395,6 +2395,7 @@ final class NativeMessageCellView: NSTableCellView {
             duration: duration,
             theme: context.theme,
             blockId: block.id,
+            sessionRedactions: context.sessionRedactions,
             onToggle: { [weak self] in
                 guard let self else { return }
                 context.onToggleExpand(block.id)
@@ -3199,6 +3200,7 @@ final class NativeMessageCellView: NSTableCellView {
             theme: context.theme,
             isStreaming: context.isStreaming,
             blockId: block.id,
+            sessionRedactions: context.sessionRedactions,
             onToggleChild: { id in context.onToggleExpand(id) },
             onToggle: { [weak self] in
                 guard let self else { return }

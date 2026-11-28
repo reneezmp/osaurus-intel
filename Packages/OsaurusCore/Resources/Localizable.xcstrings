@@ -29435,6 +29435,68 @@
         }
       }
     },
+    "Mask only detected sensitive text" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nur erkannten sensiblen Text maskieren"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "감지된 민감한 텍스트만 마스킹"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Маска обнаружила только конфиденциальный текст"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅对检测到的敏感文本脱敏"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "僅遮罩檢測到的敏感文本"
+          }
+        }
+      }
+    },
+    "Masking runs on-device using text recognition. By default every recognized text region is covered before a screenshot leaves this Mac. Names, addresses and dates have no pattern, and the on-device model that finds them needs an Apple Silicon Mac, so \"mask only sensitive text\" leaves them readable. If masking fails, nothing is sent. Screenshots also require Screen Recording permission; without it the agent stays on accessibility text only." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Maskieren läuft auf dem Gerät per Texterkennung. Standardmäßig wird jeder erkannte Textbereich abgedeckt, bevor ein Screenshot diesen Mac verlässt. Namen, Adressen und Datumsangaben haben kein festes Muster, und das Modell auf dem Gerät, das sie findet, braucht einen Apple-Silicon-Mac. Mit „Nur erkannten sensiblen Text maskieren“ bleiben sie daher lesbar. Schlägt das Maskieren fehl, wird nichts gesendet. Screenshots erfordern außerdem die Berechtigung „Bildschirmaufnahme“; ohne sie bleibt der Agent bei reinem Bedienungshilfen-Text."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遮盖在设备上通过文字识别完成。默认情况下，截图离开这台 Mac 之前，每个识别出的文字区域都会被遮住。姓名、地址和日期没有固定格式，而识别它们的设备端模型需要 Apple 芯片的 Mac，因此“仅遮盖检测到的敏感文字”会让它们保持可读。如果遮盖失败，则不会发送任何内容。截图还需要“屏幕录制”权限；没有该权限时，智能体只使用辅助功能文字。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "가리기는 기기에서 텍스트 인식으로 처리돼요. 기본적으로 스크린샷이 이 Mac을 떠나기 전에 인식된 모든 텍스트 영역을 가려요. 이름, 주소, 날짜는 정해진 형식이 없고 이를 찾는 기기 내 모델은 Apple 실리콘 Mac이 필요해서, '감지된 민감한 텍스트만 가리기'를 켜면 그대로 보여요. 가리기에 실패하면 아무것도 보내지 않아요. 스크린샷에는 화면 녹화 권한도 필요하며, 권한이 없으면 에이전트는 손쉬운 사용 텍스트만 사용해요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Скрытие выполняется на устройстве с помощью распознавания текста. По умолчанию перед отправкой снимка с этого Mac закрывается каждая распознанная область текста. У имён, адресов и дат нет шаблона, а модель на устройстве, которая их находит, требует Mac с Apple Silicon, поэтому режим «Скрывать только найденный конфиденциальный текст» оставляет их читаемыми. Если скрыть текст не удалось, ничего не отправляется. Для снимков также нужно разрешение на запись экрана; без него агент использует только текст из универсального доступа."
+          }
+        }
+      }
+    },
     "Masking runs on-device using text recognition: every recognized text region is covered before a screenshot leaves this Mac. If masking fails, nothing is sent. Screenshots also require Screen Recording permission; without it the agent stays on accessibility text only." : {
       "localizations" : {
         "de" : {
@@ -34802,6 +34864,34 @@
         }
       }
     },
+    "Off (recommended): mask ALL on-screen text before sending. On: send a screenshot where only text matching your Privacy Filter rules (emails, phone numbers, card and ID numbers, keys) is masked. Other text, including names and addresses, stays readable to the model." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus (empfohlen): Vor dem Senden wird ALLER Text auf dem Bildschirm maskiert. An: Es wird ein Screenshot gesendet, in dem nur Text maskiert ist, der zu deinen Datenschutzfilter-Regeln passt (E-Mails, Telefonnummern, Karten- und Ausweisnummern, Schlüssel). Anderer Text, auch Namen und Adressen, bleibt für das Modell lesbar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭（推荐）：发送前遮盖屏幕上的所有文字。开启：发送的截图中只遮盖符合你的隐私过滤规则的文字（邮箱、电话号码、银行卡和证件号码、密钥）。其他文字，包括姓名和地址，模型仍然可以读取。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "끄기(권장): 보내기 전에 화면의 모든 텍스트를 가려요. 켜기: 개인정보 필터 규칙에 맞는 텍스트(이메일, 전화번호, 카드·신분증 번호, 키)만 가린 스크린샷을 보내요. 이름과 주소를 포함한 다른 텍스트는 모델이 그대로 읽을 수 있어요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выключено (рекомендуется): перед отправкой скрывается ВЕСЬ текст на экране. Включено: отправляется снимок, где скрыт только текст, подходящий под ваши правила фильтра конфиденциальности (почта, телефоны, номера карт и документов, ключи). Остальной текст, включая имена и адреса, остаётся читаемым для модели."
+          }
+        }
+      }
+    },
     "Off by default. Nothing is sent without this and on-device masking." : {
       "localizations" : {
         "de" : {
@@ -38291,6 +38381,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Восприятие по умолчанию остаётся на этом Mac. Если агент использует облачную модель, вы можете разрешить ему отправлять снимки экрана в редких случаях, когда текста на экране недостаточно, но только после того, как весь текст скрыт на устройстве."
+          }
+        }
+      }
+    },
+    "Perception stays on this Mac by default. If an agent uses a cloud model, you can let it send screenshots for the rare cases on-screen text isn't enough — but only after sensitive text is masked on-device first." : {
+      "comment" : "A description of the cloud vision feature, including its default behavior and the use case for sending screenshots.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Die Wahrnehmung bleibt standardmäßig auf diesem Mac. Wenn ein Agent ein Cloud-Modell verwendet, können Sie ihn Screenshots für die seltenen Fälle senden lassen. Text auf dem Bildschirm reicht nicht aus - aber nur, nachdem sensibler Text zuerst auf dem Gerät maskiert wurde."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "인식 기능은 기본적으로 이 Mac에 유지됩니다. 에이전트가 클라우드 모델을 사용하는 경우 화면 텍스트만으로는 부족한 드문 경우에 스크린샷을 전송하도록 허용할 수 있지만, 이 기기에서 민감한 텍스트가 먼저 마스킹된 후에만 가능합니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По умолчанию Восприятие остается на этом Mac. Если агент использует облачную модель, вы можете разрешить ему отправлять снимки экрана в редких случаях, когда текста на экране недостаточно — но только после того, как конфиденциальный текст сначала замаскирован на устройстве."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感知功能默认在本机运行。如果智能体使用云端模型，你可以允许其发送截图以处理屏幕文字不足的极少数情况——但前提是敏感文字已在本地完成屏蔽。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感知功能默認在本機運行。如果智能體使用雲端模型，您可以允許其發送截圖以處理屏幕文字不足的極少數情況——但前提是敏感文字已在本地完成屏蔽。"
           }
         }
       }

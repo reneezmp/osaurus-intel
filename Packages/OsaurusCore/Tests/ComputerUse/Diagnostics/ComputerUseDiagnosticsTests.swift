@@ -84,7 +84,7 @@ struct ComputerUsePermissionDoctorTests {
         )
 
         #expect(snapshot.row(.cloudVision)?.value == "On (persistent)")
-        #expect(snapshot.row(.cloudVision)?.severity == .ready)  // Intel: both scrub modes mask all text
+        #expect(snapshot.row(.cloudVision)?.severity == .attention)  // .pii leaves non-sensitive text readable
         #expect(snapshot.row(.screenContext)?.value == "On")
         #expect(snapshot.row(.perAgent)?.value == "2/2 custom enabled")
         #expect(snapshot.agentAvailability.customAgentCount == 2)

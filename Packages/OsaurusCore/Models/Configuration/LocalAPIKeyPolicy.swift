@@ -68,6 +68,7 @@ enum LocalAPIKeyPolicy {
             || path == "/config/approvals" || path.hasPrefix("/config/approvals/")
             || path == "/computer-use/prompts" || path.hasPrefix("/computer-use/prompts/")
             || path == "/secrets/prompts" || path.hasPrefix("/secrets/prompts/")
+            || path == "/privacy/reviews" || path.hasPrefix("/privacy/reviews/")
             || path == "/memory/ingest"
     }
 

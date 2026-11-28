@@ -2,7 +2,10 @@
 //  FrameScrubber.swift
 //  OsaurusCore — Computer Use
 //
-//  Screenshot redaction (PR3). PrivacyFilter is text-only — there is no
+//  Screenshot redaction (PR3). Intel (W-privacy-filter stage 6): the `.pii` branch
+//  is upstream's, on the rule-only Privacy Filter; the on-device model pass is a
+//  hook that finds nothing on this Mac (`PrivacyFilterEngine.modelSpans`).
+//  PrivacyFilter is text-only — there is no
 //  pixel/image redactor in the app — so this is new: run Vision OCR over a
 //  frame, find PII in the recognized text with the SAME deterministic
 //  detectors PrivacyFilter uses (`RegexEntityDetector`), and paint opaque
@@ -120,7 +123,6 @@ public enum FrameScrubber {
     /// Scrub a contract `CUImage`. Processing failures throw; a successful
     /// scan with no detected PII still returns a (visually identical) frame.
     ///
-    /// - (Intel: `honorUserRules` and `useModelDetection` are accepted and ignored until `W-privacy-filter`.)
     /// - `honorUserRules`: build the regex layer from the user's configured
     ///   Privacy Filter ruleset (custom rules / presets / per-category toggles)
     ///   instead of all built-ins, so a screenshot scrub matches what the text
@@ -152,7 +154,14 @@ public enum FrameScrubber {
         processing: any FrameImageProcessing
     ) async throws -> ScrubbedFrame {
         guard let cg = decode(image) else { throw FrameScrubError.imageDecodeFailed }
-        let (masked, report) = try await scrub(cgImage: cg, mode: mode, processing: processing)
+        let ruleset = effectiveRuleset(honorUserRules: honorUserRules)
+        let (masked, report) = try await scrub(
+            cgImage: cg,
+            mode: mode,
+            ruleset: ruleset,
+            useModelDetection: useModelDetection,
+            processing: processing
+        )
         guard let encoded = encode(masked, width: image.width, height: image.height) else {
             throw FrameScrubError.imageEncodeFailed
         }
@@ -167,18 +176,40 @@ public enum FrameScrubber {
         cgImage: CGImage,
         mode: ScrubMode = .pii
     ) async throws -> (CGImage, ScrubReport) {
-        try await scrub(cgImage: cgImage, mode: mode, processing: NativeFrameImageProcessing())
+        try await scrub(
+            cgImage: cgImage,
+            mode: mode,
+            ruleset: .defaultSafetyNet(),
+            useModelDetection: false
+        )
     }
 
-    /// Core scrub over a `CGImage`. Returns the redacted image + a report.
+    /// Core scrub over a `CGImage` with an explicit regex ruleset and optional
+    /// on-device model pass. Returns the redacted image + a report.
     static func scrub(
         cgImage: CGImage,
         mode: ScrubMode,
+        ruleset: RegexEntityDetector.EffectiveRuleSet,
+        useModelDetection: Bool,
         processing: any FrameImageProcessing = NativeFrameImageProcessing()
     ) async throws -> (CGImage, ScrubReport) {
-        let scan = try recognizeAndDetect(in: cgImage, mode: mode, processing: processing)
-        let regions = scan.regions
-        let categories = scan.categories
+        let scan = try recognizeAndDetect(in: cgImage, mode: mode, ruleset: ruleset, processing: processing)
+        var regions = scan.regions
+        var categories = scan.categories
+        // The regex pass (inside `recognizeAndDetect`) masks the precise spans it
+        // can. The model owns `person`/`address`/`date`/`secret`, which have no
+        // regex — run it per OCR region and mask the whole region on a hit
+        // (recall over precision, the same philosophy the regex line-fallback
+        // uses). `.allText` already masks every region, so the model adds nothing.
+        if mode == .pii, useModelDetection, !scan.observations.isEmpty {
+            let candidates = scan.observations.prefix(maxModelObservations)
+            for obs in candidates where obs.text.count >= 2 {
+                let spans = await PrivacyFilterEngine.shared.modelSpans(in: obs.text)
+                guard !spans.isEmpty else { continue }
+                regions.append(obs.box)
+                for span in spans { categories[categoryToken(span.category), default: 0] += 1 }
+            }
+        }
         let masked: CGImage
         do {
             masked = try processing.paintMasks(over: cgImage, normalizedRegions: regions)
@@ -193,6 +224,15 @@ public enum FrameScrubber {
             categories: categories
         )
         return (masked, report)
+    }
+
+    /// The regex ruleset to run over OCR'd text: the user's configured set when
+    /// `honorUserRules`, else the default safety net (built-ins + the
+    /// fresh-install presets, so national IDs such as US SSN stay covered).
+    private static func effectiveRuleset(
+        honorUserRules: Bool
+    ) -> RegexEntityDetector.EffectiveRuleSet {
+        honorUserRules ? .build(from: PrivacyFilterStore.snapshot()) : .defaultSafetyNet()
     }
 
     // MARK: - Vision OCR
@@ -224,6 +264,7 @@ public enum FrameScrubber {
     private static func recognizeAndDetect(
         in image: CGImage,
         mode: ScrubMode,
+        ruleset: RegexEntityDetector.EffectiveRuleSet,
         processing: any FrameImageProcessing
     ) throws -> OCRScan {
         let observations: [VNRecognizedTextObservation]
@@ -240,23 +281,58 @@ public enum FrameScrubber {
 
         var regions: [CGRect] = []
         var categories: [String: Int] = [:]
+        var scanned: [OCRObservation] = []
         for observation in observations {
             guard let candidate = observation.topCandidates(1).first else { continue }
-            // Intel (docs/W_COMPUTER_USE_PLAN.md): upstream's `.pii` mode masks
-            // only regions its Privacy Filter regex / NER detectors flag. Intel has
-            // no Privacy Filter yet (`W-privacy-filter`), so `.pii` fails closed:
-            // it masks every recognized text region, exactly like `.allText`.
-            // `candidate` is still read so a line with no recognized text is skipped.
-            _ = candidate
-            regions.append(observation.boundingBox)
-            categories["text", default: 0] += 1
+            switch mode {
+            case .allText:
+                regions.append(observation.boundingBox)
+            case .pii:
+                let text = candidate.string
+                // The detector's ranges index `candidate.string` directly, so
+                // they pass straight to Vision's `boundingBox(for:)`.
+                let hit = lineMasks(
+                    in: text,
+                    lineBox: observation.boundingBox,
+                    ruleset: ruleset,
+                    subrangeBox: { range in
+                        ((try? candidate.boundingBox(for: range)) ?? nil)?.boundingBox
+                    }
+                )
+                regions.append(contentsOf: hit.regions)
+                for (key, count) in hit.categories { categories[key, default: 0] += count }
+                // Carry the region out for the optional model pass.
+                scanned.append(OCRObservation(text: text, box: observation.boundingBox))
+            }
         }
         return OCRScan(
             regions: regions,
             categories: categories,
             textRegions: observations.count,
-            observations: []
+            observations: scanned
         )
+    }
+
+    // MARK: - Line detection
+
+    /// The `.pii` rule pass for one recognized line: every detector match
+    /// yields the sub-range box when Vision can give it, else the whole line
+    /// (recall over precision, like PrivacyFilter). Pure so tests can drive it
+    /// without Vision. Intel: only the rule layer exists on this Mac; the model
+    /// pass below is a hook that finds nothing (`PrivacyFilterEngine.modelSpans`).
+    static func lineMasks(
+        in text: String,
+        lineBox: CGRect,
+        ruleset: RegexEntityDetector.EffectiveRuleSet,
+        subrangeBox: (Range<String.Index>) -> CGRect?
+    ) -> (regions: [CGRect], categories: [String: Int]) {
+        var regions: [CGRect] = []
+        var categories: [String: Int] = [:]
+        for match in RegexEntityDetector.detect(in: text, ruleset: ruleset) {
+            categories[categoryToken(match.category), default: 0] += 1
+            regions.append(subrangeBox(match.range) ?? lineBox)
+        }
+        return (regions, categories)
     }
 
     // MARK: - Masking
@@ -318,5 +394,9 @@ public enum FrameScrubber {
             width: image.width,
             height: image.height
         )
+    }
+
+    private static func categoryToken(_ category: EntityCategory) -> String {
+        String(describing: category)
     }
 }

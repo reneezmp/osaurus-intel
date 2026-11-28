@@ -14,6 +14,11 @@
 //    use confirm and cloud-vision consent cards (`ComputerUsePromptQueue`).
 //  - `GET /secrets/prompts`, `POST /secrets/prompts/{id}`: secret requests
 //    (`RemoteSecretPromptQueue`).
+//  - `GET /privacy/reviews`, `POST /privacy/reviews/{id}`: redaction reviews
+//    (`PrivacyReviewService.remoteReviews`, upstream section 19;
+//    W-privacy-filter stage 6). The list carries the detected text itself, so
+//    it is owner-only and served over the Secure Channel only (plaintext
+//    owner routes get 426 from the `/privacy` owner-channel prefix).
 //
 //  All owner-only. A card reaches these lists only from a run with a remote
 //  reviewer (`ChatExecutionContext.hasRemoteReviewer`): the owner's key over
@@ -32,7 +37,11 @@ import NIOHTTP1
 extension HTTPHandler {
     /// The approval and prompt routes, in upstream's routing order.
     func routeApprovalsRequest(context: ChannelHandlerContext, head: HTTPRequestHead, path: String) -> Bool {
-        if head.method == .GET, path == "/config/approvals" {
+        if head.method == .GET, path == "/privacy/reviews" {
+            serveListPrivacyReviews(context: context)
+        } else if head.method == .POST, path.hasPrefix("/privacy/reviews/") {
+            serveAnswerPrivacyReview(context: context, head: head, path: path)
+        } else if head.method == .GET, path == "/config/approvals" {
             serveListConfigApprovals(context: context)
         } else if head.method == .POST, path.hasPrefix("/config/approvals/") {
             serveAnswerConfigApproval(context: context, head: head, path: path)
@@ -50,6 +59,114 @@ extension HTTPHandler {
             return false
         }
         return true
+    }
+
+    // MARK: - /privacy/reviews
+
+    /// One pending redaction review of `GET /privacy/reviews`.
+    private struct PrivacyReviewDTO: Encodable {
+        let id: String
+        let session_id: String
+        let items: [Item]
+
+        struct Item: Encodable {
+            let id: String
+            /// `person | email | phone | address | url | date | accountNumber | secret`
+            let category: String
+            /// The detected text, so the user can see exactly what would
+            /// otherwise reach the provider.
+            let original: String
+            /// What replaces it when redacted, e.g. `[PERSON_1]`.
+            let placeholder: String
+        }
+    }
+
+    private struct PrivacyReviewsResponse: Encodable {
+        let reviews: [PrivacyReviewDTO]
+    }
+
+    private struct PrivacyReviewDecisionRequest: Decodable {
+        /// `redact` sends the request with the listed items replaced by their
+        /// placeholders; `cancel` abandons the send.
+        let decision: String
+        /// Item ids to redact. Omitted means all of them.
+        let redact: [String]?
+    }
+
+    /// GET /privacy/reviews: redaction reviews this Mac is holding a send on
+    /// (section 19.1). Owner-only: the payload is the PII itself, and it
+    /// travels only inside the Secure Channel to the user's own phone. Intel's
+    /// request log never records bodies, so the detections are never logged.
+    private func serveListPrivacyReviews(context: ChannelHandlerContext) {
+        guard callerOwnsThisMac(context) else {
+            sendOwnerOnlyForbidden(context: context)
+            return
+        }
+        let eventLoop = context.eventLoop
+        runRequestTask {
+            let reviews: [PrivacyReviewDTO] = await MainActor.run {
+                PrivacyReviewService.shared.remoteReviews.map { review in
+                    PrivacyReviewDTO(
+                        id: review.id.uuidString,
+                        session_id: review.sessionId,
+                        items: review.items.map {
+                            PrivacyReviewDTO.Item(
+                                id: $0.id.uuidString,
+                                category: $0.category,
+                                original: $0.original,
+                                placeholder: $0.placeholder
+                            )
+                        }
+                    )
+                }
+            }
+            let json =
+                (try? JSONEncoder.osaurusCanonical().encode(PrivacyReviewsResponse(reviews: reviews)))
+                .map { String(decoding: $0, as: UTF8.self) } ?? #"{"reviews":[]}"#
+            self.respondOnLoop(eventLoop, status: .ok, headers: self.jsonHeaders(), body: json)
+        }
+    }
+
+    /// POST /privacy/reviews/{id}: `{"decision":"redact" | "cancel","redact":[id]?}`
+    /// (section 19.2). Owner-only. An omitted `redact` list redacts everything,
+    /// the safe default and what the Mac's sheet starts with.
+    private func serveAnswerPrivacyReview(context: ChannelHandlerContext, head: HTTPRequestHead, path: String) {
+        guard callerOwnsThisMac(context) else {
+            sendOwnerOnlyForbidden(context: context)
+            return
+        }
+        if requiresOwnerChannel(head: head, context: context) { return }
+        let components = path.split(separator: "/")
+        guard components.count == 3, let reviewId = UUID(uuidString: String(components[2])) else {
+            sendResponse(
+                context: context, status: .badRequest, headers: jsonHeaders(), body: #"{"error":"invalid_review_id"}"#)
+            return
+        }
+        guard let request = try? JSONDecoder().decode(PrivacyReviewDecisionRequest.self, from: requestBodyData()),
+            request.decision == "redact" || request.decision == "cancel"
+        else {
+            sendResponse(
+                context: context, status: .badRequest, headers: jsonHeaders(),
+                body: #"{"error":"bad_request","message":"Expected {decision: redact | cancel, redact?: [id]}"}"#)
+            return
+        }
+        let cancels = request.decision == "cancel"
+        let redactIds = request.redact?.compactMap { UUID(uuidString: $0) }
+        let eventLoop = context.eventLoop
+        runRequestTask {
+            let answered = await MainActor.run { () -> Bool in
+                let service = PrivacyReviewService.shared
+                if cancels { return service.cancelRemotely(id: reviewId) }
+                guard let redactIds else {
+                    let all = service.remoteReviews.first { $0.id == reviewId }?.items.map(\.id) ?? []
+                    return service.resolveRemotely(id: reviewId, redactedIds: Set(all))
+                }
+                return service.resolveRemotely(id: reviewId, redactedIds: Set(redactIds))
+            }
+            self.respondOnLoop(
+                eventLoop, status: answered ? .ok : .notFound, headers: self.jsonHeaders(),
+                body: answered ? #"{"ok":true}"# : #"{"error":"review_not_pending"}"#)
+        }
     }
 
     // MARK: - /config/approvals
