@@ -4,10 +4,10 @@
 //
 //  Shared pieces of Intel's `image` / `video` tools (`W-media-generation`,
 //  docs/MEDIA_GENERATION_INTEL.md). Upstream runs both tools through its
-//  subagent framework (`ImageSubagentKind`, `VideoSubagentKind`), which
-//  Intel does not have (`W-subagents`); these helpers carry the parts of
-//  those kinds that apply to cloud media: model resolution, the agent's
-//  switch and policy, the result payload, and the chat artifact.
+//  subagent framework; since W-subagents stage 6 Intel does too
+//  (`ImageSubagentKind`, `VideoSubagentKind`, cloud only). These helpers
+//  are the parts of those kinds that apply to cloud media: model
+//  resolution, the agent's switch and policy, and the chat artifact.
 //
 
 import Foundation
@@ -25,8 +25,18 @@ enum IntelMediaToolSupport {
         forImage: Bool,
         imageToVideo: Bool = false
     ) async -> AgentMediaSettings {
-        let agentId = ChatExecutionContext.currentAgentId ?? Agent.defaultId
-        return await MainActor.run {
+        await agentSettings(
+            agentId: ChatExecutionContext.currentAgentId ?? Agent.defaultId,
+            forImage: forImage, imageToVideo: imageToVideo)
+    }
+
+    /// Same, for an explicit agent (the subagent kinds read it from their scope).
+    static func agentSettings(
+        agentId: UUID,
+        forImage: Bool,
+        imageToVideo: Bool = false
+    ) async -> AgentMediaSettings {
+        await MainActor.run {
             let manager = AgentManager.shared
             let settings = manager.agent(for: agentId)?.settings
             if forImage {
@@ -102,8 +112,14 @@ enum IntelMediaToolSupport {
     /// `GeneratedMediaToolArtifactBridge`, run inside the tool because Intel's
     /// engine executes tools itself). Returns the enriched marker text, or
     /// nil outside a chat (no session) or when promotion fails.
-    static func promoteToChatArtifact(_ media: GeneratedMedia, description: String) async -> String? {
-        guard let sessionId = ChatExecutionContext.currentSessionId, !sessionId.isEmpty else { return nil }
+    /// `sessionId` is the chat the call came from, captured before the
+    /// subagent host binds its own scope (outside a chat the host invents a
+    /// fresh id, which must never become an artifact context).
+    static func promoteToChatArtifact(
+        _ media: GeneratedMedia, description: String,
+        sessionId explicitSessionId: String? = ChatExecutionContext.currentSessionId
+    ) async -> String? {
+        guard let sessionId = explicitSessionId, !sessionId.isEmpty else { return nil }
         let outcome = SharedArtifact.processTrustedLocalFileResult(
             fileURL: media.url,
             filename: media.url.lastPathComponent,

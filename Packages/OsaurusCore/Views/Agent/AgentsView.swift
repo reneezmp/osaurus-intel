@@ -7557,6 +7557,18 @@ private struct IntelMediaAbilitySection: View {
                                 set: { policy in update { s, _ in s.videoPermission = policy }(true) })
                         }
                     }
+                    // Upstream's on-device image kind (MLX): shown, never hidden.
+                    toggleRow(
+                        title: L("On-device image model"),
+                        description: L(
+                            "Let the agent generate and edit images with a local model using the `image` tool."
+                        ),
+                        icon: "cpu",
+                        isOn: false,
+                        disabled: true,
+                        set: { _ in }
+                    )
+                    .help(L("Not available on Intel — requires Apple Silicon"))
                     if imageModels.isEmpty, videoModels(.textToVideo).isEmpty, videoModels(.imageToVideo).isEmpty {
                         note(
                             "No image or video models yet. Add a Venice provider under Cloud Models, or sign in to Osaurus Cloud."
@@ -7586,7 +7598,8 @@ private struct IntelMediaAbilitySection: View {
     }
 
     private func toggleRow(
-        title: String, description: String, icon: String, isOn: Bool, set: @escaping (Bool) -> Void
+        title: String, description: String, icon: String, isOn: Bool, disabled: Bool = false,
+        set: @escaping (Bool) -> Void
     ) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: icon)
@@ -7608,7 +7621,9 @@ private struct IntelMediaAbilitySection: View {
                 .labelsHidden()
                 .toggleStyle(ThemedSwitchToggleStyle())
                 .accessibilityLabel(Text(title))
+                .disabled(disabled)
         }
+        .opacity(disabled ? 0.55 : 1)
     }
 
     private func controlRow<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {

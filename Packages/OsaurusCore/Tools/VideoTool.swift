@@ -2,8 +2,8 @@
 //  VideoTool.swift
 //  osaurus
 //
-//  Intel's `video` tool (`W-media-generation`): upstream's `VideoTool` with
-//  its `VideoSubagentKind` folded in, cloud only. A current price quote rides
+//  Intel's `video` tool (`W-media-generation`): upstream's `VideoTool`; its
+//  `VideoSubagentKind` (cloud branch) is `Subagent/Kinds/VideoSubagentKind.swift`. A current price quote rides
 //  in the approval before the job is queued; once queued, a paid job is
 //  recovered after Stop or relaunch (`MediaGenerationCoordinator`). Upstream's
 //  local controls (width/height, frame_count, fps, steps, guidance, seed) are
@@ -74,154 +74,67 @@ final class VideoTool: OsaurusTool, @unchecked Sendable {
         let durationReq = requireString(args, "duration", expected: "catalog-supported duration", tool: name)
         guard case .value(let duration) = durationReq else { return durationReq.failureEnvelope ?? "" }
 
-        let sourcePath = IntelMediaToolSupport.optionalString(args["source_path"])
-        let isImageToVideo = sourcePath != nil
-        let resolution = IntelMediaToolSupport.optionalString(args["resolution"])
-        let aspectRatio = IntelMediaToolSupport.optionalString(args["aspect_ratio"])
-        let audio = args["audio"] as? Bool
-
-        let agent = await IntelMediaToolSupport.agentSettings(forImage: false, imageToVideo: isImageToVideo)
-        guard agent.enabled else {
-            return ToolEnvelope.failure(
-                kind: .unavailable,
-                message: "Video generation is not enabled for this agent (Agents → Abilities → Images & Video).",
-                tool: name)
-        }
-        let wantedKind: MediaGenerationKind = isImageToVideo ? .imageToVideo : .textToVideo
-        let candidates = await IntelMediaToolSupport.pickerItems()
-            .videoGenerationDelegateCandidates.compactMap(\.mediaModel)
-            .filter { $0.kind == wantedKind }
-        guard
-            let model = IntelMediaToolSupport.resolve(
-                requested: IntelMediaToolSupport.optionalString(args["model"]),
-                configured: agent.target, candidates: candidates)
-        else {
-            return ToolEnvelope.failure(
-                kind: .unavailable,
-                message: isImageToVideo
-                    ? "No configured image-to-video model is available."
-                    : "No configured text-to-video model is available.",
-                tool: name)
-        }
-        if let invalid = Self.validate(
-            model: model, prompt: prompt, duration: duration, resolution: resolution,
-            aspectRatio: aspectRatio, audio: audio)
-        {
-            return invalid
-        }
-
-        let source: (Data, String)?
-        do {
-            source = try sourcePath.map(Self.loadSourceImage)
-        } catch let error as SourceImageError {
-            return ToolEnvelope.failure(
-                kind: .invalidArgs, message: error.message, field: "source_path", expected: error.expected,
-                tool: name)
-        }
-        let request = MediaVideoGenerationRequest(
-            target: model.target,
+        // The switch, model, catalog checks, source image rule, quote,
+        // approval and the coordinator call run in `VideoSubagentKind` on the
+        // shared subagent host (W-subagents stage 6).
+        let params = VideoJobParams(
             prompt: prompt,
-            negativePrompt: IntelMediaToolSupport.optionalString(args["negative_prompt"]),
-            sourceImage: source?.0,
-            sourceImageMIMEType: source?.1,
             duration: duration,
-            aspectRatio: aspectRatio,
-            resolution: resolution,
-            audio: audio
+            sourcePath: IntelMediaToolSupport.optionalString(args["source_path"]),
+            model: IntelMediaToolSupport.optionalString(args["model"]),
+            negativePrompt: IntelMediaToolSupport.optionalString(args["negative_prompt"]),
+            resolution: IntelMediaToolSupport.optionalString(args["resolution"]),
+            aspectRatio: IntelMediaToolSupport.optionalString(args["aspect_ratio"]),
+            audio: args["audio"] as? Bool
         )
-
-        // Upstream `VideoSubagentKind.permission`: quote first, then the
-        // agent's policy (Ask shows the quote; Always Allow skips the card).
-        let quote: MediaVideoQuote
-        do {
-            quote = try await MediaGenerationCoordinator.shared.quoteVideo(request)
-        } catch {
-            return ToolEnvelope.failure(
-                kind: .rejected, message: "Could not quote this video: \(error.localizedDescription)", tool: name)
-        }
-        switch agent.permission {
-        case .deny:
-            return ToolEnvelope.failure(
-                kind: .rejected, message: "Video generation is denied by this agent's permission settings.",
-                tool: name)
-        case .alwaysAllow:
-            break
-        case .ask:
-            let approved = await ToolPermissionPromptService.requestApproval(
-                toolName: name,
-                description: Self.toolDescription,
-                argumentsJSON: SubagentApprovalArguments.enrichedJSON(
-                    from: argumentsJSON,
-                    values: [
-                        "resolved_model": model.displayName,
-                        "quote_usd": quote.usd,
-                        "billing_notice": "This queues a billable remote video job.",
-                    ])
-            )
-            guard approved else {
-                return ToolEnvelope.failure(
-                    kind: .userDenied, message: "User denied the quoted video generation.", tool: name)
-            }
-        }
-
-        let media: GeneratedMedia
-        do {
-            media = try await MediaGenerationCoordinator.shared.generateVideo(
-                request, approvedQuote: quote, progress: { _ in })
-        } catch {
-            return IntelMediaToolSupport.failure(error, tool: name)
-        }
-        var payload: [String: Any] = [
-            "kind": "generated_media_job",
-            "media_type": "video",
-            "job_id": media.url.deletingPathExtension().lastPathComponent,
-            "model": media.modelID,
-            "status": "completed",
-            "quote_usd": quote.usd,
-            "already_displayed": true,
-            "display_note": "The video is already shown to the user; do NOT call share_artifact for it.",
-            "media": [
-                "path": media.url.path,
-                "url": media.url.absoluteString,
-                "mime_type": media.mimeType,
-            ],
-        ]
-        if let card = await IntelMediaToolSupport.promoteToChatArtifact(
-            media, description: "Video generation result from \(model.displayName)")
-        {
-            payload["text"] = card
-        }
-        return ToolEnvelope.success(tool: name, result: payload)
+        return await SubagentSession.run(
+            VideoSubagentKind(params: params, argumentsJSON: argumentsJSON), tool: name)
     }
 
-    /// Upstream `VideoSubagentKind.validate(model:)` for cloud models.
+    /// Upstream `VideoSubagentKind.validate(model:)` for cloud models, as an
+    /// `invalid_args` envelope (nil when the arguments fit the catalog).
     static func validate(
         model: MediaModelInfo, prompt: String, duration: String, resolution: String?,
         aspectRatio: String?, audio: Bool?
     ) -> String? {
+        guard
+            let failure = validationFailure(
+                model: model, prompt: prompt, duration: duration, resolution: resolution,
+                aspectRatio: aspectRatio, audio: audio)
+        else { return nil }
+        return ToolEnvelope.failure(
+            kind: .invalidArgs, message: failure.message, field: failure.field, expected: failure.expected,
+            tool: "video")
+    }
+
+    /// The same check as a value, for `VideoSubagentKind`.
+    static func validationFailure(
+        model: MediaModelInfo, prompt: String, duration: String, resolution: String?,
+        aspectRatio: String?, audio: Bool?
+    ) -> (message: String, field: String, expected: String)? {
         let c = model.constraints
-        func invalid(_ message: String, _ field: String, _ expected: String) -> String {
-            ToolEnvelope.failure(kind: .invalidArgs, message: message, field: field, expected: expected, tool: "video")
-        }
         if !c.durations.isEmpty, !c.durations.contains(duration) {
-            return invalid(
-                "Unsupported duration for \(model.displayName).", "duration", c.durations.joined(separator: ", "))
+            return (
+                "Unsupported duration for \(model.displayName).", "duration", c.durations.joined(separator: ", ")
+            )
         }
         if let resolution, !c.resolutions.isEmpty, !c.resolutions.contains(resolution) {
-            return invalid(
+            return (
                 "Unsupported resolution for \(model.displayName).", "resolution",
-                c.resolutions.joined(separator: ", "))
+                c.resolutions.joined(separator: ", ")
+            )
         }
         if let aspectRatio, !c.aspectRatios.isEmpty, !c.aspectRatios.contains(aspectRatio) {
-            return invalid(
+            return (
                 "Unsupported aspect ratio for \(model.displayName).", "aspect_ratio",
-                c.aspectRatios.joined(separator: ", "))
+                c.aspectRatios.joined(separator: ", ")
+            )
         }
         if audio != nil, !c.audioConfigurable {
-            return invalid("Audio cannot be configured for \(model.displayName).", "audio", "omit this field")
+            return ("Audio cannot be configured for \(model.displayName).", "audio", "omit this field")
         }
         if let limit = c.promptCharacterLimit, prompt.count > limit {
-            return invalid("The video prompt is too long.", "prompt", "at most \(limit) characters")
+            return ("The video prompt is too long.", "prompt", "at most \(limit) characters")
         }
         return nil
     }
